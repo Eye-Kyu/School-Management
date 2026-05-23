@@ -1,0 +1,19 @@
+# =============================================================================
+# Code owners
+# =============================================================================
+# Add GitHub usernames or teams once there's more than one contributor.
+# For now this just documents the *areas* that warrant special attention.
+#
+# Format:  <path-pattern>  @owner1 @owner2
+# =============================================================================
+
+# Database schema and migrations - any change here warrants extra eyes.
+# packages/db/prisma/                @your-github-username
+
+# RLS policies live in migrations - treat as production-critical.
+# packages/db/prisma/migrations/     @your-github-username
+
+# Auth, payments, audit - security-sensitive.
+# apps/api/src/auth/                 @your-github-username
+# apps/api/src/fees/                 @your-github-username
+# apps/api/src/audit/                @your-github-username

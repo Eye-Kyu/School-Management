@@ -1,0 +1,47 @@
+# =============================================================================
+# Local-only development dependencies.
+# =============================================================================
+# Production uses Supabase + Upstash + Vercel/Fly - this file is for offline
+# work and so we don't burn the Supabase free tier while iterating locally.
+#
+# Usage:
+#   docker compose -f infra/docker/docker-compose.yml up -d    # start
+#   docker compose -f infra/docker/docker-compose.yml down     # stop
+#   docker compose -f infra/docker/docker-compose.yml down -v  # wipe volume
+#
+# Local DATABASE_URL in .env (when using this instead of Supabase):
+#   DATABASE_URL=postgresql://postgres:dev@localhost:5432/school_manager
+#   DIRECT_URL=postgresql://postgres:dev@localhost:5432/school_manager
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: school-manager-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: school_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d school_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: school-manager-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
