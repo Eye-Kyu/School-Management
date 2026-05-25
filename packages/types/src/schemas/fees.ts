@@ -1,11 +1,6 @@
 import { z } from 'zod';
 import { Uuid, IsoDate } from './common';
 
-// =============================================================================
-// Fees - v0.1 is view-only (CSV import by admin, parents see balance)
-// Payment processing arrives in v0.2.
-// =============================================================================
-
 // Money is stored as Decimal in the DB. On the wire we use strings to avoid
 // JS float pitfalls. Validate as a numeric string.
 export const MoneyAmount = z
@@ -33,3 +28,16 @@ export const FeeBalanceCsvRow = z.object({
   notes: z.string().optional(),
 });
 export type FeeBalanceCsvRow = z.infer<typeof FeeBalanceCsvRow>;
+
+export const PAYMENT_METHODS = ['cash', 'bank_transfer', 'mpesa', 'cheque', 'other'] as const;
+export type PaymentMethod = typeof PAYMENT_METHODS[number];
+
+export const RecordPaymentInput = z.object({
+  feeBalanceId: Uuid,
+  amount: MoneyAmount,
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  referenceNo: z.string().max(100).optional(),
+  paidDate: IsoDate,
+  notes: z.string().max(500).optional(),
+});
+export type RecordPaymentInput = z.infer<typeof RecordPaymentInput>;

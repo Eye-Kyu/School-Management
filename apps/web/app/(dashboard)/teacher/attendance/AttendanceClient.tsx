@@ -57,6 +57,7 @@ export default function AttendanceClient({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const roster = initialRoster;
 
@@ -82,6 +83,24 @@ export default function AttendanceClient({
   function setStatus(studentId: string, status: Status) {
     setSaved(false);
     setStatuses((prev) => ({ ...prev, [studentId]: status }));
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (classId) params.set('classId', classId);
+      const { csv, filename } = await apiFetch<{ csv: string; filename: string }>(
+        `/attendance/export?${params.toString()}`,
+      );
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -213,7 +232,7 @@ export default function AttendanceClient({
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               type="submit"
               disabled={saving}
@@ -221,6 +240,15 @@ export default function AttendanceClient({
                          hover:bg-slate-700 disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save attendance'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting || !classId}
+              className="border border-slate-300 px-4 py-2 rounded-md text-sm font-medium
+                         hover:bg-slate-50 disabled:opacity-50"
+            >
+              {exporting ? 'Exporting…' : '↓ Export CSV'}
             </button>
             <span className="text-xs text-slate-400">{roster.length} student{roster.length !== 1 ? 's' : ''}</span>
           </div>

@@ -41,6 +41,7 @@ model School {
   timetableSlots    TimetableSlot[]
   attendanceRecords AttendanceRecord[]
   feeBalances       FeeBalance[]
+  paymentRecords    PaymentRecord[]
   announcements     Announcement[]
   auditLogs         AuditLog[]
 
@@ -79,6 +80,7 @@ model User {
   guardianLinks         Guardian[]
   auditLogs             AuditLog[]
   authoredAnnouncements Announcement[]
+  recordedPayments      PaymentRecord[] @relation("RecordedPayments")
 
   @@unique([schoolId, email])
   @@unique([schoolId, phone])
@@ -109,6 +111,7 @@ model Student {
   guardians         Guardian[]
   attendanceRecords AttendanceRecord[]
   feeBalances       FeeBalance[]
+  paymentRecords    PaymentRecord[]
 
   @@unique([schoolId, admissionNo])
   @@index([schoolId])
@@ -321,12 +324,36 @@ model FeeBalance {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  school  School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  term    Term?   @relation(fields: [termId], references: [id])
+  school         School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student        Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  term           Term?           @relation(fields: [termId], references: [id])
+  paymentRecords PaymentRecord[]
 
   @@index([schoolId, studentId])
   @@map("fee_balances")
+}
+
+model PaymentRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @map("school_id") @db.Uuid
+  feeBalanceId  String   @map("fee_balance_id") @db.Uuid
+  studentId     String   @map("student_id") @db.Uuid
+  amount        Decimal  @db.Decimal(12, 2)
+  paymentMethod String   @map("payment_method")
+  referenceNo   String?  @map("reference_no")
+  paidDate      DateTime @map("paid_date") @db.Date
+  recordedById  String?  @map("recorded_by_id") @db.Uuid
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  school     School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  feeBalance FeeBalance @relation(fields: [feeBalanceId], references: [id], onDelete: Cascade)
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recordedBy User?      @relation("RecordedPayments", fields: [recordedById], references: [id])
+
+  @@index([schoolId, studentId])
+  @@index([feeBalanceId])
+  @@map("payment_records")
 }
 
 // =============================================================================

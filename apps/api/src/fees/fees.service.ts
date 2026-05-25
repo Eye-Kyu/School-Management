@@ -1,7 +1,7 @@
-import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
-import { FeeBalanceCsvRow } from '@school-manager/types';
+import { FeeBalanceCsvRow, RecordPaymentInput } from '@school-manager/types';
 
 @Injectable()
 export class FeesService {
@@ -136,6 +136,62 @@ export class FeesService {
       failed: upserts.filter((u) => u.result === 'error').length,
       rows: upserts,
     };
+  }
+
+  async recordPayment(accessToken: string, input: RecordPaymentInput) {
+    const client = this.supabase.forUser(accessToken);
+    await this.requireAdmin(client);
+
+    const { data: bal } = await client
+      .from('fee_balances')
+      .select('id, school_id, student_id, amount_due, amount_paid, currency')
+      .eq('id', input.feeBalanceId)
+      .maybeSingle();
+    if (!bal) throw new NotFoundException('Fee balance not found');
+
+    const { data: authData } = await this.supabase.admin.auth.getUser(accessToken);
+    const { data: userRow } = await client
+      .from('users')
+      .select('id')
+      .eq('auth_id', authData.user!.id)
+      .maybeSingle();
+
+    const { data: payment, error } = await client
+      .from('payment_records')
+      .insert({
+        id: randomUUID(),
+        school_id: bal.school_id,
+        fee_balance_id: bal.id,
+        student_id: bal.student_id,
+        amount: input.amount,
+        payment_method: input.paymentMethod,
+        reference_no: input.referenceNo ?? null,
+        paid_date: input.paidDate,
+        recorded_by_id: userRow?.id ?? null,
+        notes: input.notes ?? null,
+      })
+      .select()
+      .single();
+    if (error) throw new BadRequestException(error.message);
+
+    const newAmountPaid = Number(bal.amount_paid) + Number(input.amount);
+    return {
+      payment,
+      newAmountPaid: newAmountPaid.toFixed(2),
+      remainingDue: Math.max(0, Number(bal.amount_due) - newAmountPaid).toFixed(2),
+      currency: bal.currency,
+    };
+  }
+
+  async listPayments(accessToken: string, balanceId: string) {
+    const client = this.supabase.forUser(accessToken);
+    const { data, error } = await client
+      .from('payment_records')
+      .select('id, amount, payment_method, reference_no, paid_date, notes, created_at, recorded_by:users(full_name)')
+      .eq('fee_balance_id', balanceId)
+      .order('paid_date', { ascending: false });
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
   }
 
   private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {

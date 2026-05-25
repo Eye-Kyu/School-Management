@@ -57,6 +57,37 @@ export class AttendanceService {
     }));
   }
 
+  async exportCsv(accessToken: string, query: { classId?: string; dateFrom?: string; dateTo?: string }) {
+    const client = this.supabase.forUser(accessToken);
+
+    let q = client
+      .from('attendance_records')
+      .select('date, status, note, student:students!inner(admission_no, user:users!inner(full_name)), class:classes!inner(name)')
+      .order('date', { ascending: false });
+
+    if (query.classId) q = q.eq('class_id', query.classId);
+    if (query.dateFrom) q = q.gte('date', query.dateFrom);
+    if (query.dateTo) q = q.lte('date', query.dateTo);
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as unknown as Array<{
+      date: string; status: string; note: string | null;
+      student: { admission_no: string; user: { full_name: string } };
+      class: { name: string };
+    }>;
+
+    const header = 'Date,Student,AdmissionNo,Class,Status,Note';
+    const lines = rows.map((r) =>
+      [r.date, csvCell(r.student.user.full_name), r.student.admission_no, csvCell(r.class.name), r.status, csvCell(r.note ?? '')].join(','),
+    );
+    return {
+      csv: [header, ...lines].join('\n'),
+      filename: `attendance_${new Date().toISOString().slice(0, 10)}.csv`,
+    };
+  }
+
   async mark(accessToken: string, authUserId: string, input: MarkAttendanceInput) {
     const client = this.supabase.forUser(accessToken);
 
@@ -152,4 +183,9 @@ export class AttendanceService {
 
     return { upserted: totalUpserted };
   }
+}
+
+function csvCell(v: string): string {
+  return v.includes(',') || v.includes('"') || v.includes('\n')
+    ? `"${v.replace(/"/g, '""')}"` : v;
 }
