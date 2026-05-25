@@ -39,7 +39,7 @@ export class FeesService {
 
     // lines.length >= 2 asserted above, so index 0 is safe
     const headerLine = lines[0] as string;
-    const header = headerLine.replace(/^﻿/, '').split(',').map((h) => h.trim().toLowerCase());
+    const header = headerLine.replace(/^\ufeff/, '').split(',').map((h) => h.trim().toLowerCase());
     for (const h of ['admissionno', 'amountdue']) {
       if (!header.includes(h)) {
         throw new BadRequestException(`Missing required column: ${h}`);

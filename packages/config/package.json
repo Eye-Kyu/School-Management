@@ -2,5 +2,10 @@
   "name": "@school-manager/config",
   "version": "0.1.0",
   "private": true,
-  "files": ["eslint", "tsconfig"]
+  "files": ["eslint", "tsconfig"],
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint-config-prettier": "^9.1.0"
+  }
 }

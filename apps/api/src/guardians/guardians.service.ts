@@ -29,7 +29,7 @@ export class GuardiansService {
     }>();
 
     for (const row of data ?? []) {
-      const parent = row.parent as any;
+      const parent = row.parent as { id: string; full_name: string; email: string | null; phone: string | null };
       if (!grouped.has(parent.id)) {
         grouped.set(parent.id, {
           userId: parent.id,
@@ -39,7 +39,7 @@ export class GuardiansService {
           children: [],
         });
       }
-      const student = row.student as any;
+      const student = row.student as { admission_no: string; user: { full_name: string } };
       grouped.get(parent.id)!.children.push({
         admissionNo: student.admission_no,
         studentName: student.user.full_name,

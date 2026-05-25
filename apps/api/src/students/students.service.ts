@@ -152,7 +152,7 @@ export class StudentsService {
     if (lines.length < 2) throw new BadRequestException('CSV must have a header row and at least one data row');
 
     const headerLine = lines[0] as string;
-    const header = headerLine.replace(/^﻿/, '').split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, ''));
+    const header = headerLine.replace(/^\ufeff/, '').split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, ''));
     for (const h of ['admissionno', 'fullname', 'classname']) {
       if (!header.includes(h)) throw new BadRequestException(`Missing required column: ${h}`);
     }
@@ -171,7 +171,7 @@ export class StudentsService {
         fullName: raw.fullname,
         className: raw.classname,
         dateOfBirth: raw.dateofbirth || undefined,
-        gender: (raw.gender?.toUpperCase() as any) || undefined,
+        gender: raw.gender?.toUpperCase() || undefined,
       });
       if (!parsed.success) {
         rows.push({ row: i + 1, result: 'error', message: parsed.error.issues[0]?.message });
