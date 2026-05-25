@@ -32,7 +32,7 @@ export default async function StudentGradesPage({
 
   let scores: any[] = [];
   if (student && termId) {
-    let q = supabase
+    const q = supabase
       .from('scores')
       .select('id, marks_obtained, comments, assessment:assessments!inner(id, name, max_marks, assessment_date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
       .eq('student_id', student.id)

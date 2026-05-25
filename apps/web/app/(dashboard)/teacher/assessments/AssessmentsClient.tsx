@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 
@@ -33,7 +32,6 @@ export default function AssessmentsClient({
   terms: TermOption[];
   currentTermId: string | null;
 }) {
-  const router = useRouter();
   const [assessments, setAssessments] = useState(initialAssessments);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
