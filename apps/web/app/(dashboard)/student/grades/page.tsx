@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 
@@ -66,24 +67,36 @@ export default async function StudentGradesPage({
         </div>
       </div>
 
-      {/* Term filter */}
-      {(terms ?? []).length > 1 && (
-        <div className="flex gap-2 flex-wrap">
-          {(terms ?? []).map((t: any) => (
-            <a
-              key={t.id}
-              href={`/student/grades?termId=${t.id}`}
-              className={`text-sm rounded-full px-3 py-1 font-medium transition-colors ${
-                t.id === termId
-                  ? 'bg-violet-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {t.name}
-            </a>
-          ))}
-        </div>
-      )}
+      {/* Term filter + report card link */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {(terms ?? []).length > 1 && (
+          <div className="flex gap-2 flex-wrap">
+            {(terms ?? []).map((t: any) => (
+              <a
+                key={t.id}
+                href={`/student/grades?termId=${t.id}`}
+                className={`text-sm rounded-full px-3 py-1 font-medium transition-colors ${
+                  t.id === termId
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {t.name}
+              </a>
+            ))}
+          </div>
+        )}
+        {student && termId && (
+          <Link
+            href={`/report-card/${student.id}?termId=${termId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-violet-700 border border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-4 py-1.5 transition-colors"
+          >
+            Print Report Card
+          </Link>
+        )}
+      </div>
 
       {scores.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl px-5 py-12 text-center text-sm text-slate-400">

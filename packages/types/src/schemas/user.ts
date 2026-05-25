@@ -37,6 +37,20 @@ export const CreateParentInput = BaseUser.extend({
 });
 export type CreateParentInput = z.infer<typeof CreateParentInput>;
 
+// Admin bulk-promotes all active students from one class to another (or graduates them).
+export const PromoteStudentsInput = z.object({
+  fromClassId: Uuid,
+  toClassId: Uuid.optional(),
+});
+export type PromoteStudentsInput = z.infer<typeof PromoteStudentsInput>;
+
+// Used by users updating their own profile (name + phone only).
+export const UpdateProfileInput = z.object({
+  fullName: z.string().min(1).max(100),
+  phone: z.string().max(20).optional(),
+});
+export type UpdateProfileInput = z.infer<typeof UpdateProfileInput>;
+
 // Used by the admin's "edit user" form. Most fields optional.
 export const UpdateUserInput = z.object({
   fullName: z.string().min(2).max(200).optional(),

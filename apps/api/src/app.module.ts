@@ -16,6 +16,7 @@ import { FeesModule } from './fees/fees.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { GuardiansModule } from './guardians/guardians.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { AssessmentsModule } from './assessments/assessments.module';
     AnnouncementsModule,
     GuardiansModule,
     AssessmentsModule,
+    UsersModule,
   ],
   controllers: [AppController],
 })

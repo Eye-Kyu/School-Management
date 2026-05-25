@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { CreateStudentInput } from '@school-manager/types';
 
@@ -264,8 +265,18 @@ export default function StudentsClient({
                   {s.admission_no}{s.class ? ` · ${s.class.name}` : ''}
                 </p>
               </div>
-              <button onClick={() => handleDeactivate(s.id)}
-                className="text-xs text-slate-400 hover:text-red-600 transition-colors">Remove</button>
+              <div className="flex items-center gap-3">
+                <Link
+                  href={`/report-card/${s.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-violet-600 hover:text-violet-800 transition-colors"
+                >
+                  Report Card
+                </Link>
+                <button onClick={() => handleDeactivate(s.id)}
+                  className="text-xs text-slate-400 hover:text-red-600 transition-colors">Remove</button>
+              </div>
             </div>
           ))}
         </div>

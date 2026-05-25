@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
-import type { CreateStudentInput, UpdateUserInput } from '@school-manager/types';
+import type { CreateStudentInput, UpdateUserInput, PromoteStudentsInput } from '@school-manager/types';
 import { StudentCsvRow } from '@school-manager/types';
 
 @Injectable()
@@ -273,6 +273,33 @@ export class StudentsService {
   private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
     const { data } = await client.from('users').select('role').maybeSingle();
     if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  }
+
+  async promote(accessToken: string, authUserId: string, input: PromoteStudentsInput) {
+    const client = this.supabase.forUser(accessToken);
+    await this.requireAdmin(client);
+
+    const now = new Date().toISOString();
+
+    if (input.toClassId) {
+      const { data, error } = await client
+        .from('students')
+        .update({ current_class_id: input.toClassId, updated_at: now })
+        .eq('current_class_id', input.fromClassId)
+        .eq('is_active', true)
+        .select('id');
+      if (error) throw new BadRequestException(error.message);
+      return { promoted: data?.length ?? 0, action: 'promoted' };
+    } else {
+      const { data, error } = await client
+        .from('students')
+        .update({ is_active: false, current_class_id: null, updated_at: now })
+        .eq('current_class_id', input.fromClassId)
+        .eq('is_active', true)
+        .select('id');
+      if (error) throw new BadRequestException(error.message);
+      return { graduated: data?.length ?? 0, action: 'graduated' };
+    }
   }
 
   private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
