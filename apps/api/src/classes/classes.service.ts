@@ -87,6 +87,30 @@ export class ClassesService {
     return { deleted: true };
   }
 
+  async setPrefect(accessToken: string, authUserId: string, classId: string, studentId: string | null) {
+    const client = this.supabase.forUser(accessToken);
+
+    const { data: teacherRecord } = await client
+      .from('teachers')
+      .select('id, school_id, is_class_teacher_of, user:users!inner(auth_id)')
+      .eq('users.auth_id', authUserId)
+      .maybeSingle();
+
+    if (!teacherRecord) throw new ForbiddenException('Teacher record not found');
+    if (teacherRecord.is_class_teacher_of !== classId) {
+      throw new ForbiddenException('You are not the class teacher of this class');
+    }
+
+    const { error } = await client
+      .from('classes')
+      .update({ prefect_student_id: studentId, updated_at: new Date().toISOString() })
+      .eq('id', classId);
+    if (error) throw new Error(error.message);
+
+    await this.audit(client, teacherRecord.school_id, 'class.set_prefect', 'class', classId, { studentId });
+    return { updated: true };
+  }
+
   private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
     const { data } = await client.from('users').select('role').maybeSingle();
     if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');

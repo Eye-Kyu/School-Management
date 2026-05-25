@@ -8,6 +8,7 @@ import { CreateTeacherInput } from '@school-manager/types';
 type TeacherRow = {
   id: string;
   staff_no: string;
+  department: string | null;
   user: { id: string; full_name: string; email: string | null; phone: string | null; is_active: boolean };
 };
 
@@ -19,6 +20,7 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [staffNo, setStaffNo] = useState('');
+  const [department, setDepartment] = useState('');
   const [tempPassword, setTempPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,6 +33,7 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
       email: email || undefined,
       phone: phone || undefined,
       staffNo,
+      department: department || undefined,
     });
     if (!result.success) { setError(result.error.issues[0]?.message ?? 'Invalid'); return; }
 
@@ -43,7 +46,7 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
       setTempPassword(created.temporaryPassword);
       setTeachers((prev) => [...prev, created]);
       setShowForm(false);
-      setFullName(''); setEmail(''); setPhone(''); setStaffNo('');
+      setFullName(''); setEmail(''); setPhone(''); setStaffNo(''); setDepartment('');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -95,10 +98,17 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700">Staff number</label>
-            <input value={staffNo} onChange={(e) => setStaffNo(e.target.value)} required
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Staff number</label>
+              <input value={staffNo} onChange={(e) => setStaffNo(e.target.value)} required
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Department</label>
+              <input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Mathematics"
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
           </div>
           <button type="submit" disabled={loading}
             className="bg-slate-900 text-white px-4 py-2 rounded-md text-sm disabled:opacity-50">
@@ -116,7 +126,7 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
               <div>
                 <p className="font-medium text-sm">{t.user.full_name}</p>
                 <p className="text-xs text-slate-500">
-                  {t.staff_no} · {t.user.email ?? t.user.phone}
+                  {t.staff_no}{t.department ? ` · ${t.department}` : ''} · {t.user.email ?? t.user.phone}
                 </p>
               </div>
               <button onClick={() => handleDeactivate(t.id)}

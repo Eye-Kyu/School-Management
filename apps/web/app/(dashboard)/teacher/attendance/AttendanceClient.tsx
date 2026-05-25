@@ -35,11 +35,15 @@ export default function AttendanceClient({
   selectedClassId,
   date: initialDate,
   roster: initialRoster,
+  isClassTeacher,
+  currentPrefectId: initialPrefectId,
 }: {
   classes: ClassOption[];
   selectedClassId: string;
   date: string;
   roster: RosterStudent[];
+  isClassTeacher: boolean;
+  currentPrefectId: string | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -58,6 +62,8 @@ export default function AttendanceClient({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [prefectId, setPrefectId] = useState<string | null>(initialPrefectId);
+  const [settingPrefect, setSettingPrefect] = useState(false);
 
   const roster = initialRoster;
 
@@ -100,6 +106,22 @@ export default function AttendanceClient({
       URL.revokeObjectURL(url);
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleSetPrefect(studentId: string | null) {
+    if (!classId) return;
+    setSettingPrefect(true);
+    try {
+      await apiFetch(`/classes/${classId}/prefect`, {
+        method: 'PATCH',
+        body: JSON.stringify({ studentId }),
+      });
+      setPrefectId(studentId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set prefect');
+    } finally {
+      setSettingPrefect(false);
     }
   }
 
@@ -156,6 +178,24 @@ export default function AttendanceClient({
         </div>
       </div>
 
+      {isClassTeacher && classId && initialRoster.length > 0 && (
+        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+          <label className="text-sm font-medium text-slate-700 shrink-0">Class Prefect</label>
+          <select
+            value={prefectId ?? ''}
+            onChange={(e) => handleSetPrefect(e.target.value || null)}
+            disabled={settingPrefect}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+          >
+            <option value="">— none —</option>
+            {initialRoster.map((s) => (
+              <option key={s.id} value={s.id}>{s.fullName} ({s.admissionNo})</option>
+            ))}
+          </select>
+          {settingPrefect && <span className="text-xs text-slate-400">Saving…</span>}
+        </div>
+      )}
+
       {!classId ? (
         <div className="bg-white border border-slate-200 rounded-lg px-5 py-10 text-center text-sm text-slate-400">
           Select a class above to load the student roster.
@@ -196,7 +236,12 @@ export default function AttendanceClient({
                   const current = statuses[student.id] ?? 'PRESENT';
                   return (
                     <tr key={student.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-2.5 font-medium">{student.fullName}</td>
+                      <td className="px-4 py-2.5 font-medium">
+                        {student.fullName}
+                        {prefectId === student.id && (
+                          <span className="ml-2 text-xs bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">Prefect</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-slate-500 text-xs">{student.admissionNo}</td>
                       {STATUSES.map((s) => (
                         <td key={s} className="px-3 py-2.5 text-center">

@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
-import type { CreateTeacherInput, UpdateUserInput } from '@school-manager/types';
+import type { CreateTeacherInput, UpdateTeacherInput } from '@school-manager/types';
 
 @Injectable()
 export class TeachersService {
@@ -82,6 +82,7 @@ export class TeachersService {
         school_id: school.id,
         user_id: actualUserId,
         staff_no: input.staffNo,
+        department: input.department ?? null,
         updated_at: new Date().toISOString(),
       })
       .select()
@@ -96,7 +97,7 @@ export class TeachersService {
     return { ...teacher, temporaryPassword: tempPassword };
   }
 
-  async update(accessToken: string, teacherId: string, input: UpdateUserInput) {
+  async update(accessToken: string, teacherId: string, input: UpdateTeacherInput) {
     const client = this.supabase.forUser(accessToken);
     await this.requireAdmin(client);
 
@@ -107,16 +108,25 @@ export class TeachersService {
       .maybeSingle();
     if (!teacher) throw new NotFoundException('Teacher not found');
 
-    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (input.fullName !== undefined) patch.full_name = input.fullName;
-    if (input.email !== undefined) patch.email = input.email;
-    if (input.phone !== undefined) patch.phone = input.phone;
-    if (input.isActive !== undefined) patch.is_active = input.isActive;
+    const now = new Date().toISOString();
+    const userPatch: Record<string, unknown> = { updated_at: now };
+    if (input.fullName !== undefined) userPatch.full_name = input.fullName;
+    if (input.email !== undefined) userPatch.email = input.email;
+    if (input.phone !== undefined) userPatch.phone = input.phone;
+    if (input.isActive !== undefined) userPatch.is_active = input.isActive;
 
-    const { error } = await client.from('users').update(patch).eq('id', teacher.user_id);
+    const { error } = await client.from('users').update(userPatch).eq('id', teacher.user_id);
     if (error) throw new Error(error.message);
 
-    await this.audit(client, teacher.school_id, 'teacher.update', 'teacher', teacherId, patch);
+    if (input.department !== undefined) {
+      const { error: teacherErr } = await client
+        .from('teachers')
+        .update({ department: input.department, updated_at: now })
+        .eq('id', teacherId);
+      if (teacherErr) throw new Error(teacherErr.message);
+    }
+
+    await this.audit(client, teacher.school_id, 'teacher.update', 'teacher', teacherId, { ...userPatch, department: input.department });
     return { updated: true };
   }
 

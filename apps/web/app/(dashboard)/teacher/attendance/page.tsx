@@ -18,10 +18,10 @@ export default async function TeacherAttendancePage({
   const date = searchParams.date ?? todayIso();
   const selectedClassId = searchParams.classId ?? '';
 
-  // Fetch classes this teacher is assigned to via subject_assignments
+  // Fetch teacher record (includes which class they are class teacher of)
   const { data: teacher } = await supabase
     .from('teachers')
-    .select('id, user:users!inner(auth_id)')
+    .select('id, is_class_teacher_of, user:users!inner(auth_id)')
     .eq('users.auth_id', user.id)
     .maybeSingle();
 
@@ -39,16 +39,19 @@ export default async function TeacherAttendancePage({
     .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id))
     .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
-  // Fetch roster + existing attendance for the selected class
+  const isClassTeacher = !!(teacher?.is_class_teacher_of && teacher.is_class_teacher_of === selectedClassId);
+
+  // Fetch roster + existing attendance + current prefect for the selected class
   let roster: Array<{
     id: string;
     admissionNo: string;
     fullName: string;
     attendance: { status: string; note: string | null } | null;
   }> = [];
+  let currentPrefectId: string | null = null;
 
   if (selectedClassId) {
-    const [{ data: students }, { data: records }] = await Promise.all([
+    const [{ data: students }, { data: records }, { data: classRow }] = await Promise.all([
       supabase
         .from('students')
         .select('id, admission_no, user:users!inner(full_name)')
@@ -60,7 +63,14 @@ export default async function TeacherAttendancePage({
         .select('student_id, status, note')
         .eq('class_id', selectedClassId)
         .eq('date', date),
+      supabase
+        .from('classes')
+        .select('prefect_student_id')
+        .eq('id', selectedClassId)
+        .maybeSingle(),
     ]);
+
+    currentPrefectId = classRow?.prefect_student_id ?? null;
 
     const statusMap = Object.fromEntries(
       (records ?? []).map((r) => [r.student_id, { status: r.status, note: r.note }]),
@@ -89,6 +99,8 @@ export default async function TeacherAttendancePage({
         selectedClassId={selectedClassId}
         date={date}
         roster={roster}
+        isClassTeacher={isClassTeacher}
+        currentPrefectId={currentPrefectId}
       />
     </div>
   );

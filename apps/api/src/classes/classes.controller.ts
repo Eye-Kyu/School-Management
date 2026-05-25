@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
-import { AccessToken } from '../common/decorators/current-user.decorator';
+import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CreateClassInput, UpdateClassInput } from '@school-manager/types';
 import { ClassesService } from './classes.service';
@@ -30,6 +30,16 @@ export class ClassesController {
     @Body(new ZodValidationPipe(UpdateClassInput)) body: UpdateClassInput,
   ) {
     return this.classes.update(token, id, body);
+  }
+
+  @Patch(':id/prefect')
+  setPrefect(
+    @AccessToken() token: string,
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Body() body: { studentId: string | null },
+  ) {
+    return this.classes.setPrefect(token, user.id, id, body.studentId ?? null);
   }
 
   @Delete(':id')

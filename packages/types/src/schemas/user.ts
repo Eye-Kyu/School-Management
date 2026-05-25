@@ -17,6 +17,7 @@ const BaseUser = z.object({
 
 export const CreateTeacherInput = BaseUser.extend({
   staffNo: z.string().min(1).max(50),
+  department: z.string().max(100).optional(),
 });
 export type CreateTeacherInput = z.infer<typeof CreateTeacherInput>;
 
@@ -59,6 +60,16 @@ export const UpdateUserInput = z.object({
   isActive: z.boolean().optional(),
 });
 export type UpdateUserInput = z.infer<typeof UpdateUserInput>;
+
+// Used by admin when updating a teacher (includes teacher-row fields like department).
+export const UpdateTeacherInput = z.object({
+  fullName: z.string().min(2).max(200).optional(),
+  email: z.string().email().optional(),
+  phone: PhoneNumber.optional(),
+  isActive: z.boolean().optional(),
+  department: z.string().max(100).optional(),
+});
+export type UpdateTeacherInput = z.infer<typeof UpdateTeacherInput>;
 
 // CSV bulk-import - one row at a time, server validates each.
 export const StudentCsvRow = z.object({

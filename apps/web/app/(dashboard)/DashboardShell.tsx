@@ -12,7 +12,6 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin',               label: 'Dashboard' },
     { href: '/admin/teachers',      label: 'Teachers' },
     { href: '/admin/students',      label: 'Students' },
-    { href: '/admin/promote',       label: 'Promote Students' },
     { href: '/admin/parents',       label: 'Parents' },
     { href: '/admin/classes',       label: 'Classes' },
     { href: '/admin/subjects',      label: 'Subjects' },

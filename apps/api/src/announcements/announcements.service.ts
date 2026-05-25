@@ -11,7 +11,7 @@ export class AnnouncementsService {
     const client = this.supabase.forUser(accessToken);
     const { data, error } = await client
       .from('announcements')
-      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, author:users!inner(full_name)')
+      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, author:users(full_name)')
       .order('published_at', { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -27,7 +27,7 @@ export class AnnouncementsService {
 
     const { data: authorRow } = await client
       .from('users')
-      .select('id')
+      .select('id, full_name')
       .eq('auth_id', authUserId)
       .maybeSingle();
 
@@ -53,6 +53,9 @@ export class AnnouncementsService {
       .single();
     if (error) throw new Error(error.message);
 
+    // Return the announcement enriched with author info so the frontend can display it immediately.
+    const result = { ...data, author: { full_name: (authorRow as { id: string; full_name: string }).full_name } };
+
     await client.from('audit_logs').insert({
       id: randomUUID(),
       school_id: school.id,
@@ -63,7 +66,7 @@ export class AnnouncementsService {
       metadata: { title: input.title, audience: input.audience },
     });
 
-    return data;
+    return result;
   }
 
   async remove(accessToken: string, announcementId: string) {

@@ -63,7 +63,8 @@ export class AttendanceService {
     let q = client
       .from('attendance_records')
       .select('date, status, note, student:students!inner(admission_no, user:users!inner(full_name)), class:classes!inner(name)')
-      .order('date', { ascending: false });
+      .order('date', { ascending: false })
+      .order('student_id', { ascending: true });
 
     if (query.classId) q = q.eq('class_id', query.classId);
     if (query.dateFrom) q = q.gte('date', query.dateFrom);
@@ -78,13 +79,42 @@ export class AttendanceService {
       class: { name: string };
     }>;
 
-    const header = 'Date,Student,AdmissionNo,Class,Status,Note';
+    const today = new Date().toISOString().slice(0, 10);
+    const meta: string[] = [];
+
+    if (query.classId) {
+      // Look up class name and class teacher for the header section
+      const [{ data: classRow }, { data: teacherRow }] = await Promise.all([
+        client.from('classes').select('name').eq('id', query.classId).maybeSingle(),
+        client
+          .from('teachers')
+          .select('user:users!inner(full_name)')
+          .eq('is_class_teacher_of', query.classId)
+          .maybeSingle(),
+      ]);
+
+      const className = classRow?.name ?? 'Unknown class';
+      const teacherName = (teacherRow?.user as unknown as { full_name: string } | null)?.full_name ?? 'Not assigned';
+      const dateRange = [query.dateFrom, query.dateTo].filter(Boolean).join(' to ') || 'All dates';
+
+      meta.push(
+        `# Class: ${className}`,
+        `# Class Teacher: ${teacherName}`,
+        `# Date Range: ${dateRange}`,
+        `# Exported: ${today}`,
+        '',
+      );
+    }
+
+    const header = 'AdmissionNo,Student,Date,Class,Status,Note';
     const lines = rows.map((r) =>
-      [r.date, csvCell(r.student.user.full_name), r.student.admission_no, csvCell(r.class.name), r.status, csvCell(r.note ?? '')].join(','),
+      [r.student.admission_no, csvCell(r.student.user.full_name), r.date, csvCell(r.class.name), r.status, csvCell(r.note ?? '')].join(','),
     );
+
+    const suffix = query.classId ? `_${rows[0]?.class?.name?.replace(/\s+/g, '_') ?? query.classId.slice(0, 8)}` : '';
     return {
-      csv: [header, ...lines].join('\n'),
-      filename: `attendance_${new Date().toISOString().slice(0, 10)}.csv`,
+      csv: [...meta, header, ...lines].join('\n'),
+      filename: `attendance${suffix}_${today}.csv`,
     };
   }
 

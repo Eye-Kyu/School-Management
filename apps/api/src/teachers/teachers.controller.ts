@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { CreateTeacherInput, UpdateUserInput } from '@school-manager/types';
+import { CreateTeacherInput, UpdateTeacherInput } from '@school-manager/types';
 import { TeachersService } from './teachers.service';
 
 @Controller('teachers')
@@ -27,7 +27,7 @@ export class TeachersController {
   update(
     @AccessToken() token: string,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(UpdateUserInput)) body: UpdateUserInput,
+    @Body(new ZodValidationPipe(UpdateTeacherInput)) body: UpdateTeacherInput,
   ) {
     return this.teachers.update(token, id, body);
   }
