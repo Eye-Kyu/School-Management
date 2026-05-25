@@ -68,10 +68,12 @@ export default async function ReportCardPage({
     const a = row.assessment as any;
     const sub = a?.subject;
     if (!sub) continue;
-    if (!bySubject[sub.id]) {
-      bySubject[sub.id] = { subjectName: sub.name, subjectCode: sub.code, rows: [] };
+    let entry = bySubject[sub.id];
+    if (!entry) {
+      entry = { subjectName: sub.name, subjectCode: sub.code, rows: [] };
+      bySubject[sub.id] = entry;
     }
-    bySubject[sub.id].rows.push(row);
+    entry.rows.push(row);
   }
 
   const subjectGroups = Object.values(bySubject);

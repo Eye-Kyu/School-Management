@@ -49,10 +49,12 @@ export default async function StudentGradesPage({
     const assessment = row.assessment as any;
     const subject = assessment?.subject;
     if (!subject) continue;
-    if (!bySubject[subject.id]) {
-      bySubject[subject.id] = { subjectName: subject.name, subjectCode: subject.code, rows: [] };
+    let entry = bySubject[subject.id];
+    if (!entry) {
+      entry = { subjectName: subject.name, subjectCode: subject.code, rows: [] };
+      bySubject[subject.id] = entry;
     }
-    bySubject[subject.id].rows.push(row);
+    entry.rows.push(row);
   }
 
   const selectedTermName = (terms ?? []).find((t: any) => t.id === termId)?.name ?? 'this term';
