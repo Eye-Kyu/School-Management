@@ -43,7 +43,9 @@ jobs:
         run: pnpm lint
 
       - name: Type check
-        run: pnpm -r exec tsc --noEmit
+        run: |
+          pnpm --filter @school-manager/api exec tsc --noEmit
+          pnpm --filter @school-manager/web exec tsc --noEmit
 
       - name: Test
         run: pnpm test
