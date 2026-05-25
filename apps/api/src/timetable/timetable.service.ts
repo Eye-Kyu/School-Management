@@ -90,7 +90,7 @@ export class TimetableService {
         .eq('user_id', userRow.id)
         .limit(1)
         .maybeSingle();
-      const classId = (guardian?.student as { current_class_id: string | null } | null)?.current_class_id;
+      const classId = (guardian?.student as unknown as { current_class_id: string | null } | null)?.current_class_id;
       if (!classId) return [];
       q = q.eq('class_id', classId);
     }

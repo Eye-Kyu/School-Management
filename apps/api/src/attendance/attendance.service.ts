@@ -52,7 +52,7 @@ export class AttendanceService {
     return (students ?? []).map((s) => ({
       id: s.id,
       admissionNo: s.admission_no,
-      fullName: (s.user as { full_name: string } | null)?.full_name ?? '',
+      fullName: (s.user as unknown as { full_name: string } | null)?.full_name ?? '',
       attendance: statusMap[s.id] ?? null,
     }));
   }
@@ -71,7 +71,7 @@ export class AttendanceService {
       throw new ForbiddenException('Only teachers can mark attendance');
     }
     const markedById = teacherRecord.id;
-    const publicUserId = (teacherRecord.user as { id: string }).id;
+    const publicUserId = (teacherRecord.user as unknown as { id: string }).id;
 
     const { data: cls, error: clsErr } = await client
       .from('classes')
