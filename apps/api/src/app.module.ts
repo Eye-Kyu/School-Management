@@ -15,6 +15,7 @@ import { TimetableModule } from './timetable/timetable.module';
 import { FeesModule } from './fees/fees.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { GuardiansModule } from './guardians/guardians.module';
+import { AssessmentsModule } from './assessments/assessments.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { GuardiansModule } from './guardians/guardians.module';
     FeesModule,
     AnnouncementsModule,
     GuardiansModule,
+    AssessmentsModule,
   ],
   controllers: [AppController],
 })

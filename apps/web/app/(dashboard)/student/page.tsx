@@ -104,6 +104,23 @@ export default async function StudentHomePage() {
           </div>
         </Link>
 
+        {/* Grades card */}
+        <Link href="/student/grades" className="block group">
+          <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">My Grades</span>
+                <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
+              <p className="text-4xl font-bold text-white">%</p>
+              <p className="text-violet-100 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
+            </div>
+            <div className="bg-white px-5 py-3">
+              <p className="text-sm text-slate-600">View assessment results and scores.</p>
+            </div>
+          </div>
+        </Link>
+
         {/* Attendance card */}
         <Link href="/student/attendance" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">

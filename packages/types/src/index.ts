@@ -21,3 +21,4 @@ export * from './schemas/timetable';
 export * from './schemas/attendance';
 export * from './schemas/fees';
 export * from './schemas/announcement';
+export * from './schemas/assessments';

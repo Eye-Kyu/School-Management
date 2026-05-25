@@ -82,6 +82,7 @@ export default async function AdminHomePage() {
     { href: '/admin/fees',          label: 'Fee arrears',   desc: 'Import, record payments, view balances',  color: 'text-amber-600 bg-amber-50 border-amber-200' },
     { href: '/admin/attendance',    label: 'Attendance',    desc: 'Export attendance records as CSV',         color: 'text-green-600 bg-green-50 border-green-200' },
     { href: '/admin/announcements', label: 'Announcements', desc: 'Post notices to staff and students',      color: 'text-rose-600 bg-rose-50 border-rose-200' },
+    { href: '/teacher/assessments', label: 'Assessments',   desc: 'View all assessments and grades',         color: 'text-violet-600 bg-violet-50 border-violet-200' },
   ];
 
   return (

@@ -42,6 +42,8 @@ model School {
   attendanceRecords AttendanceRecord[]
   feeBalances       FeeBalance[]
   paymentRecords    PaymentRecord[]
+  assessments       Assessment[]
+  scores            Score[]
   announcements     Announcement[]
   auditLogs         AuditLog[]
 
@@ -112,6 +114,7 @@ model Student {
   attendanceRecords AttendanceRecord[]
   feeBalances       FeeBalance[]
   paymentRecords    PaymentRecord[]
+  scores            Score[]
 
   @@unique([schoolId, admissionNo])
   @@index([schoolId])
@@ -134,6 +137,7 @@ model Teacher {
   subjectAssignments SubjectAssignment[]
   timetableSlots     TimetableSlot[]
   attendanceMarked   AttendanceRecord[]  @relation("MarkedBy")
+  assessments        Assessment[]
 
   @@unique([schoolId, staffNo])
   @@index([schoolId])
@@ -178,6 +182,7 @@ model Class {
   subjectAssignments SubjectAssignment[]
   timetableSlots     TimetableSlot[]
   attendanceRecords  AttendanceRecord[]
+  assessments        Assessment[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -195,6 +200,7 @@ model Subject {
   school         School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   assignments    SubjectAssignment[]
   timetableSlots TimetableSlot[]
+  assessments    Assessment[]
 
   @@unique([schoolId, code])
   @@index([schoolId])
@@ -229,6 +235,7 @@ model Term {
 
   school      School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   feeBalances FeeBalance[]
+  assessments Assessment[]
 
   @@unique([schoolId, name])
   @@index([schoolId, isCurrent])
@@ -328,9 +335,57 @@ model FeeBalance {
   student        Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
   term           Term?           @relation(fields: [termId], references: [id])
   paymentRecords PaymentRecord[]
+}
 
+// =============================================================================
+// ASSESSMENTS & GRADES
+// =============================================================================
+
+model Assessment {
+  id             String    @id @default(uuid()) @db.Uuid
+  schoolId       String    @map("school_id") @db.Uuid
+  termId         String    @map("term_id") @db.Uuid
+  classId        String    @map("class_id") @db.Uuid
+  subjectId      String    @map("subject_id") @db.Uuid
+  teacherId      String    @map("teacher_id") @db.Uuid
+  name           String
+  description    String?
+  maxMarks       Int       @map("max_marks")
+  assessmentDate DateTime? @map("assessment_date") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  school  School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  term    Term    @relation(fields: [termId], references: [id], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  scores  Score[]
+
+  @@unique([termId, classId, subjectId, name])
+  @@index([teacherId, termId])
+  @@index([classId, subjectId])
+  @@map("assessments")
+}
+
+model Score {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @map("school_id") @db.Uuid
+  assessmentId  String   @map("assessment_id") @db.Uuid
+  studentId     String   @map("student_id") @db.Uuid
+  marksObtained Decimal? @map("marks_obtained") @db.Decimal(5, 2)
+  comments      String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  school     School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, studentId])
+  @@index([studentId, assessmentId])
   @@index([schoolId, studentId])
-  @@map("fee_balances")
+  @@map("scores")
 }
 
 model PaymentRecord {

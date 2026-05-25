@@ -117,6 +117,23 @@ export default async function TeacherHomePage() {
             </div>
           </div>
         </Link>
+
+        {/* Assessments card */}
+        <Link href="/teacher/assessments" className="block group">
+          <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">Assessments</span>
+                <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
+              <p className="text-4xl font-bold text-white">+</p>
+              <p className="text-violet-100 text-sm mt-1">Record marks</p>
+            </div>
+            <div className="bg-white px-5 py-3">
+              <p className="text-sm text-slate-600">Create tests and enter student scores.</p>
+            </div>
+          </div>
+        </Link>
       </div>
 
       {/* Weekly overview */}
