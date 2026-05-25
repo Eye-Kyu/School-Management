@@ -2,6 +2,12 @@
 // API bootstrap
 // =============================================================================
 
+// Polyfill WebSocket for Node.js < 22 — required by @supabase/realtime-js
+import ws from 'ws';
+if (!('WebSocket' in globalThis)) {
+  (globalThis as Record<string, unknown>).WebSocket = ws;
+}
+
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
