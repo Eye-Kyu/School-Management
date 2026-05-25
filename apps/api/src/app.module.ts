@@ -14,6 +14,7 @@ import { TermsModule } from './terms/terms.module';
 import { TimetableModule } from './timetable/timetable.module';
 import { FeesModule } from './fees/fees.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { GuardiansModule } from './guardians/guardians.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AnnouncementsModule } from './announcements/announcements.module';
     TimetableModule,
     FeesModule,
     AnnouncementsModule,
+    GuardiansModule,
   ],
   controllers: [AppController],
 })

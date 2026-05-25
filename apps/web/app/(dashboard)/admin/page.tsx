@@ -16,12 +16,14 @@ export default async function AdminHomePage() {
     { count: classCount },
     { count: teacherCount },
     { count: studentCount },
+    { count: parentCount },
     { data: feeData },
     { data: announcements },
   ] = await Promise.all([
     supabase.from('classes').select('*', { count: 'exact', head: true }).eq('is_active', true),
     supabase.from('teachers').select('*', { count: 'exact', head: true }),
     supabase.from('students').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'PARENT').eq('is_active', true),
     supabase.from('fee_balances').select('amount_due, amount_paid'),
     supabase
       .from('announcements')
@@ -55,6 +57,12 @@ export default async function AdminHomePage() {
       gradient: 'from-violet-500 to-purple-600',
     },
     {
+      label: 'Parents',
+      value: parentCount ?? 0,
+      href: '/admin/parents',
+      gradient: 'from-pink-500 to-rose-600',
+    },
+    {
       label: 'Fee arrears',
       value: `KES ${totalOutstanding.toLocaleString()}`,
       sub: 'outstanding',
@@ -69,6 +77,7 @@ export default async function AdminHomePage() {
     { href: '/admin/subjects',      label: 'Subjects',      desc: 'Define subjects and assign teachers',     color: 'text-indigo-600 bg-indigo-50 border-indigo-200' },
     { href: '/admin/teachers',      label: 'Teachers',      desc: 'Create teacher accounts',                 color: 'text-teal-600 bg-teal-50 border-teal-200' },
     { href: '/admin/students',      label: 'Students',      desc: 'Enrol students and link to classes',      color: 'text-violet-600 bg-violet-50 border-violet-200' },
+    { href: '/admin/parents',       label: 'Parents',       desc: 'Create parent accounts and link children', color: 'text-pink-600 bg-pink-50 border-pink-200' },
     { href: '/admin/timetable',     label: 'Timetable',     desc: 'Build the weekly class schedule',         color: 'text-blue-600 bg-blue-50 border-blue-200' },
     { href: '/admin/fees',          label: 'Fee arrears',   desc: 'Import and view student balances',        color: 'text-amber-600 bg-amber-50 border-amber-200' },
     { href: '/admin/announcements', label: 'Announcements', desc: 'Post notices to staff and students',      color: 'text-rose-600 bg-rose-50 border-rose-200' },

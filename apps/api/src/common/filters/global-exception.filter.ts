@@ -5,6 +5,7 @@
 // is a consistent JSON shape: { statusCode, error, message, path, timestamp }.
 // =============================================================================
 
+import * as Sentry from '@sentry/node';
 import {
   ArgumentsHost,
   Catch,
@@ -42,6 +43,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         `${request.method} ${request.url} -> ${status}`,
         exception instanceof Error ? exception.stack : exception,
       );
+      if (process.env.SENTRY_DSN) {
+        Sentry.captureException(exception);
+      }
     }
 
     response.status(status).json({

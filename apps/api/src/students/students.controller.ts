@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
-import { AccessToken } from '../common/decorators/current-user.decorator';
+import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CreateStudentInput, UpdateUserInput } from '@school-manager/types';
 import { StudentsService } from './students.service';
@@ -21,6 +21,18 @@ export class StudentsController {
     @Body(new ZodValidationPipe(CreateStudentInput)) body: CreateStudentInput,
   ) {
     return this.students.create(token, body);
+  }
+
+  @Post('import')
+  importCsv(
+    @AccessToken() token: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { csv: string },
+  ) {
+    if (typeof body.csv !== 'string' || !body.csv.trim()) {
+      throw new Error('csv field is required');
+    }
+    return this.students.importCsv(token, user.id, body.csv);
   }
 
   @Patch(':id')

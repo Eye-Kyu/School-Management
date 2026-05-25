@@ -73,11 +73,12 @@ model User {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  school         School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  studentProfile Student?
-  teacherProfile Teacher?
-  guardianLinks  Guardian[]
-  auditLogs      AuditLog[]
+  school                School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentProfile        Student?
+  teacherProfile        Teacher?
+  guardianLinks         Guardian[]
+  auditLogs             AuditLog[]
+  authoredAnnouncements Announcement[]
 
   @@unique([schoolId, email])
   @@unique([schoolId, phone])
@@ -223,7 +224,8 @@ model Term {
   isCurrent Boolean  @default(false) @map("is_current")
   createdAt DateTime @default(now()) @map("created_at")
 
-  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school      School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  feeBalances FeeBalance[]
 
   @@unique([schoolId, name])
   @@index([schoolId, isCurrent])
@@ -321,6 +323,7 @@ model FeeBalance {
 
   school  School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  term    Term?   @relation(fields: [termId], references: [id])
 
   @@index([schoolId, studentId])
   @@map("fee_balances")
@@ -350,6 +353,7 @@ model Announcement {
   updatedAt        DateTime             @updatedAt @map("updated_at")
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
 
   @@index([schoolId, publishedAt])
   @@map("announcements")
