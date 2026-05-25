@@ -49,8 +49,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Authenticated user hitting /login → their role home
-  if (user && pathname === '/login') {
+  // Authenticated user hitting /login or / → their role home
+  if (user && (pathname === '/login' || pathname === '/')) {
     const { data: userRow } = await supabase
       .from('users')
       .select('role')
@@ -58,8 +58,8 @@ export async function middleware(request: NextRequest) {
       .maybeSingle();
 
     const role = userRow?.role as string | undefined;
-    const home = (role && ROLE_HOME[role]) ?? '/';
-    return NextResponse.redirect(new URL(home, request.url));
+    const home = (role && ROLE_HOME[role]) ?? null;
+    if (home) return NextResponse.redirect(new URL(home, request.url));
   }
 
   // Authenticated user on a role path that doesn't match their role → their home

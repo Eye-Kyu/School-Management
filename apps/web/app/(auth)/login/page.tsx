@@ -1,14 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { EmailLoginInput } from '@school-manager/types';
 
 type Tab = 'email' | 'phone';
 
+const ROLE_HOME: Record<string, string> = {
+  ADMIN: '/admin',
+  TEACHER: '/teacher',
+  STUDENT: '/student',
+  PARENT: '/parent',
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,7 +39,7 @@ export default function LoginPage() {
     }
 
     setLoading(true);
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
 
     if (authError) {
@@ -39,8 +47,18 @@ export default function LoginPage() {
       return;
     }
 
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('role')
+      .eq('auth_id', user!.id)
+      .maybeSingle();
+
+    const role = userRow?.role as string | undefined;
+    const next = searchParams.get('next');
+    const destination = next || (role && ROLE_HOME[role]) || '/';
+
     router.refresh();
-    router.push('/');
+    router.push(destination);
   }
 
   async function handleSendOtp(e: React.FormEvent) {
@@ -61,15 +79,26 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const { error: authError } = await supabase.auth.verifyOtp({
+    const { data: { user }, error: authError } = await supabase.auth.verifyOtp({
       phone,
       token: otp,
       type: 'sms',
     });
     setLoading(false);
     if (authError) { setError(authError.message); return; }
+
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('role')
+      .eq('auth_id', user!.id)
+      .maybeSingle();
+
+    const role = userRow?.role as string | undefined;
+    const next = searchParams.get('next');
+    const destination = next || (role && ROLE_HOME[role]) || '/';
+
     router.refresh();
-    router.push('/');
+    router.push(destination);
   }
 
   return (
