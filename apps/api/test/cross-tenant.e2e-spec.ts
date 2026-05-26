@@ -1,0 +1,343 @@
+// =============================================================================
+// Cross-tenant isolation test
+// Verifies that RLS prevents School A's users from seeing School B's data
+// through any API route, even when they know a resource's UUID.
+//
+// Uses the real Supabase project — creates isolated test data in beforeAll,
+// fires real HTTP requests, deletes everything in afterAll.
+// =============================================================================
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
+import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
+
+const TIMEOUT = 30_000;
+
+describe('Cross-tenant isolation (e2e)', () => {
+  let app: INestApplication;
+  let admin: SupabaseClient;
+
+  // Test school IDs
+  const schoolAId = randomUUID();
+  const schoolBId = randomUUID();
+  const suffix = Date.now();
+
+  // Auth user IDs — collected for cleanup
+  const authUserIds: string[] = [];
+
+  // Public resource IDs seeded in each school
+  let classAId: string;
+  let classBId: string;
+  let studentAId: string;
+  let studentBId: string;
+  let announcementAId: string;
+  let announcementBId: string;
+  let attendanceAId: string;
+  let attendanceBId: string;
+  let feeAId: string;
+  let feeBId: string;
+  let teacherATeacherId: string;
+  let teacherBTeacherId: string;
+
+  // JWT access tokens for each school's admin
+  let tokenA: string;
+  let tokenB: string;
+
+  beforeAll(async () => {
+    // 1. Bootstrap NestJS app (loads .env via ConfigModule.forRoot)
+    // PrismaService is mocked — none of the tested routes use Prisma, and the
+    // pooler DATABASE_URL is incompatible with Prisma's connection mode in tests.
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
+      .compile();
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    // 2. Service-role client for seeding and cleanup (bypasses RLS)
+    admin = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } },
+    );
+
+    // 3. Create two test schools
+    const now = new Date().toISOString();
+    const { error: schoolErr } = await admin.from('schools').insert([
+      { id: schoolAId, name: `Test School Alpha ${suffix}`, slug: `test-alpha-${suffix}`, updated_at: now },
+      { id: schoolBId, name: `Test School Beta ${suffix}`,  slug: `test-beta-${suffix}`,  updated_at: now },
+    ]);
+    if (schoolErr) throw new Error(`School insert failed: ${schoolErr.message}`);
+
+    // 4. Helper: create an auth user + public users row, return { authId, userId, token }
+    async function seedUser(schoolId: string, role: 'ADMIN' | 'TEACHER' | 'STUDENT', label: string) {
+      const email = `${label}-${suffix}@test-isolation.internal`;
+      const password = `TestPass${suffix}!`;
+
+      const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+        email, password, email_confirm: true,
+        user_metadata: { school_id: schoolId, role },
+      });
+      if (authErr) throw new Error(`Auth user create failed (${label}): ${authErr.message}`);
+      const authId = authData.user.id;
+      authUserIds.push(authId);
+
+      const userId = randomUUID();
+      const { error: userErr } = await admin.from('users').upsert({
+        id: userId, school_id: schoolId, auth_id: authId,
+        email, full_name: `Test ${label}`, role,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'auth_id' });
+      if (userErr) throw new Error(`users row failed (${label}): ${userErr.message}`);
+
+      // Get the actual userId (trigger may have created it first)
+      const { data: row } = await admin.from('users').select('id').eq('auth_id', authId).single();
+      const actualUserId = row?.id ?? userId;
+
+      // Sign in to get access token
+      const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
+      if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+
+      return { authId, userId: actualUserId, token: session.session!.access_token };
+    }
+
+    // 5. Seed admin users for each school
+    const adminA = await seedUser(schoolAId, 'ADMIN', 'admin-a');
+    const adminB = await seedUser(schoolBId, 'ADMIN', 'admin-b');
+    tokenA = adminA.token;
+    tokenB = adminB.token;
+
+    // 6. Seed a class in each school
+    classAId = randomUUID();
+    classBId = randomUUID();
+    const { error: classErr } = await admin.from('classes').insert([
+      { id: classAId, school_id: schoolAId, name: 'Class Alpha', grade_level: 1, updated_at: now },
+      { id: classBId, school_id: schoolBId, name: 'Class Beta',  grade_level: 1, updated_at: now },
+    ]);
+    if (classErr) throw new Error(`Class insert failed: ${classErr.message}`);
+
+    // 7. Seed a student in each school
+    const studentUserA = await seedUser(schoolAId, 'STUDENT', 'student-a');
+    const studentUserB = await seedUser(schoolBId, 'STUDENT', 'student-b');
+
+    studentAId = randomUUID();
+    studentBId = randomUUID();
+    const { error: studErr } = await admin.from('students').insert([
+      { id: studentAId, school_id: schoolAId, user_id: studentUserA.userId, current_class_id: classAId, admission_no: `ALPHA-${suffix}`, updated_at: now },
+      { id: studentBId, school_id: schoolBId, user_id: studentUserB.userId, current_class_id: classBId, admission_no: `BETA-${suffix}`,  updated_at: now },
+    ]);
+    if (studErr) throw new Error(`Student insert failed: ${studErr.message}`);
+
+    // 8. Seed teacher users + teachers rows (needed for attendance marked_by_id)
+    const teacherUserA = await seedUser(schoolAId, 'TEACHER', 'teacher-a');
+    const teacherUserB = await seedUser(schoolBId, 'TEACHER', 'teacher-b');
+
+    teacherATeacherId = randomUUID();
+    teacherBTeacherId = randomUUID();
+    const { error: teachErr } = await admin.from('teachers').insert([
+      { id: teacherATeacherId, school_id: schoolAId, user_id: teacherUserA.userId, staff_no: `TA-${suffix}`, updated_at: now },
+      { id: teacherBTeacherId, school_id: schoolBId, user_id: teacherUserB.userId, staff_no: `TB-${suffix}`, updated_at: now },
+    ]);
+    if (teachErr) throw new Error(`Teacher insert failed: ${teachErr.message}`);
+
+    // 9. Seed one announcement per school
+    announcementAId = randomUUID();
+    announcementBId = randomUUID();
+    const { error: annErr } = await admin.from('announcements').insert([
+      { id: announcementAId, school_id: schoolAId, author_id: adminA.userId, title: 'Alpha Announcement', body: 'Test', audience: 'SCHOOL_WIDE', updated_at: now },
+      { id: announcementBId, school_id: schoolBId, author_id: adminB.userId, title: 'Beta Announcement',  body: 'Test', audience: 'SCHOOL_WIDE', updated_at: now },
+    ]);
+    if (annErr) throw new Error(`Announcement insert failed: ${annErr.message}`);
+
+    // 10. Seed one attendance record per school
+    attendanceAId = randomUUID();
+    attendanceBId = randomUUID();
+    const today = now.slice(0, 10);
+    const { error: attErr } = await admin.from('attendance_records').insert([
+      { id: attendanceAId, school_id: schoolAId, student_id: studentAId, class_id: classAId, date: today, status: 'PRESENT', marked_by_id: teacherATeacherId, updated_at: now },
+      { id: attendanceBId, school_id: schoolBId, student_id: studentBId, class_id: classBId, date: today, status: 'PRESENT', marked_by_id: teacherBTeacherId, updated_at: now },
+    ]);
+    if (attErr) throw new Error(`Attendance insert failed: ${attErr.message}`);
+
+    // 11. Seed one fee balance per school
+    feeAId = randomUUID();
+    feeBId = randomUUID();
+    const { error: feeErr } = await admin.from('fee_balances').insert([
+      { id: feeAId, school_id: schoolAId, student_id: studentAId, amount_due: 5000, updated_at: now },
+      { id: feeBId, school_id: schoolBId, student_id: studentBId, amount_due: 6000, updated_at: now },
+    ]);
+    if (feeErr) throw new Error(`Fee balance insert failed: ${feeErr.message}`);
+  }, TIMEOUT);
+
+  afterAll(async () => {
+    // Clean up in FK-safe order using service-role client
+    await admin.from('attendance_records').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('fee_balances').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('announcements').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('students').delete().in('school_id', [schoolAId, schoolBId]);
+    // teachers has no school_id column — delete via user_id
+    const { data: testUsers } = await admin.from('users').select('id').in('school_id', [schoolAId, schoolBId]);
+    const testUserIds = (testUsers ?? []).map((u: { id: string }) => u.id);
+    if (testUserIds.length) await admin.from('teachers').delete().in('user_id', testUserIds);
+    await admin.from('classes').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('users').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('schools').delete().in('id', [schoolAId, schoolBId]);
+    for (const id of authUserIds) {
+      await admin.auth.admin.deleteUser(id);
+    }
+    await app.close();
+  }, TIMEOUT);
+
+  // ---------------------------------------------------------------------------
+  // Students
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot see School B students', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/students')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).not.toContain(studentBId);
+  });
+
+  it('School B admin cannot see School A students', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/students')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).not.toContain(studentAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Classes
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot see School B classes', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/classes')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((c) => c.id);
+    expect(ids).not.toContain(classBId);
+  });
+
+  it('School B admin cannot see School A classes', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/classes')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((c) => c.id);
+    expect(ids).not.toContain(classAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Each school only sees its own data
+  // ---------------------------------------------------------------------------
+
+  it('School A admin can see their own student', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/students')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(studentAId);
+  });
+
+  it('School B admin can see their own student', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/students')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(studentBId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Announcements
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot see School B announcements', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/announcements')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((a) => a.id);
+    expect(ids).not.toContain(announcementBId);
+  });
+
+  it('School B admin cannot see School A announcements', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/announcements')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((a) => a.id);
+    expect(ids).not.toContain(announcementAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Attendance
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot see School B attendance records', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/attendance')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).not.toContain(attendanceBId);
+  });
+
+  it('School B admin cannot see School A attendance records', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/attendance')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).not.toContain(attendanceAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fee balances
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot see School B fee balances', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/fees')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((f) => f.id);
+    expect(ids).not.toContain(feeBId);
+  });
+
+  it('School B admin cannot see School A fee balances', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/fees')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((f) => f.id);
+    expect(ids).not.toContain(feeAId);
+  });
+});

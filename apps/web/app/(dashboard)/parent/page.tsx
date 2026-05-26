@@ -117,22 +117,22 @@ export default async function ParentHomePage() {
           )}
 
           {/* Cards grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
 
             {/* Today's classes card */}
             <Link href="/parent/timetable" className="block group">
               <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-5 py-4">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-3 sm:px-5 sm:py-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-blue-100 text-xs font-medium uppercase tracking-wide">
                       {childFirstName ? `${childFirstName}'s Classes Today` : "Today's Classes"}
                     </span>
                     <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
                   </div>
-                  <p className="text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
+                  <p className="text-3xl sm:text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
                   <p className="text-blue-100 text-sm mt-1">{DAY_LABELS[today]}</p>
                 </div>
-                <div className="bg-white px-5 py-3 space-y-1.5">
+                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
                   {(todaySlots ?? []).length === 0 ? (
                     <p className="text-sm text-slate-400">No classes today.</p>
                   ) : (
@@ -150,7 +150,7 @@ export default async function ParentHomePage() {
             {/* Attendance card */}
             <Link href="/parent/attendance" className="block group">
               <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className={`px-5 py-4 bg-gradient-to-br ${
+                <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
                   attRate === null ? 'from-slate-400 to-slate-500'
                   : attRate >= 80 ? 'from-emerald-500 to-teal-600'
                   : attRate >= 60 ? 'from-amber-500 to-orange-600'
@@ -160,12 +160,12 @@ export default async function ParentHomePage() {
                     <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
                     <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
                   </div>
-                  <p className="text-4xl font-bold text-white">
+                  <p className="text-3xl sm:text-4xl font-bold text-white">
                     {attRate !== null ? `${attRate}%` : '—'}
                   </p>
                   <p className="text-white/80 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
                 </div>
-                <div className="bg-white px-5 py-3">
+                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
                   {attTotal === 0 ? (
                     <p className="text-sm text-slate-400">No attendance recorded yet.</p>
                   ) : (
@@ -182,17 +182,17 @@ export default async function ParentHomePage() {
             {/* Grades card */}
             <Link href="/parent/grades" className="block group">
               <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">
                       {childFirstName ? `${childFirstName}'s Grades` : 'Grades'}
                     </span>
                     <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
                   </div>
-                  <p className="text-4xl font-bold text-white">%</p>
+                  <p className="text-3xl sm:text-4xl font-bold text-white">%</p>
                   <p className="text-violet-100 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
                 </div>
-                <div className="bg-white px-5 py-3">
+                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
                   <p className="text-sm text-slate-600">View assessment results and marks.</p>
                 </div>
               </div>
@@ -201,7 +201,7 @@ export default async function ParentHomePage() {
             {/* Fee balance card */}
             <Link href="/parent/fees" className="block group">
               <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className={`px-5 py-4 bg-gradient-to-br ${
+                <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
                   totalOutstanding > 0 ? 'from-amber-500 to-orange-600' : 'from-emerald-500 to-teal-600'
                 }`}>
                   <div className="flex items-center justify-between mb-2">
@@ -215,7 +215,7 @@ export default async function ParentHomePage() {
                     {totalOutstanding > 0 ? 'outstanding balance' : 'all fees paid'}
                   </p>
                 </div>
-                <div className="bg-white px-5 py-3">
+                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
                   {(feeBalances ?? []).length === 0 ? (
                     <p className="text-sm text-slate-400">No fee records yet.</p>
                   ) : (
@@ -230,12 +230,12 @@ export default async function ParentHomePage() {
             {/* Announcements card */}
             {(announcements ?? []).length > 0 && (
               <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
                   <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">Announcements</span>
-                  <p className="text-4xl font-bold text-white mt-2">{(announcements ?? []).length}</p>
+                  <p className="text-3xl sm:text-4xl font-bold text-white mt-2">{(announcements ?? []).length}</p>
                   <p className="text-violet-100 text-sm mt-1">recent notices</p>
                 </div>
-                <div className="bg-white px-5 py-3 space-y-2">
+                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
                   {(announcements ?? []).slice(0, 2).map((a: any) => (
                     <div key={a.id}>
                       <p className="text-sm font-medium text-slate-700 truncate">{a.title}</p>

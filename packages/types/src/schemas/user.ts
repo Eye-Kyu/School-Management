@@ -49,6 +49,7 @@ export type PromoteStudentsInput = z.infer<typeof PromoteStudentsInput>;
 export const UpdateProfileInput = z.object({
   fullName: z.string().min(1).max(100),
   phone: z.string().max(20).optional(),
+  avatarUrl: z.string().url().max(500).optional().nullable(),
 });
 export type UpdateProfileInput = z.infer<typeof UpdateProfileInput>;
 

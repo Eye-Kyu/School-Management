@@ -66,20 +66,20 @@ export default async function TeacherHomePage() {
       </div>
 
       {/* Cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4">
 
         {/* Today's schedule card */}
         <Link href="/teacher/schedule" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-sky-500 to-blue-600 px-5 py-4">
+            <div className="bg-gradient-to-br from-sky-500 to-blue-600 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sky-100 text-xs font-medium uppercase tracking-wide">Today's Schedule</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
+              <p className="text-3xl sm:text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
               <p className="text-sky-100 text-sm mt-1">{DAY_LABELS[today]}</p>
             </div>
-            <div className="bg-white px-5 py-3 space-y-1.5">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
               {(todaySlots ?? []).length === 0 ? (
                 <p className="text-sm text-slate-400">No classes today.</p>
               ) : (
@@ -98,17 +98,17 @@ export default async function TeacherHomePage() {
         {/* Attendance card */}
         <Link href="/teacher/attendance" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 px-5 py-4">
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-emerald-100 text-xs font-medium uppercase tracking-wide">Mark Attendance</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">{myClasses.length}</p>
+              <p className="text-3xl sm:text-4xl font-bold text-white">{myClasses.length}</p>
               <p className="text-emerald-100 text-sm mt-1">
                 {myClasses.length === 1 ? 'class assigned' : 'classes assigned'}
               </p>
             </div>
-            <div className="bg-white px-5 py-3">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
               <p className="text-sm text-slate-600">
                 {myClasses.length === 0
                   ? 'No classes assigned yet.'
@@ -121,15 +121,15 @@ export default async function TeacherHomePage() {
         {/* Assessments card */}
         <Link href="/teacher/assessments" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">Assessments</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">+</p>
+              <p className="text-3xl sm:text-4xl font-bold text-white">+</p>
               <p className="text-violet-100 text-sm mt-1">Record marks</p>
             </div>
-            <div className="bg-white px-5 py-3">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
               <p className="text-sm text-slate-600">Create tests and enter student scores.</p>
             </div>
           </div>

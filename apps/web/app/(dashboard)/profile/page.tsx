@@ -8,7 +8,7 @@ export default async function ProfilePage() {
 
   const { data: userRow } = await supabase
     .from('users')
-    .select('full_name, email, phone, role')
+    .select('full_name, email, phone, role, avatar_url')
     .eq('auth_id', user.id)
     .maybeSingle();
 
@@ -23,6 +23,7 @@ export default async function ProfilePage() {
         email={userRow?.email ?? user.email ?? ''}
         phone={userRow?.phone ?? ''}
         role={userRow?.role ?? ''}
+        avatarUrl={userRow?.avatar_url ?? null}
       />
     </div>
   );

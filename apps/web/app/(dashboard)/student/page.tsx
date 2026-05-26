@@ -73,20 +73,20 @@ export default async function StudentHomePage() {
       </div>
 
       {/* Cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4">
 
         {/* Today's classes card */}
         <Link href="/student/timetable" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-5 py-4">
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-blue-100 text-xs font-medium uppercase tracking-wide">Today's Classes</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
+              <p className="text-3xl sm:text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
               <p className="text-blue-100 text-sm mt-1">{DAY_LABELS[today]}</p>
             </div>
-            <div className="bg-white px-5 py-3 space-y-1.5">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
               {(todaySlots ?? []).length === 0 ? (
                 <p className="text-sm text-slate-400">No classes scheduled today.</p>
               ) : (
@@ -107,15 +107,15 @@ export default async function StudentHomePage() {
         {/* Grades card */}
         <Link href="/student/grades" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-5 py-4">
+            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">My Grades</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">%</p>
+              <p className="text-3xl sm:text-4xl font-bold text-white">%</p>
               <p className="text-violet-100 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
             </div>
-            <div className="bg-white px-5 py-3">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
               <p className="text-sm text-slate-600">View assessment results and scores.</p>
             </div>
           </div>
@@ -124,7 +124,7 @@ export default async function StudentHomePage() {
         {/* Attendance card */}
         <Link href="/student/attendance" className="block group">
           <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className={`px-5 py-4 bg-gradient-to-br ${
+            <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
               attRate === null ? 'from-slate-400 to-slate-500'
               : attRate >= 80 ? 'from-emerald-500 to-teal-600'
               : attRate >= 60 ? 'from-amber-500 to-orange-600'
@@ -134,14 +134,14 @@ export default async function StudentHomePage() {
                 <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
                 <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
               </div>
-              <p className="text-4xl font-bold text-white">
+              <p className="text-3xl sm:text-4xl font-bold text-white">
                 {attRate !== null ? `${attRate}%` : '—'}
               </p>
               <p className="text-white/80 text-sm mt-1">
                 {currentTerm?.name ?? 'current term'}
               </p>
             </div>
-            <div className="bg-white px-5 py-3">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
               {attTotal === 0 ? (
                 <p className="text-sm text-slate-400">No attendance recorded yet.</p>
               ) : (

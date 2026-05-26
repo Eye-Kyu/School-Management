@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api';
 
 function Eye() {
   return (
@@ -60,6 +61,7 @@ export default function UpdatePasswordPage() {
       return;
     }
 
+    apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.password_reset' }) }).catch(() => {});
     setDone(true);
     setTimeout(() => router.push('/login'), 2500);
   }

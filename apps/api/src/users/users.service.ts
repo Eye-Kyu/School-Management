@@ -14,10 +14,11 @@ export class UsersService {
       .update({
         full_name: input.fullName,
         phone: input.phone ?? null,
+        ...(input.avatarUrl !== undefined ? { avatar_url: input.avatarUrl } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('auth_id', authUserId)
-      .select('full_name, phone, email, role')
+      .select('full_name, phone, email, role, avatar_url')
       .single();
 
     if (error) throw new BadRequestException(error.message);

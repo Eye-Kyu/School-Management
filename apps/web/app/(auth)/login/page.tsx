@@ -4,7 +4,10 @@ import { Suspense } from 'react';
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api';
 import { EmailLoginInput } from '@school-manager/types';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 type Tab = 'email' | 'phone';
 
@@ -68,8 +71,15 @@ function LoginPageInner() {
 
     if (authError) {
       setError(authError.message);
+      fetch(`${API_BASE}/auth/failed-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      }).catch(() => {});
       return;
     }
+
+    apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.login' }) }).catch(() => {});
 
     const { data: userRow } = await supabase
       .from('users')
@@ -109,6 +119,8 @@ function LoginPageInner() {
     });
     setLoading(false);
     if (authError) { setError(authError.message); return; }
+
+    apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.login' }) }).catch(() => {});
 
     const { data: userRow } = await supabase
       .from('users')

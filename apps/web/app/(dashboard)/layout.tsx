@@ -10,7 +10,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const { data: userRow } = await supabase
     .from('users')
-    .select('full_name, role')
+    .select('full_name, role, avatar_url')
     .eq('auth_id', user.id)
     .maybeSingle();
 
@@ -18,7 +18,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const role = userRow?.role as string | undefined;
 
   return (
-    <DashboardShell role={role ?? ''} displayName={displayName}>
+    <DashboardShell role={role ?? ''} displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
       {children}
     </DashboardShell>
   );

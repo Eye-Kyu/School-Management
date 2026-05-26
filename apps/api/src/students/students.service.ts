@@ -15,7 +15,7 @@ export class StudentsService {
       .select(`
         id, admission_no, gender, enrollment_date, is_active, current_class_id,
         user:users!inner(id, full_name, email, phone),
-        class:classes(id, name, grade_level)
+        class:classes!current_class_id(id, name, grade_level)
       `)
       .eq('is_active', true)
       .order('admission_no');

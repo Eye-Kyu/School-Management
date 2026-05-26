@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,10 +18,14 @@ import { AnnouncementsModule } from './announcements/announcements.module';
 import { GuardiansModule } from './guardians/guardians.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { UsersModule } from './users/users.module';
+import { EventsModule } from './events/events.module';
+import { HomeworkModule } from './homework/homework.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     SupabaseModule,
     AuthModule,
@@ -36,6 +41,9 @@ import { UsersModule } from './users/users.module';
     GuardiansModule,
     AssessmentsModule,
     UsersModule,
+    EventsModule,
+    HomeworkModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
 })

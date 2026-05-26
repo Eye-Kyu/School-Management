@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type {
   AttendanceQuery,
   AttendanceRosterQuery,
@@ -9,7 +10,10 @@ import type {
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async list(accessToken: string, query: AttendanceQuery) {
     const client = this.supabase.forUser(accessToken);
@@ -211,7 +215,58 @@ export class AttendanceService {
       metadata: { classId: input.classId, date: input.date, count: input.records.length },
     });
 
+    // Queue absence notifications for guardians of absent students
+    const absentIds = input.records.filter((r) => r.status === 'ABSENT').map((r) => r.studentId);
+    if (absentIds.length > 0) {
+      await this.queueAbsenceNotifications(cls.school_id, input.classId, input.date, absentIds);
+    }
+
     return { upserted: totalUpserted };
+  }
+
+  private async queueAbsenceNotifications(
+    schoolId: string,
+    classId: string,
+    date: string,
+    absentStudentIds: string[],
+  ) {
+    try {
+      // Look up each absent student's name and their guardians
+      const { data: guardianRows } = await this.supabase.admin
+        .from('guardians')
+        .select('user_id, student:students!student_id(user:users!user_id(full_name))')
+        .in('student_id', absentStudentIds);
+
+      if (!guardianRows?.length) return;
+
+      // Look up guardian user rows for school_id scoping
+      const guardianUserIds = guardianRows.map((g: any) => g.user_id);
+      const { data: guardianUsers } = await this.supabase.admin
+        .from('users')
+        .select('id, school_id')
+        .in('id', guardianUserIds)
+        .eq('school_id', schoolId);
+
+      const guardianSchoolIds = new Set((guardianUsers ?? []).map((u: any) => u.id));
+
+      const payloads = guardianRows
+        .filter((g: any) => guardianSchoolIds.has(g.user_id))
+        .map((g: any) => {
+          const studentName = (g.student as any)?.user?.full_name ?? 'Your child';
+          return {
+            schoolId,
+            recipientId: g.user_id as string,
+            type: 'ABSENT_STUDENT' as const,
+            title: `Absence alert — ${studentName}`,
+            body: `${studentName} was marked absent on ${date}. Please contact the school if this is incorrect.`,
+            metadata: { date, classId },
+          };
+        });
+
+      await this.notifications.queue(payloads);
+    } catch (err) {
+      console.error('[AttendanceService] absence notification error:', err);
+    }
   }
 }
 

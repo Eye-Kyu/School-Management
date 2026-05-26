@@ -175,6 +175,11 @@ export class FeesService {
     if (error) throw new BadRequestException(error.message);
 
     const newAmountPaid = Number(bal.amount_paid) + Number(input.amount);
+    await client
+      .from('fee_balances')
+      .update({ amount_paid: newAmountPaid, updated_at: new Date().toISOString() })
+      .eq('id', bal.id);
+
     return {
       payment,
       newAmountPaid: newAmountPaid.toFixed(2),

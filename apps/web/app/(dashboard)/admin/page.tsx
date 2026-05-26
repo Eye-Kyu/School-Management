@@ -141,7 +141,7 @@ export default async function AdminHomePage() {
       {/* Setup links */}
       <div>
         <h2 className="text-base font-semibold text-slate-700 mb-3">School setup</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           {setupLinks.map((link) => (
             <Link
               key={link.href}

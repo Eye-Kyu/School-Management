@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import LogoutButton from './LogoutButton';
+import NotificationBell from '@/components/NotificationBell';
+import UserAvatar from '@/components/UserAvatar';
 
 type NavItem = { href: string; label: string };
 
@@ -21,18 +23,21 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin/fees',          label: 'Fees' },
     { href: '/admin/attendance',    label: 'Attendance' },
     { href: '/admin/announcements', label: 'Announcements' },
+    { href: '/admin/events',        label: 'Events' },
   ],
   TEACHER: [
     { href: '/teacher',             label: 'Dashboard' },
     { href: '/teacher/schedule',    label: 'Schedule' },
     { href: '/teacher/attendance',  label: 'Attendance' },
     { href: '/teacher/assessments', label: 'Assessments' },
+    { href: '/teacher/homework',    label: 'Homework' },
   ],
   STUDENT: [
     { href: '/student',             label: 'Dashboard' },
     { href: '/student/timetable',   label: 'Timetable' },
     { href: '/student/grades',      label: 'Grades' },
     { href: '/student/attendance',  label: 'Attendance' },
+    { href: '/student/homework',    label: 'Homework' },
   ],
   PARENT: [
     { href: '/parent',              label: 'Dashboard' },
@@ -40,6 +45,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/parent/grades',       label: 'Grades' },
     { href: '/parent/attendance',   label: 'Attendance' },
     { href: '/parent/fees',         label: 'Fees' },
+    { href: '/parent/homework',     label: 'Homework' },
   ],
 };
 
@@ -62,10 +68,12 @@ function NavLink({ href, label, active, onClick }: NavItem & { active: boolean; 
 export default function DashboardShell({
   role,
   displayName,
+  avatarUrl,
   children,
 }: {
   role: string;
   displayName: string;
+  avatarUrl?: string | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -96,8 +104,12 @@ export default function DashboardShell({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-500 hidden sm:block truncate max-w-[160px]">{displayName}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <UserAvatar name={displayName} avatarUrl={avatarUrl} size={30} />
+            <span className="text-sm text-slate-500 hidden sm:block truncate max-w-[140px]">{displayName}</span>
+          </div>
+          <NotificationBell />
           <LogoutButton />
         </div>
       </header>
