@@ -124,11 +124,35 @@ export class AnnouncementsService {
     targetGradeLevel: number | null,
     targetClassId: string | null,
   ): Promise<string[]> {
+    // School-wide: all teachers + all parents (not students or admins)
     if (audience === 'SCHOOL_WIDE') {
       const { data } = await this.supabase.admin
         .from('users')
         .select('id')
         .eq('school_id', schoolId)
+        .in('role', ['TEACHER', 'PARENT'])
+        .neq('id', authorId);
+      return (data ?? []).map((u) => u.id);
+    }
+
+    // Teachers only
+    if (audience === 'TEACHERS') {
+      const { data } = await this.supabase.admin
+        .from('users')
+        .select('id')
+        .eq('school_id', schoolId)
+        .eq('role', 'TEACHER')
+        .neq('id', authorId);
+      return (data ?? []).map((u) => u.id);
+    }
+
+    // Parents only
+    if (audience === 'PARENTS') {
+      const { data } = await this.supabase.admin
+        .from('users')
+        .select('id')
+        .eq('school_id', schoolId)
+        .eq('role', 'PARENT')
         .neq('id', authorId);
       return (data ?? []).map((u) => u.id);
     }
@@ -140,30 +164,30 @@ export class AnnouncementsService {
         .eq('school_id', schoolId)
         .eq('grade_level', targetGradeLevel);
       const classIds = (classRows ?? []).map((c) => c.id);
-      return this.studentAndGuardianUserIds(schoolId, authorId, { classIds });
+      return this.guardiansAndTeachersForClasses(schoolId, authorId, classIds);
     }
 
     if (audience === 'CLASS' && targetClassId) {
-      return this.studentAndGuardianUserIds(schoolId, authorId, { classIds: [targetClassId] });
+      return this.guardiansAndTeachersForClasses(schoolId, authorId, [targetClassId]);
     }
 
     return [];
   }
 
-  private async studentAndGuardianUserIds(
+  private async guardiansAndTeachersForClasses(
     schoolId: string,
     excludeId: string,
-    filter: { classIds: string[] },
+    classIds: string[],
   ): Promise<string[]> {
-    if (filter.classIds.length === 0) return [];
+    if (classIds.length === 0) return [];
 
+    // Parents of students in these classes
     const { data: students } = await this.supabase.admin
       .from('students')
-      .select('id, user_id')
-      .in('current_class_id', filter.classIds)
+      .select('id')
+      .in('current_class_id', classIds)
       .eq('school_id', schoolId);
 
-    const studentUserIds = (students ?? []).map((s) => s.user_id).filter(Boolean);
     const studentIds = (students ?? []).map((s) => s.id);
 
     const { data: guardians } = studentIds.length > 0
@@ -175,7 +199,17 @@ export class AnnouncementsService {
 
     const guardianUserIds = (guardians ?? []).map((g) => g.user_id);
 
-    return [...new Set([...studentUserIds, ...guardianUserIds])].filter(
+    // Teachers assigned to these classes
+    const { data: assignments } = await this.supabase.admin
+      .from('subject_assignments')
+      .select('teacher:teachers!inner(user_id)')
+      .in('class_id', classIds);
+
+    const teacherUserIds = (assignments ?? [])
+      .map((a) => (a.teacher as { user_id: string })?.user_id)
+      .filter(Boolean);
+
+    return [...new Set([...guardianUserIds, ...teacherUserIds])].filter(
       (uid) => uid && uid !== excludeId,
     );
   }

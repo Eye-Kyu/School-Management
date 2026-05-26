@@ -5,7 +5,7 @@ import { Uuid } from './common';
 // Announcements - text-only in v0.1, distribution via email/SMS/WhatsApp in v0.2
 // =============================================================================
 
-export const AnnouncementAudience = z.enum(['SCHOOL_WIDE', 'GRADE', 'CLASS']);
+export const AnnouncementAudience = z.enum(['SCHOOL_WIDE', 'TEACHERS', 'PARENTS', 'GRADE', 'CLASS']);
 export type AnnouncementAudience = z.infer<typeof AnnouncementAudience>;
 
 export const CreateAnnouncementInput = z

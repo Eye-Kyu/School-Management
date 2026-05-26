@@ -4,8 +4,7 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import LogoutButton from './LogoutButton';
-import NotificationBell from '@/components/NotificationBell';
-import UserAvatar from '@/components/UserAvatar';
+import AvatarDropdown from '@/components/AvatarDropdown';
 
 type NavItem = { href: string; label: string };
 
@@ -19,7 +18,6 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin/subjects',      label: 'Subjects' },
     { href: '/admin/terms',         label: 'Terms' },
     { href: '/admin/timetable',     label: 'Timetable' },
-    { href: '/teacher/assessments', label: 'Assessments' },
     { href: '/admin/fees',          label: 'Fees' },
     { href: '/admin/attendance',    label: 'Attendance' },
     { href: '/admin/announcements', label: 'Announcements' },
@@ -105,12 +103,8 @@ export default function DashboardShell({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <UserAvatar name={displayName} avatarUrl={avatarUrl} size={30} />
-            <span className="text-sm text-slate-500 hidden sm:block truncate max-w-[140px]">{displayName}</span>
-          </div>
-          <NotificationBell />
-          <LogoutButton />
+          <span className="text-sm text-slate-500 hidden sm:block truncate max-w-[140px]">{displayName}</span>
+          <AvatarDropdown name={displayName} avatarUrl={avatarUrl} role={role} />
         </div>
       </header>
 

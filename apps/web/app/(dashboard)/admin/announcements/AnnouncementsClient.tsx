@@ -19,6 +19,8 @@ type ClassOption = { id: string; name: string; grade_level: number };
 
 const AUDIENCE_LABELS: Record<string, string> = {
   SCHOOL_WIDE: 'Everyone',
+  TEACHERS: 'Teachers',
+  PARENTS: 'Parents',
   GRADE: 'Grade',
   CLASS: 'Class',
 };
@@ -35,7 +37,7 @@ export default function AnnouncementsClient({
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [audience, setAudience] = useState<'SCHOOL_WIDE' | 'GRADE' | 'CLASS'>('SCHOOL_WIDE');
+  const [audience, setAudience] = useState<'SCHOOL_WIDE' | 'TEACHERS' | 'PARENTS' | 'GRADE' | 'CLASS'>('SCHOOL_WIDE');
   const [gradeLevel, setGradeLevel] = useState('');
   const [classId, setClassId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -119,9 +121,11 @@ export default function AnnouncementsClient({
               onChange={(e) => setAudience(e.target.value as any)}
               className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
             >
-              <option value="SCHOOL_WIDE">Everyone (school-wide)</option>
-              <option value="GRADE">Specific grade level</option>
-              <option value="CLASS">Specific class</option>
+              <option value="SCHOOL_WIDE">Everyone — teachers &amp; parents (school-wide)</option>
+              <option value="TEACHERS">All teachers only</option>
+              <option value="PARENTS">All parents only</option>
+              <option value="GRADE">Parents &amp; teachers of a specific grade</option>
+              <option value="CLASS">Parents &amp; teacher of a specific class</option>
             </select>
           </div>
           {audience === 'GRADE' && (

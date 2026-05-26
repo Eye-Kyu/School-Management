@@ -33,15 +33,21 @@ export async function apiFetch<T>(
     },
   });
 
+  // Read the body as text once, then try to parse as JSON.
+  // This avoids "body stream already read" errors that occur when
+  // res.json() throws and we then try res.text() on the same response.
+  const text = await res.text();
+
   if (!res.ok) {
-    let body: unknown;
+    let body: unknown = text;
     try {
-      body = await res.json();
-    } catch {
-      body = await res.text();
-    }
-    throw new ApiError(res.status, `API ${res.status}: ${res.statusText}`, body);
+      body = JSON.parse(text);
+    } catch { /* keep as plain text */ }
+    const msg = (body as Record<string, unknown>)?.message;
+    const message = typeof msg === 'string' ? msg : Array.isArray(msg) ? (msg as string[]).join('; ') : text || `${res.status}: ${res.statusText}`;
+    throw new ApiError(res.status, message, body);
   }
 
-  return (await res.json()) as T;
+  if (!text) return undefined as unknown as T;
+  return JSON.parse(text) as T;
 }

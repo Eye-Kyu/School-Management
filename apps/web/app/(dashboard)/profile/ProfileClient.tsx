@@ -86,16 +86,32 @@ export default function ProfileClient({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const ext = file.type === 'image/png' ? 'png' : 'jpg';
-      const path = `${user.id}/${Date.now()}.${ext}`;
+      // Determine mime type and extension
+      const mimeToExt: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+      };
+      const ext = mimeToExt[file.type] ?? 'jpg';
+      const contentType = file.type || 'image/jpeg';
+      // Always overwrite the same slot so old files don't accumulate
+      const path = `${user.id}/avatar.${ext}`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(path, file, { upsert: true });
-      if (uploadError) throw uploadError;
+        .upload(path, file, { upsert: true, contentType });
+
+      if (uploadError) {
+        // Bucket not found means the migration hasn't been run yet
+        if (uploadError.message.includes('Bucket not found') || uploadError.message.includes('bucket')) {
+          throw new Error('Avatar storage is not configured. Please run the avatar migration in Supabase SQL editor first.');
+        }
+        throw uploadError;
+      }
 
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
-      await saveAvatar(publicUrl);
+      // Bust cache so the browser fetches the new image
+      await saveAvatar(`${publicUrl}?t=${Date.now()}`);
     } catch (err: any) {
       setAvatarError(err?.message ?? 'Upload failed.');
       setAvatarSaving(false);
