@@ -1,11 +1,17 @@
 import './globals.css';
+import * as Sentry from '@sentry/nextjs';
 import type { Metadata, Viewport } from 'next';
 
-export const metadata: Metadata = {
-  title: 'School Manager',
-  description: 'School management for parents, students, teachers, and admins.',
-  manifest: '/manifest.webmanifest',
-};
+export function generateMetadata(): Metadata {
+  return {
+    title: 'School Manager',
+    description: 'School management for parents, students, teachers, and admins.',
+    manifest: '/manifest.webmanifest',
+    other: {
+      ...Sentry.getTraceData(),
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',
