@@ -7,12 +7,14 @@ type EventItem = {
   event_type: string;
 };
 
+const DEFAULT_STYLE = { chip: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' };
+
 const TYPE_STYLES: Record<string, { chip: string; dot: string }> = {
-  EXAM:    { chip: 'bg-rose-100 text-rose-700',     dot: 'bg-rose-500' },
+  EXAM:    { chip: 'bg-rose-100 text-rose-700',       dot: 'bg-rose-500' },
   HOLIDAY: { chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
-  PTA:     { chip: 'bg-violet-100 text-violet-700',  dot: 'bg-violet-500' },
-  SPORTS:  { chip: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500' },
-  GENERAL: { chip: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400' },
+  PTA:     { chip: 'bg-violet-100 text-violet-700',   dot: 'bg-violet-500' },
+  SPORTS:  { chip: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500' },
+  GENERAL: DEFAULT_STYLE,
 };
 
 function formatEventDate(iso: string) {
@@ -47,7 +49,7 @@ export default function UpcomingEvents({ events }: { events: EventItem[] }) {
       <h2 className="text-base font-semibold mb-3 text-slate-700">Upcoming events</h2>
       <div className="space-y-2">
         {events.map((ev) => {
-          const style = TYPE_STYLES[ev.event_type] ?? TYPE_STYLES.GENERAL;
+          const style = TYPE_STYLES[ev.event_type] ?? DEFAULT_STYLE;
           return (
             <div
               key={ev.id}
