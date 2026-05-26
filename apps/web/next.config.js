@@ -11,9 +11,10 @@ const nextConfig = {
 };
 
 // Wrap with PostHog (adds /ingest rewrites automatically)
+// Source map uploading requires a PostHog project ID + personal API key — disabled here.
 const withPostHog = withPostHogConfig(nextConfig, {
-  // EU cloud
   host: 'https://eu.i.posthog.com',
+  sourcemaps: { enabled: false },
 });
 
 // Wrap with Sentry only when DSN is configured to avoid build noise in local dev.
