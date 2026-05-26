@@ -1,6 +1,7 @@
 import './globals.css';
 import * as Sentry from '@sentry/nextjs';
 import type { Metadata, Viewport } from 'next';
+import { PostHogProvider } from '@/components/PostHogProvider';
 
 export function generateMetadata(): Metadata {
   return {
@@ -22,7 +23,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PostHogProvider>{children}</PostHogProvider>
+      </body>
     </html>
   );
 }

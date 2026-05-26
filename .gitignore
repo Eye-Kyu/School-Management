@@ -53,3 +53,9 @@ secrets/
 backups/
 *.pem
 *.key
+
+# Internal planning (not for public repo)
+EXECUTION_PLAN.md
+
+# Sentry build plugin auth token (use CI secret instead)
+apps/web/.env.sentry-build-plugin
