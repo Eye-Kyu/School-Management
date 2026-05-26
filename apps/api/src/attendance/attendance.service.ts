@@ -240,19 +240,19 @@ export class AttendanceService {
       if (!guardianRows?.length) return;
 
       // Look up guardian user rows for school_id scoping
-      const guardianUserIds = guardianRows.map((g: any) => g.user_id);
+      const guardianUserIds = guardianRows.map((g) => g.user_id);
       const { data: guardianUsers } = await this.supabase.admin
         .from('users')
         .select('id, school_id')
         .in('id', guardianUserIds)
         .eq('school_id', schoolId);
 
-      const guardianSchoolIds = new Set((guardianUsers ?? []).map((u: any) => u.id));
+      const guardianSchoolIds = new Set((guardianUsers ?? []).map((u) => u.id));
 
       const payloads = guardianRows
-        .filter((g: any) => guardianSchoolIds.has(g.user_id))
-        .map((g: any) => {
-          const studentName = (g.student as any)?.user?.full_name ?? 'Your child';
+        .filter((g) => guardianSchoolIds.has(g.user_id))
+        .map((g) => {
+          const studentName = (g.student as { user?: { full_name?: string } })?.user?.full_name ?? 'Your child';
           return {
             schoolId,
             recipientId: g.user_id as string,

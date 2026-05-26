@@ -130,7 +130,7 @@ export class AnnouncementsService {
         .select('id')
         .eq('school_id', schoolId)
         .neq('id', authorId);
-      return (data ?? []).map((u: any) => u.id);
+      return (data ?? []).map((u) => u.id);
     }
 
     if (audience === 'GRADE' && targetGradeLevel != null) {
@@ -139,7 +139,7 @@ export class AnnouncementsService {
         .select('id')
         .eq('school_id', schoolId)
         .eq('grade_level', targetGradeLevel);
-      const classIds = (classRows ?? []).map((c: any) => c.id);
+      const classIds = (classRows ?? []).map((c) => c.id);
       return this.studentAndGuardianUserIds(schoolId, authorId, { classIds });
     }
 
@@ -163,8 +163,8 @@ export class AnnouncementsService {
       .in('current_class_id', filter.classIds)
       .eq('school_id', schoolId);
 
-    const studentUserIds = (students ?? []).map((s: any) => s.user_id).filter(Boolean);
-    const studentIds = (students ?? []).map((s: any) => s.id);
+    const studentUserIds = (students ?? []).map((s) => s.user_id).filter(Boolean);
+    const studentIds = (students ?? []).map((s) => s.id);
 
     const { data: guardians } = studentIds.length > 0
       ? await this.supabase.admin
@@ -173,7 +173,7 @@ export class AnnouncementsService {
           .in('student_id', studentIds)
       : { data: [] };
 
-    const guardianUserIds = (guardians ?? []).map((g: any) => g.user_id);
+    const guardianUserIds = (guardians ?? []).map((g) => g.user_id);
 
     return [...new Set([...studentUserIds, ...guardianUserIds])].filter(
       (uid) => uid && uid !== excludeId,

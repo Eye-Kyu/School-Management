@@ -5,6 +5,19 @@ import { SupabaseService } from '../supabase/supabase.service';
 
 export type NotifType = 'ABSENT_STUDENT' | 'NEW_ANNOUNCEMENT' | 'HOMEWORK_ASSIGNED';
 
+interface BrevoClient {
+  sendTransacEmail(params: {
+    sender: { email: string; name: string };
+    to: { email: string }[];
+    subject: string;
+    textContent: string;
+  }): Promise<unknown>;
+}
+
+type PendingNotif = { id: string; recipient_id: string; type: string; title: string; body: string };
+type UserRow = { id: string; email: string | null };
+type PrefRow = { user_id: string; notification_type: string; email_enabled: boolean };
+
 export interface NotifPayload {
   schoolId: string;
   recipientId: string;
@@ -18,7 +31,7 @@ export interface NotifPayload {
 
 @Injectable()
 export class NotificationsService {
-  private brevo: any = null;
+  private brevo: BrevoClient | null = null;
 
   constructor(
     private readonly supabase: SupabaseService,
@@ -31,7 +44,7 @@ export class NotificationsService {
     const apiKey = this.config.get<string>('BREVO_API_KEY');
     if (!apiKey) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const Brevo = require('@getbrevo/brevo');
       const client = new Brevo.TransactionalEmailsApi();
       client.authentications['api-key'].apiKey = apiKey;
@@ -116,7 +129,8 @@ export class NotificationsService {
     }
     if (!rows?.length) return;
 
-    const recipientIds = [...new Set((rows as any[]).map((r) => r.recipient_id))];
+    const pendingRows = rows as PendingNotif[];
+    const recipientIds = [...new Set(pendingRows.map((r) => r.recipient_id))];
 
     const [{ data: users }, { data: prefs }] = await Promise.all([
       this.supabase.admin.from('users').select('id, email').in('id', recipientIds),
@@ -126,18 +140,18 @@ export class NotificationsService {
         .in('user_id', recipientIds),
     ]);
 
-    const userMap = Object.fromEntries((users ?? []).map((u: any) => [u.id, u]));
+    const userMap = Object.fromEntries(((users ?? []) as UserRow[]).map((u) => [u.id, u]));
 
     // prefMap[user_id][notification_type] = { email }
     const prefMap: Record<string, Record<string, { email: boolean }>> = {};
-    for (const p of prefs ?? []) {
+    for (const p of (prefs as PrefRow[]) ?? []) {
       (prefMap[p.user_id] ??= {})[p.notification_type] = { email: p.email_enabled };
     }
 
     const senderEmail = this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app';
     const senderName = this.config.get<string>('BREVO_SENDER_NAME') ?? 'School Manager';
 
-    for (const row of rows as any[]) {
+    for (const row of pendingRows) {
       const user = userMap[row.recipient_id];
       if (!user) continue;
 
