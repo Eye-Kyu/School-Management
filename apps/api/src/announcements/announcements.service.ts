@@ -206,7 +206,8 @@ export class AnnouncementsService {
       .in('class_id', classIds);
 
     const teacherUserIds = (assignments ?? [])
-      .map((a) => (a.teacher as { user_id: string })?.user_id)
+      .flatMap((a) => (a.teacher as unknown as { user_id: string }[]) ?? [])
+      .map((t) => t.user_id)
       .filter(Boolean);
 
     return [...new Set([...guardianUserIds, ...teacherUserIds])].filter(
