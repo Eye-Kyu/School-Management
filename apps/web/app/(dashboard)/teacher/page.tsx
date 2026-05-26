@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { todayEnum, formatTime, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
+import UpcomingEvents from '@/components/UpcomingEvents';
 
 export default async function TeacherHomePage() {
   const supabase = createClient();
@@ -52,6 +53,16 @@ export default async function TeacherHomePage() {
     .select('id, title, body, published_at')
     .order('published_at', { ascending: false })
     .limit(3);
+
+  const now = new Date().toISOString();
+  const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: events } = await supabase
+    .from('events')
+    .select('id, title, starts_at, ends_at, all_day, event_type')
+    .gte('starts_at', now)
+    .lte('starts_at', in30Days)
+    .order('starts_at')
+    .limit(10);
 
   const firstName = (teacher?.user as any)?.full_name?.split(' ')[0] ?? 'Teacher';
 
@@ -186,6 +197,8 @@ export default async function TeacherHomePage() {
           </div>
         </section>
       )}
+
+      <UpcomingEvents events={(events ?? []) as any[]} />
     </div>
   );
 }

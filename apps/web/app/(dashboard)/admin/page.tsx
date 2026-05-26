@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import UpcomingEvents from '@/components/UpcomingEvents';
 
 type StatCard = {
   label: string;
@@ -12,6 +13,9 @@ type StatCard = {
 export default async function AdminHomePage() {
   const supabase = createClient();
 
+  const now = new Date().toISOString();
+  const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
   const [
     { count: classCount },
     { count: teacherCount },
@@ -19,6 +23,7 @@ export default async function AdminHomePage() {
     { count: parentCount },
     { data: feeData },
     { data: announcements },
+    { data: events },
   ] = await Promise.all([
     supabase.from('classes').select('*', { count: 'exact', head: true }).eq('is_active', true),
     supabase.from('teachers').select('*', { count: 'exact', head: true }),
@@ -30,6 +35,13 @@ export default async function AdminHomePage() {
       .select('id, title, published_at, author:users!inner(full_name)')
       .order('published_at', { ascending: false })
       .limit(3),
+    supabase
+      .from('events')
+      .select('id, title, starts_at, ends_at, all_day, event_type')
+      .gte('starts_at', now)
+      .lte('starts_at', in30Days)
+      .order('starts_at')
+      .limit(10),
   ]);
 
   const totalOutstanding = (feeData ?? []).reduce(
@@ -154,6 +166,8 @@ export default async function AdminHomePage() {
           ))}
         </div>
       </div>
+
+      <UpcomingEvents events={(events ?? []) as any[]} />
     </div>
   );
 }

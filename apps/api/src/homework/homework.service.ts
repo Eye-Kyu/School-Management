@@ -182,6 +182,7 @@ export class HomeworkService {
 
     const { data: school } = await client.from('schools').select('id').single();
 
+    const completedAt = new Date().toISOString();
     const { error } = await client
       .from('homework_completions')
       .upsert({
@@ -189,9 +190,20 @@ export class HomeworkService {
         school_id: school!.id,
         homework_id: homeworkId,
         student_id: studentRow.id,
-        completed_at: new Date().toISOString(),
+        completed_at: completedAt,
       }, { onConflict: 'homework_id,student_id' });
     if (error) throw new Error(error.message);
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: school!.id,
+      user_id: userRow.id,
+      action: 'homework.complete',
+      entity_type: 'homework_completion',
+      entity_id: homeworkId,
+      metadata: { homeworkId, studentId: studentRow.id, completedAt },
+    });
+
     return { completed: true };
   }
 
@@ -206,12 +218,25 @@ export class HomeworkService {
       .from('students').select('id').eq('user_id', userRow.id).maybeSingle();
     if (!studentRow) throw new ForbiddenException('Student record not found');
 
+    const { data: school } = await client.from('schools').select('id').single();
+
     const { error } = await client
       .from('homework_completions')
       .delete()
       .eq('homework_id', homeworkId)
       .eq('student_id', studentRow.id);
     if (error) throw new Error(error.message);
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: school!.id,
+      user_id: userRow.id,
+      action: 'homework.uncomplete',
+      entity_type: 'homework_completion',
+      entity_id: homeworkId,
+      metadata: { homeworkId, studentId: studentRow.id },
+    });
+
     return { completed: false };
   }
 }
