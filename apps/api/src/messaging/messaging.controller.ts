@@ -1,7 +1,8 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, UseGuards, Req,
+  Controller, Get, Post, Patch, Param, Body, UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
+import { AccessToken } from '../common/decorators/current-user.decorator';
 import { MessagingService } from './messaging.service';
 import { CreateConversationInput, SendMessageInput } from '@school-manager/types';
 
@@ -11,40 +12,40 @@ export class MessagingController {
   constructor(private readonly svc: MessagingService) {}
 
   @Get('conversations')
-  listConversations(@Req() req: any) {
-    return this.svc.listConversations(req.accessToken);
+  listConversations(@AccessToken() token: string) {
+    return this.svc.listConversations(token);
   }
 
   @Post('conversations')
-  createConversation(@Req() req: any, @Body() body: unknown) {
+  createConversation(@AccessToken() token: string, @Body() body: unknown) {
     const input = CreateConversationInput.parse(body);
-    return this.svc.getOrCreateConversation(req.accessToken, input);
+    return this.svc.getOrCreateConversation(token, input);
   }
 
   @Get('conversations/:id/messages')
-  listMessages(@Req() req: any, @Param('id') id: string) {
-    return this.svc.listMessages(req.accessToken, id);
+  listMessages(@AccessToken() token: string, @Param('id') id: string) {
+    return this.svc.listMessages(token, id);
   }
 
   @Post('conversations/:id/messages')
-  sendMessage(@Req() req: any, @Param('id') id: string, @Body() body: unknown) {
+  sendMessage(@AccessToken() token: string, @Param('id') id: string, @Body() body: unknown) {
     const input = SendMessageInput.parse(body);
-    return this.svc.sendMessage(req.accessToken, id, input);
+    return this.svc.sendMessage(token, id, input);
   }
 
   @Patch('conversations/:id/read')
-  markRead(@Req() req: any, @Param('id') id: string) {
-    return this.svc.markRead(req.accessToken, id);
+  markRead(@AccessToken() token: string, @Param('id') id: string) {
+    return this.svc.markRead(token, id);
   }
 
   @Get('unread-count')
-  async unreadCount(@Req() req: any) {
-    const count = await this.svc.unreadCount(req.accessToken);
+  async unreadCount(@AccessToken() token: string) {
+    const count = await this.svc.unreadCount(token);
     return { count };
   }
 
   @Get('contacts')
-  availableContacts(@Req() req: any) {
-    return this.svc.availableContacts(req.accessToken);
+  availableContacts(@AccessToken() token: string) {
+    return this.svc.availableContacts(token);
   }
 }
