@@ -401,6 +401,18 @@ export default function ProfileClient({
           {savingPrefs ? 'Saving…' : 'Save preferences'}
         </button>
       </div>
+
+      {/* Data & privacy */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+        <h2 className="text-base font-semibold text-slate-800">Data &amp; privacy</h2>
+        <p className="text-sm text-slate-500">Download a copy of your data or request account deletion.</p>
+        <div className="flex gap-3 flex-wrap">
+          <a href="/api/export" download
+            className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors">
+            ↓ Download my data (JSON)
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
