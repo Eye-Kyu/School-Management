@@ -26,7 +26,7 @@ export default async function GradebookPage() {
   // Unique classes this teacher is assigned to
   const seen = new Set<string>();
   const myClasses = (assignments ?? [])
-    .map((a) => a.class as { id: string; name: string; grade_level: number })
+    .map((a) => a.class as unknown as { id: string; name: string; grade_level: number })
     .filter((c) => c && !seen.has(c.id) && seen.add(c.id));
 
   const currentTerm = (terms ?? []).find((t) => t.is_current) ?? (terms ?? [])[0];

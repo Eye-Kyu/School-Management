@@ -79,8 +79,8 @@ export default async function AdminMessagesPage({
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {(conversations ?? []).map((c, i) => {
-            const parent = c.parent as { id: string; full_name: string; avatar_url?: string | null };
-            const teacher = c.teacher as { id: string; full_name: string; avatar_url?: string | null };
+            const parent = c.parent as unknown as { id: string; full_name: string; avatar_url?: string | null };
+            const teacher = c.teacher as unknown as { id: string; full_name: string; avatar_url?: string | null };
             const studentName = c.student
               ? ((c.student as any)?.user?.full_name as string | undefined)
               : null;

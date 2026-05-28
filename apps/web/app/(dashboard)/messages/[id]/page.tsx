@@ -36,8 +36,8 @@ export default async function ThreadPage({ params }: { params: { id: string } })
     .order('created_at', { ascending: true })
     .limit(200);
 
-  const parent = conv.parent as { id: string; full_name: string; avatar_url?: string | null };
-  const teacher = conv.teacher as { id: string; full_name: string; avatar_url?: string | null };
+  const parent = conv.parent as unknown as { id: string; full_name: string; avatar_url?: string | null };
+  const teacher = conv.teacher as unknown as { id: string; full_name: string; avatar_url?: string | null };
   const otherParty = userRow.role === 'PARENT' ? teacher : parent;
 
   const studentName = conv.student

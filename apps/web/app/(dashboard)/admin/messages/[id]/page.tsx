@@ -28,8 +28,8 @@ export default async function AdminThreadPage({ params }: { params: { id: string
     .order('created_at', { ascending: true })
     .limit(200);
 
-  const parent = conv.parent as { id: string; full_name: string; avatar_url?: string | null };
-  const teacher = conv.teacher as { id: string; full_name: string; avatar_url?: string | null };
+  const parent = conv.parent as unknown as { id: string; full_name: string; avatar_url?: string | null };
+  const teacher = conv.teacher as unknown as { id: string; full_name: string; avatar_url?: string | null };
   const studentName = conv.student ? ((conv.student as any)?.user?.full_name as string | undefined) : null;
 
   return (
@@ -55,7 +55,7 @@ export default async function AdminThreadPage({ params }: { params: { id: string
       {/* Read-only thread */}
       <div className="space-y-3">
         {(messages ?? []).map((msg) => {
-          const sender = msg.sender as { full_name: string; avatar_url?: string | null };
+          const sender = msg.sender as unknown as { full_name: string; avatar_url?: string | null };
           const isParent = msg.sender_id === (parent as { id: string }).id;
           return (
             <div key={msg.id} className={`flex items-end gap-2 ${isParent ? 'justify-start' : 'justify-end'}`}>

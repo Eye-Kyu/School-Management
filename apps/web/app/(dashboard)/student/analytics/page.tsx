@@ -52,7 +52,7 @@ export default async function StudentAnalyticsPage({ searchParams }: { searchPar
   type SubSummary = { name: string; myAvg: number | null; classAvg: number | null };
   const bySubject: Record<string, SubSummary> = {};
   for (const a of assessments ?? []) {
-    const sub = a.subject as { id: string; name: string } | null;
+    const sub = a.subject as unknown as { id: string; name: string } | null;
     if (!sub) continue;
     if (!bySubject[sub.id]) bySubject[sub.id] = { name: sub.name, myAvg: null, classAvg: null };
     const row = bySubject[sub.id]!;

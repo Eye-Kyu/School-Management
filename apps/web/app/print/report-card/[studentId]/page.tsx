@@ -62,7 +62,7 @@ export default async function ReportCardPage({
   type SubjectRow = { name: string; assessmentCount: number; avg: number | null };
   const bySubject: Record<string, SubjectRow> = {};
   for (const a of assessments ?? []) {
-    const sub = a.subject as { id: string; name: string } | null;
+    const sub = a.subject as unknown as { id: string; name: string } | null;
     if (!sub) continue;
     if (!bySubject[sub.id]) bySubject[sub.id] = { name: sub.name, assessmentCount: 0, avg: null };
     const row = bySubject[sub.id]!;
