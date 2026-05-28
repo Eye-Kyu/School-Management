@@ -21,6 +21,7 @@ import { UsersModule } from './users/users.module';
 import { EventsModule } from './events/events.module';
 import { HomeworkModule } from './homework/homework.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { MessagingModule } from './messaging/messaging.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     EventsModule,
     HomeworkModule,
     NotificationsModule,
+    MessagingModule,
   ],
   controllers: [AppController],
 })

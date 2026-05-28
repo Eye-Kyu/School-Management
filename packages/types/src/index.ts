@@ -24,3 +24,4 @@ export * from './schemas/announcement';
 export * from './schemas/assessments';
 export * from './schemas/event';
 export * from './schemas/homework';
+export * from './schemas/messaging';

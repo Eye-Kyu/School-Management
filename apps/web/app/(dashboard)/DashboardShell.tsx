@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import LogoutButton from './LogoutButton';
 import AvatarDropdown from '@/components/AvatarDropdown';
+import { apiFetch } from '@/lib/api';
 
-type NavItem = { href: string; label: string };
+type NavItem = { href: string; label: string; badgeKey?: string };
 
 const NAV: Record<string, NavItem[]> = {
   ADMIN: [
@@ -22,6 +23,9 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin/attendance',    label: 'Attendance' },
     { href: '/admin/announcements', label: 'Announcements' },
     { href: '/admin/events',        label: 'Events' },
+    { href: '/admin/messages',      label: 'Messages' },
+    { href: '/admin/documents',     label: 'Documents' },
+    { href: '/admin/report-cards',  label: 'Report Cards' },
   ],
   TEACHER: [
     { href: '/teacher',             label: 'Dashboard' },
@@ -29,6 +33,10 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/teacher/attendance',  label: 'Attendance' },
     { href: '/teacher/assessments', label: 'Assessments' },
     { href: '/teacher/homework',    label: 'Homework' },
+    { href: '/teacher/assignments',  label: 'Assignments' },
+    { href: '/teacher/quizzes',     label: 'Quizzes' },
+    { href: '/teacher/gradebook',   label: 'Gradebook' },
+    { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
   STUDENT: [
     { href: '/student',             label: 'Dashboard' },
@@ -36,6 +44,9 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/student/grades',      label: 'Grades' },
     { href: '/student/attendance',  label: 'Attendance' },
     { href: '/student/homework',    label: 'Homework' },
+    { href: '/student/assignments', label: 'Assignments' },
+    { href: '/student/quizzes',     label: 'Quizzes' },
+    { href: '/student/analytics',   label: 'Analytics' },
   ],
   PARENT: [
     { href: '/parent',              label: 'Dashboard' },
@@ -44,21 +55,29 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/parent/attendance',   label: 'Attendance' },
     { href: '/parent/fees',         label: 'Fees' },
     { href: '/parent/homework',     label: 'Homework' },
+    { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
 };
 
-function NavLink({ href, label, active, onClick }: NavItem & { active: boolean; onClick?: () => void }) {
+function NavLink({
+  href, label, active, onClick, badge,
+}: NavItem & { active: boolean; onClick?: () => void; badge?: number }) {
   return (
     <Link
       href={href}
       onClick={onClick}
-      className={`block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+      className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
         active
           ? 'bg-slate-900 text-white'
           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
       }`}
     >
       {label}
+      {badge ? (
+        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -76,8 +95,19 @@ export default function DashboardShell({
 }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [msgUnread, setMsgUnread] = useState(0);
 
-  const links = NAV[role] ?? [];
+  useEffect(() => {
+    if (role === 'TEACHER' || role === 'PARENT') {
+      apiFetch<{ count: number }>('/messaging/unread-count')
+        .then((r) => setMsgUnread(r.count))
+        .catch(() => {});
+    }
+  }, [role, pathname]);
+
+  const links = (NAV[role] ?? []).map((link) =>
+    link.badgeKey === 'messages' ? { ...link, badge: msgUnread || undefined } : link,
+  );
   const close = () => setSidebarOpen(false);
 
   return (

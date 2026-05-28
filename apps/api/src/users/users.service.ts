@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { UpdateProfileInput } from '@school-manager/types';
 
@@ -23,5 +24,39 @@ export class UsersService {
 
     if (error) throw new BadRequestException(error.message);
     return data;
+  }
+
+  async getNotifPrefs(accessToken: string) {
+    const { data } = await this.supabase
+      .forUser(accessToken)
+      .from('notification_preferences')
+      .select('notification_type, email_enabled');
+    return data ?? [];
+  }
+
+  async updateNotifPrefs(
+    accessToken: string,
+    prefs: { type: string; emailEnabled: boolean }[],
+  ) {
+    const client = this.supabase.forUser(accessToken);
+    const { data: userRow } = await client
+      .from('users')
+      .select('id, school_id')
+      .maybeSingle();
+    if (!userRow) throw new BadRequestException('User not found');
+
+    for (const p of prefs) {
+      await client.from('notification_preferences').upsert(
+        {
+          id: randomUUID(),
+          school_id: userRow.school_id,
+          user_id: userRow.id,
+          notification_type: p.type,
+          email_enabled: p.emailEnabled,
+        },
+        { onConflict: 'user_id,notification_type' },
+      );
+    }
+    return { updated: prefs.length };
   }
 }

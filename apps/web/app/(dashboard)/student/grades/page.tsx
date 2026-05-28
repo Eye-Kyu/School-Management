@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 
@@ -11,53 +10,72 @@ export default async function StudentGradesPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: student } = await supabase
-    .from('students')
+  const { data: userRow } = await supabase
+    .from('users')
     .select('id')
-    .eq('users.auth_id', user.id)
+    .eq('auth_id', user.id)
     .maybeSingle();
 
-  const { data: currentTerm } = await supabase
-    .from('terms')
-    .select('id, name')
-    .eq('is_current', true)
+  const { data: student } = await supabase
+    .from('students')
+    .select('id, current_class_id')
+    .eq('user_id', userRow?.id ?? '')
     .maybeSingle();
 
   const { data: terms } = await supabase
     .from('terms')
-    .select('id, name')
+    .select('id, name, is_current')
     .order('start_date', { ascending: false });
 
-  const termId = searchParams.termId ?? currentTerm?.id ?? null;
+  const currentTermId = searchParams.termId
+    ?? (terms ?? []).find((t) => t.is_current)?.id
+    ?? (terms ?? [])[0]?.id;
 
-  let scores: any[] = [];
-  if (student && termId) {
-    const q = supabase
-      .from('scores')
-      .select('id, marks_obtained, comments, assessment:assessments!inner(id, name, max_marks, assessment_date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
-      .eq('student_id', student.id)
-      .eq('assessments.term_id', termId)
-      .order('created_at', { ascending: false });
+  // Load grades via assessments
+  let gradeRows: any[] = [];
+  if (student && currentTermId) {
+    const { data: assessments } = await supabase
+      .from('assessments')
+      .select('id, name, kind, max_score, weight, date, subject:subjects(id, name)')
+      .eq('class_id', student.current_class_id ?? '')
+      .eq('term_id', currentTermId);
 
-    const { data } = await q;
-    scores = data ?? [];
+    const assessmentIds = (assessments ?? []).map((a) => a.id);
+    if (assessmentIds.length > 0) {
+      const { data: grades } = await supabase
+        .from('grades')
+        .select('assessment_id, score, comment')
+        .eq('student_id', student.id)
+        .in('assessment_id', assessmentIds);
+
+      const gradeMap = Object.fromEntries(
+        (grades ?? []).map((g) => [g.assessment_id, g]),
+      );
+      gradeRows = (assessments ?? []).map((a) => ({
+        ...a,
+        grade: gradeMap[a.id] ?? null,
+      }));
+    }
   }
 
   // Group by subject
-  const bySubject: Record<string, { subjectName: string; subjectCode: string; rows: any[] }> = {};
-  for (const row of scores) {
-    const assessment = row.assessment as any;
-    const subject = assessment?.subject;
-    if (!subject) continue;
-    let entry = bySubject[subject.id];
-    if (!entry) {
-      entry = { subjectName: subject.name, subjectCode: subject.code, rows: [] };
-      bySubject[subject.id] = entry;
-    }
-    entry.rows.push(row);
+  type SubjectGroup = { name: string; rows: any[] };
+  const bySubject: Record<string, SubjectGroup> = {};
+  for (const row of gradeRows) {
+    const sub = row.subject as { id: string; name: string } | null;
+    if (!sub) continue;
+    (bySubject[sub.id] ??= { name: sub.name, rows: [] }).rows.push(row);
   }
 
-  const selectedTermName = (terms ?? []).find((t: any) => t.id === termId)?.name ?? 'this term';
+  function weightedAvg(rows: any[]) {
+    const scored = rows.filter((r) => r.grade?.score != null);
+    if (!scored.length) return null;
+    const ws = scored.reduce((s: number, r: any) => s + (r.grade.score / r.max_score) * r.weight, 0);
+    const wt = scored.reduce((s: number, r: any) => s + r.weight, 0);
+    return wt > 0 ? ((ws / wt) * 100).toFixed(1) : null;
+  }
+
+  const selectedTermName = (terms ?? []).find((t) => t.id === currentTermId)?.name ?? 'this term';
 
   return (
     <div className="space-y-6">
@@ -69,96 +87,80 @@ export default async function StudentGradesPage({
         </div>
       </div>
 
-      {/* Term filter + report card link */}
+      {/* Term selector + report card link */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {(terms ?? []).length > 1 && (
-          <div className="flex gap-2 flex-wrap">
-            {(terms ?? []).map((t: any) => (
-              <a
-                key={t.id}
-                href={`/student/grades?termId=${t.id}`}
-                className={`text-sm rounded-full px-3 py-1 font-medium transition-colors ${
-                  t.id === termId
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {t.name}
-              </a>
-            ))}
-          </div>
-        )}
-        {student && termId && (
-          <Link
-            href={`/report-card/${student.id}?termId=${termId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-violet-700 border border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-4 py-1.5 transition-colors"
-          >
-            Print Report Card
-          </Link>
+        {student && currentTermId && (
+          <a href={`/print/report-card/${student.id}?termId=${currentTermId}`} target="_blank" rel="noopener noreferrer"
+            className="text-sm font-medium text-violet-700 border border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-4 py-1.5 transition-colors">
+            🖨 Print report card
+          </a>
         )}
       </div>
 
-      {scores.length === 0 ? (
+      {/* Term selector */}
+      {(terms ?? []).length > 1 && (
+        <div className="flex gap-2 flex-wrap">
+          {(terms ?? []).map((t) => (
+            <a key={t.id} href={`/student/grades?termId=${t.id}`}
+              className={`text-sm rounded-full px-3 py-1 font-medium transition-colors ${
+                t.id === currentTermId ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}>
+              {t.name}
+            </a>
+          ))}
+        </div>
+      )}
+
+      {gradeRows.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl px-5 py-12 text-center text-sm text-slate-400">
           No grades recorded for {selectedTermName} yet.
         </div>
       ) : (
-        <div className="space-y-6">
-          {Object.values(bySubject).map((group) => {
-            const totalMarks = group.rows.reduce((s, r) => s + Number(r.marks_obtained ?? 0), 0);
-            const totalMax = group.rows.reduce((s, r) => s + (r.assessment?.max_marks ?? 0), 0);
-            const pct = totalMax > 0 ? Math.round((totalMarks / totalMax) * 100) : null;
-            const pctColor =
-              pct == null ? 'text-slate-500'
-              : pct >= 75 ? 'text-emerald-600'
-              : pct >= 50 ? 'text-amber-600'
-              : 'text-rose-600';
-
+        <div className="space-y-5">
+          {Object.entries(bySubject).map(([, group]) => {
+            const avg = weightedAvg(group.rows);
             return (
-              <div key={group.subjectCode} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+              <div key={group.name} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-                  <div>
-                    <span className="font-semibold text-slate-800">{group.subjectName}</span>
-                    <span className="ml-2 text-xs text-slate-400 font-mono">{group.subjectCode}</span>
-                  </div>
-                  {pct != null && (
-                    <span className={`text-sm font-bold ${pctColor}`}>{pct}% overall</span>
+                  <h2 className="font-semibold text-slate-800">{group.name}</h2>
+                  {avg && (
+                    <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full ${
+                      parseFloat(avg) >= 70 ? 'bg-emerald-100 text-emerald-700'
+                      : parseFloat(avg) >= 50 ? 'bg-amber-100 text-amber-700'
+                      : 'bg-rose-100 text-rose-600'
+                    }`}>
+                      {avg}%
+                    </span>
                   )}
                 </div>
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                     <tr>
-                      <th className="text-left px-5 py-2 font-medium text-slate-500 text-xs">Assessment</th>
-                      <th className="text-left px-5 py-2 font-medium text-slate-500 text-xs">Date</th>
-                      <th className="text-right px-5 py-2 font-medium text-slate-500 text-xs">Marks</th>
-                      <th className="text-right px-5 py-2 font-medium text-slate-500 text-xs">Out of</th>
-                      <th className="text-right px-5 py-2 font-medium text-slate-500 text-xs">%</th>
+                      <th className="px-5 py-2 text-left font-medium">Assessment</th>
+                      <th className="px-4 py-2 text-center font-medium">Type</th>
+                      <th className="px-4 py-2 text-center font-medium">Score</th>
+                      <th className="px-4 py-2 text-center font-medium">%</th>
+                      <th className="px-5 py-2 text-left font-medium hidden sm:table-cell">Comment</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {group.rows.map((row: any) => {
-                      const a = row.assessment;
-                      const m = row.marks_obtained;
-                      const p = m != null ? Math.round((Number(m) / a.max_marks) * 100) : null;
-                      const pc =
-                        p == null ? 'text-slate-400'
-                        : p >= 75 ? 'text-emerald-600'
-                        : p >= 50 ? 'text-amber-600'
-                        : 'text-rose-600';
+                  <tbody>
+                    {group.rows.map((row) => {
+                      const score = row.grade?.score;
+                      const pct = typeof score === 'number' ? ((score / row.max_score) * 100).toFixed(1) : null;
+                      const color = pct === null ? 'text-slate-400'
+                        : parseFloat(pct) >= 70 ? 'text-emerald-700 font-semibold'
+                        : parseFloat(pct) >= 50 ? 'text-amber-600 font-semibold'
+                        : 'text-rose-600 font-semibold';
                       return (
-                        <tr key={row.id} className="hover:bg-slate-50">
-                          <td className="px-5 py-2.5 font-medium text-slate-700">{a.name}</td>
-                          <td className="px-5 py-2.5 text-slate-500">
-                            {a.assessment_date ? new Date(a.assessment_date).toLocaleDateString() : '—'}
+                        <tr key={row.id} className="border-t border-slate-100">
+                          <td className="px-5 py-2.5 text-slate-800">{row.name}</td>
+                          <td className="px-4 py-2.5 text-center text-slate-500 text-xs">{row.kind}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            {typeof score === 'number' ? `${score} / ${row.max_score}` : '—'}
                           </td>
-                          <td className="px-5 py-2.5 text-right font-semibold text-slate-800">
-                            {m != null ? Number(m) : '—'}
-                          </td>
-                          <td className="px-5 py-2.5 text-right text-slate-500">{a.max_marks}</td>
-                          <td className={`px-5 py-2.5 text-right font-semibold ${pc}`}>
-                            {p != null ? `${p}%` : '—'}
+                          <td className={`px-4 py-2.5 text-center ${color}`}>{pct ? `${pct}%` : '—'}</td>
+                          <td className="px-5 py-2.5 text-slate-400 text-xs hidden sm:table-cell">
+                            {row.grade?.comment ?? ''}
                           </td>
                         </tr>
                       );

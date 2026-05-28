@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 
-export type NotifType = 'ABSENT_STUDENT' | 'NEW_ANNOUNCEMENT' | 'HOMEWORK_ASSIGNED';
+export type NotifType = 'ABSENT_STUDENT' | 'NEW_ANNOUNCEMENT' | 'HOMEWORK_ASSIGNED' | 'NEW_MESSAGE';
 
 interface BrevoClient {
   sendTransacEmail(params: {
@@ -27,6 +27,8 @@ export interface NotifPayload {
   metadata?: Record<string, unknown>;
   /** When true, pre-fills email_sent_at so the dispatcher skips delivery (in-app only). */
   skipExternalChannels?: boolean;
+  /** ISO timestamp — notification is hidden until this time (quiet hours). */
+  deliverAfter?: string;
 }
 
 @Injectable()
@@ -68,6 +70,7 @@ export class NotificationsService {
       metadata: p.metadata ?? null,
       email_sent_at: p.skipExternalChannels ? now : null,
       sms_sent_at: now, // SMS not implemented; pre-fill so dispatcher skips this column
+      deliver_after: p.deliverAfter ?? null,
     }));
 
     const { error } = await this.supabase.admin.from('notifications').insert(rows);
@@ -82,6 +85,7 @@ export class NotificationsService {
       .forUser(accessToken)
       .from('notifications')
       .select('id, type, title, body, metadata, is_read, created_at')
+      .or(`deliver_after.is.null,deliver_after.lte.${new Date().toISOString()}`)
       .order('created_at', { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -116,10 +120,12 @@ export class NotificationsService {
   async dispatch(): Promise<void> {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
+    const now = new Date().toISOString();
     const { data: rows, error } = await this.supabase.admin
       .from('notifications')
       .select('id, recipient_id, type, title, body, email_sent_at')
       .is('email_sent_at', null)
+      .or(`deliver_after.is.null,deliver_after.lte.${now}`)
       .gte('created_at', cutoff)
       .limit(100);
 
@@ -159,7 +165,8 @@ export class NotificationsService {
 
       let emailSentAt: string | null = null;
       if (emailEnabled && user.email) {
-        const sent = await this.sendEmail(senderEmail, senderName, user.email, row.title, row.body);
+        const unsubToken = this.buildUnsubscribeToken(row.recipient_id, row.type);
+        const sent = await this.sendEmail(senderEmail, senderName, user.email, row.title, row.body, unsubToken);
         if (sent) emailSentAt = new Date().toISOString();
       } else {
         // No email address or user opted out — mark done so it's not re-attempted
@@ -175,20 +182,73 @@ export class NotificationsService {
     }
   }
 
+  async sendTest(accessToken: string, title?: string, message?: string): Promise<void> {
+    const { data: userRow } = await this.supabase
+      .forUser(accessToken)
+      .from('users')
+      .select('id, school_id')
+      .maybeSingle();
+    if (!userRow) return;
+
+    await this.queue([{
+      schoolId: userRow.school_id,
+      recipientId: userRow.id,
+      type: 'NEW_ANNOUNCEMENT',
+      title: title ?? 'Test notification',
+      body: message ?? 'This is a test notification from your admin panel.',
+    }]);
+  }
+
+  async handleUnsubscribe(token: string): Promise<{ message: string }> {
+    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+    let uid: string, type: string;
+    try {
+      const decoded = Buffer.from(token, 'base64url').toString('utf8');
+      const payload = JSON.parse(decoded) as { uid: string; type: string; sig: string };
+      const expected = createHmac('sha256', secret)
+        .update(`${payload.uid}:${payload.type}`)
+        .digest('hex');
+      if (payload.sig !== expected) return { message: 'Invalid unsubscribe link.' };
+      uid = payload.uid;
+      type = payload.type;
+    } catch {
+      return { message: 'Invalid unsubscribe link.' };
+    }
+
+    await this.supabase.admin
+      .from('notification_preferences')
+      .upsert(
+        { id: randomUUID(), user_id: uid, notification_type: type, email_enabled: false, school_id: '' },
+        { onConflict: 'user_id,notification_type' },
+      );
+    return { message: `You have been unsubscribed from ${type.toLowerCase().replace(/_/g, ' ')} email notifications.` };
+  }
+
+  private buildUnsubscribeToken(userId: string, notifType: string): string {
+    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+    const sig = createHmac('sha256', secret).update(`${userId}:${notifType}`).digest('hex');
+    return Buffer.from(JSON.stringify({ uid: userId, type: notifType, sig })).toString('base64url');
+  }
+
   private async sendEmail(
     senderEmail: string,
     senderName: string,
     to: string,
     subject: string,
     textContent: string,
+    unsubscribeToken?: string,
   ): Promise<boolean> {
     if (!this.brevo) return false;
+    const appUrl = this.config.get<string>('NEXT_PUBLIC_APP_URL') ?? 'https://schoolmanager.app';
+    const unsubscribeLink = unsubscribeToken
+      ? `\n\n---\nTo stop receiving these emails: ${appUrl}/api/notifications/unsubscribe?token=${unsubscribeToken}`
+      : '';
     try {
       await this.brevo.sendTransacEmail({
         sender: { email: senderEmail, name: senderName },
         to: [{ email: to }],
         subject,
-        textContent,
+        textContent: textContent + unsubscribeLink,
       });
       return true;
     } catch (err) {

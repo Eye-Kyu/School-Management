@@ -12,11 +12,15 @@ export default async function ProfilePage() {
     .eq('auth_id', user.id)
     .maybeSingle();
 
+  const { data: prefs } = await supabase
+    .from('notification_preferences')
+    .select('notification_type, email_enabled');
+
   return (
     <div className="space-y-6 max-w-lg">
       <div>
         <h1 className="text-2xl font-semibold">My profile</h1>
-        <p className="text-sm text-slate-500 mt-1">Update your name, phone number, or password.</p>
+        <p className="text-sm text-slate-500 mt-1">Update your name, phone number, password, or notification preferences.</p>
       </div>
       <ProfileClient
         fullName={userRow?.full_name ?? ''}
@@ -24,6 +28,7 @@ export default async function ProfilePage() {
         phone={userRow?.phone ?? ''}
         role={userRow?.role ?? ''}
         avatarUrl={userRow?.avatar_url ?? null}
+        notifPrefs={(prefs ?? []) as { notification_type: string; email_enabled: boolean }[]}
       />
     </div>
   );

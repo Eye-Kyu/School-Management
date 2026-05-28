@@ -1,4 +1,4 @@
-import { Body, Controller, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
@@ -20,5 +20,18 @@ export class UsersController {
     @Body(new ZodValidationPipe(UpdateProfileInput)) input: UpdateProfileInputType,
   ) {
     return this.users.updateMe(token, user.id, input);
+  }
+
+  @Get('me/notification-preferences')
+  getNotifPrefs(@AccessToken() token: string) {
+    return this.users.getNotifPrefs(token);
+  }
+
+  @Patch('me/notification-preferences')
+  updateNotifPrefs(
+    @AccessToken() token: string,
+    @Body() body: { prefs: { type: string; emailEnabled: boolean }[] },
+  ) {
+    return this.users.updateNotifPrefs(token, body.prefs ?? []);
   }
 }
