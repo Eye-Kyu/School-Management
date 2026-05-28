@@ -207,7 +207,8 @@ export class MessagingService {
 
       const classIds = [...new Set(
         (guardians ?? [])
-          .map((g) => (g.student as { current_class_id: string })?.current_class_id)
+          .flatMap((g) => (g.student as unknown as { current_class_id: string }[]) ?? [])
+          .map((s) => s.current_class_id)
           .filter(Boolean),
       )];
 
@@ -221,7 +222,7 @@ export class MessagingService {
       // Deduplicate by teacher user_id
       const seen = new Set<string>();
       const teachers = (assignments ?? [])
-        .map((a) => a.teacher as { user_id: string; user: { id: string; full_name: string; avatar_url?: string } })
+        .flatMap((a) => (a.teacher as unknown as { user_id: string; user: { id: string; full_name: string; avatar_url?: string } }[]) ?? [])
         .filter((t) => t?.user_id && !seen.has(t.user_id) && seen.add(t.user_id));
 
       const students = (guardians ?? []).map((g) => g.student);
