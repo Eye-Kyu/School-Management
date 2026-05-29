@@ -2,7 +2,7 @@
  * Notification service unit tests — mocks Supabase, no network required.
  */
 
-import { NotificationsService, type NotifPayload } from '../notifications/notifications.service';
+import { type NotifPayload } from '../notifications/notifications.service';
 
 // ── Profanity filter (internal helper) ─────────────────────
 // The function is inside MessagingService; test equivalent logic here.

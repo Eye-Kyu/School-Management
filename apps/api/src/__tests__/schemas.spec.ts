@@ -4,17 +4,13 @@
  * and rejects invalid input.
  */
 
-// Import schema source files directly (4 levels up to monorepo root from src/__tests__/)
-/* eslint-disable @typescript-eslint/no-var-requires */
-const { CreateStudentInput, UpdateProfileInput } =
-  require('../../../../packages/types/src/schemas/user');
-const { MarkAttendanceInput } =
-  require('../../../../packages/types/src/schemas/attendance');
-const { CreateAnnouncementInput } =
-  require('../../../../packages/types/src/schemas/announcement');
-const { CreateConversationInput, SendMessageInput } =
-  require('../../../../packages/types/src/schemas/messaging');
-/* eslint-enable @typescript-eslint/no-var-requires */
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
+// Imported directly from source to bypass ts-jest workspace package resolution
+const { CreateStudentInput } = require('../../../../packages/types/src/schemas/user');
+const { MarkAttendanceInput } = require('../../../../packages/types/src/schemas/attendance');
+const { CreateAnnouncementInput } = require('../../../../packages/types/src/schemas/announcement');
+const { CreateConversationInput, SendMessageInput } = require('../../../../packages/types/src/schemas/messaging');
+/* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 
 const UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
 
