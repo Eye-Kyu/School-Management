@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import NotificationsMarkRead from './NotificationsMarkRead';
+import AcknowledgeButton from './AcknowledgeButton';
 
 type Notification = {
   id: string;
@@ -8,6 +9,7 @@ type Notification = {
   title: string;
   body: string;
   is_read: boolean;
+  acknowledged_at: string | null;
   created_at: string;
 };
 
@@ -56,7 +58,7 @@ export default async function NotificationsPage() {
   if (userRow) {
     const { data } = await supabase
       .from('notifications')
-      .select('id, type, title, body, is_read, created_at')
+      .select('id, type, title, body, is_read, acknowledged_at, created_at')
       .order('created_at', { ascending: false })
       .limit(50);
     notifications = data ?? [];
@@ -109,6 +111,11 @@ export default async function NotificationsPage() {
                     <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {n.type === 'ABSENT_STUDENT' && (
+                      n.acknowledged_at
+                        ? <span className="text-xs text-emerald-600 font-medium">✓ Acknowledged</span>
+                        : <AcknowledgeButton id={n.id} />
+                    )}
                     {!n.is_read && (
                       <span className="h-2 w-2 rounded-full bg-blue-500" />
                     )}

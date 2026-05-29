@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
+import AnalyticsExport from './AnalyticsExport';
 
 function StatCard({ label, value, sub, color = 'text-slate-800' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
@@ -119,6 +120,12 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
           <p className="text-sm text-slate-500 mt-0.5">School-wide performance overview.</p>
         </div>
       </div>
+
+      <AnalyticsExport
+        attendanceRows={attByClass.map((c) => ({ class: c.name, attendance_rate: `${c.rate!.toFixed(1)}%` }))}
+        passRateRows={passRates.map((s) => ({ subject: s.name, pass_rate: `${s.rate.toFixed(1)}%`, total_grades: s.total }))}
+        feeRows={{ total_due: totalDue, total_paid: totalPaid, outstanding: totalOutstanding, collection_rate: `${feeCollectionRate.toFixed(1)}%` }}
+      />
 
       {/* Term selector */}
       <div className="flex gap-2 flex-wrap">

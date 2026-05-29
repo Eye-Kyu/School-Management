@@ -112,6 +112,15 @@ export class NotificationsService {
     if (error) throw new Error(error.message);
   }
 
+  async acknowledge(accessToken: string, id: string): Promise<void> {
+    const { error } = await this.supabase
+      .forUser(accessToken)
+      .from('notifications')
+      .update({ acknowledged_at: new Date().toISOString(), is_read: true })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+
   /**
    * Dispatcher — called by the scheduler every minute.
    * Sends pending email notifications via Brevo.

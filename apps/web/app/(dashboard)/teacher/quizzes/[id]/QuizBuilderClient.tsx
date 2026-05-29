@@ -16,8 +16,101 @@ type Attempt = {
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
+function ShortAnswerReview({
+  attempts, questions, quizId, onScoreUpdate,
+}: {
+  attempts: Attempt[];
+  questions: Question[];
+  quizId: string;
+  onScoreUpdate: (attemptId: string, newScore: number) => void;
+}) {
+  const supabase = createClient();
+  const [scores, setScores] = useState<Record<string, Record<string, string>>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const submitted = attempts.filter((a) => a.submitted_at);
+
+  async function finalise(attempt: Attempt) {
+    const key = attempt.id;
+    setSaving((p) => ({ ...p, [key]: true }));
+
+    // Calculate total score: MCQ score already in attempt + short-answer scores entered
+    const saBonus = questions.reduce((sum, q) => {
+      const raw = scores[key]?.[q.id];
+      return sum + (raw ? parseFloat(raw) || 0 : 0);
+    }, 0);
+    const newScore = (attempt.score ?? 0) + saBonus;
+
+    await supabase.from('quiz_attempts')
+      .update({ score: newScore })
+      .eq('id', attempt.id);
+
+    // Write to grades table
+    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    await supabase.from('grades').upsert({
+      school_id: userRow?.school_id,
+      assessment_id: quizId, // quiz acts as an assessment
+      student_id: attempt.student_id,
+      score: newScore,
+      comment: `Quiz score (${attempt.max_score ? `${newScore}/${attempt.max_score}` : newScore})`,
+      graded_by_id: userRow?.id,
+      graded_at: new Date().toISOString(),
+    }, { onConflict: 'assessment_id,student_id' });
+
+    onScoreUpdate(attempt.id, newScore);
+    setSaving((p) => ({ ...p, [key]: false }));
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
+        Short-answer review ({submitted.length} submissions)
+      </h2>
+      {submitted.map((attempt) => {
+        const answers = attempt as unknown as { answers: Record<string, string> };
+        const key = attempt.id;
+        return (
+          <div key={key} className="bg-white border border-blue-100 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="font-medium text-slate-800">{(attempt.student as any)?.user?.full_name}</p>
+              <button
+                onClick={() => finalise(attempt)}
+                disabled={saving[key]}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {saving[key] ? 'Saving…' : 'Finalise & push to grades'}
+              </button>
+            </div>
+            {questions.map((q) => (
+              <div key={q.id} className="space-y-2">
+                <p className="text-sm font-medium text-slate-700">{q.body} <span className="text-xs text-slate-400">({q.points} pt{q.points !== 1 ? 's' : ''})</span></p>
+                <div className="bg-slate-50 rounded-lg px-4 py-2 text-sm text-slate-600 italic">
+                  {(answers as any).answers?.[q.id] ?? <span className="text-slate-400">No answer</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-500">Score:</label>
+                  <input
+                    type="number" min={0} max={q.points} step={0.5}
+                    value={scores[key]?.[q.id] ?? ''}
+                    onChange={(e) => setScores((p) => ({
+                      ...p,
+                      [key]: { ...(p[key] ?? {}), [q.id]: e.target.value },
+                    }))}
+                    className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-sm text-center"
+                    placeholder={`/ ${q.points}`}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function QuizBuilderClient({
-  quiz, initialQuestions, attempts,
+  quiz, initialQuestions, attempts: initialAttempts,
 }: {
   quiz: { id: string; is_published: boolean };
   initialQuestions: Question[];
@@ -25,6 +118,7 @@ export default function QuizBuilderClient({
 }) {
   const supabase = createClient();
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
+  const [attempts, setAttempts] = useState<Attempt[]>(initialAttempts);
   const [adding, setAdding] = useState<'MCQ' | 'SHORT_ANSWER' | null>(null);
   const [body, setBody] = useState('');
   const [points, setPoints] = useState('1');
@@ -159,6 +253,20 @@ export default function QuizBuilderClient({
             </button>
           </div>
         </form>
+      )}
+
+      {/* Short-answer review */}
+      {attempts.length > 0 && questions.some((q) => q.kind === 'SHORT_ANSWER') && (
+        <ShortAnswerReview
+          attempts={attempts}
+          questions={questions.filter((q) => q.kind === 'SHORT_ANSWER')}
+          quizId={quiz.id}
+          onScoreUpdate={(attemptId, newScore) =>
+            setAttempts((prev) =>
+              prev.map((a) => a.id === attemptId ? { ...a, score: newScore } : a)
+            )
+          }
+        />
       )}
 
       {/* Results */}

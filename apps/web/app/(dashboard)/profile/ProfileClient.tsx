@@ -78,13 +78,18 @@ export default function ProfileClient({
     try {
       await apiFetch('/users/me', {
         method: 'PATCH',
-        body: JSON.stringify({ fullName: fullName.trim(), avatarUrl: url }),
+        body: JSON.stringify({ fullName: fullName.trim() || 'User', avatarUrl: url }),
       });
       setAvatarUrl(url);
       setShowPresets(false);
       router.refresh();
-    } catch {
-      setAvatarError('Failed to save avatar. Please try again.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save avatar';
+      // Guide the user if the column doesn't exist yet
+      const hint = msg.toLowerCase().includes('avatar_url')
+        ? ' — run migration 20260526000010_add_avatar_url.sql in Supabase SQL editor first.'
+        : '';
+      setAvatarError(msg + hint);
     } finally {
       setAvatarSaving(false);
     }
@@ -93,8 +98,14 @@ export default function ProfileClient({
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setAvatarError('Only JPG, PNG or WebP images are supported.');
+      e.target.value = '';
+      return;
+    }
     if (file.size > 2 * 1024 * 1024) {
       setAvatarError('Photo must be under 2 MB.');
+      e.target.value = '';
       return;
     }
 

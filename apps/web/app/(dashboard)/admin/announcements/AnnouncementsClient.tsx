@@ -28,9 +28,11 @@ const AUDIENCE_LABELS: Record<string, string> = {
 export default function AnnouncementsClient({
   announcements: initial,
   classes,
+  statsMap = {},
 }: {
   announcements: Announcement[];
   classes: ClassOption[];
+  statsMap?: Record<string, { sent: number; read: number }>;
 }) {
   const router = useRouter();
   const [announcements, setAnnouncements] = useState(initial);
@@ -192,6 +194,16 @@ export default function AnnouncementsClient({
                   <p className="font-medium">{a.title}</p>
                   <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{a.body}</p>
                   <p className="text-xs text-slate-400 mt-2">Posted by {a.author?.full_name}</p>
+                  {statsMap[a.id] && (
+                    <div className="flex gap-3 mt-2">
+                      <span className="text-xs text-slate-500">
+                        📬 {statsMap[a.id]!.sent} notified
+                      </span>
+                      <span className="text-xs text-emerald-600">
+                        👁 {statsMap[a.id]!.read} read ({statsMap[a.id]!.sent > 0 ? Math.round((statsMap[a.id]!.read / statsMap[a.id]!.sent) * 100) : 0}%)
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(a.id)}

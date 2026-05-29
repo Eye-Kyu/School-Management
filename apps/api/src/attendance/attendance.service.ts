@@ -234,10 +234,25 @@ export class AttendanceService {
       // Look up each absent student's name and their guardians
       const { data: guardianRows } = await this.supabase.admin
         .from('guardians')
-        .select('user_id, student:students!student_id(user:users!user_id(full_name))')
+        .select('user_id, student_id, student:students!student_id(user:users!user_id(full_name))')
         .in('student_id', absentStudentIds);
 
       if (!guardianRows?.length) return;
+
+      // Throttle: skip guardians who already received an absence notification for
+      // this student today (handles re-marking attendance without double-notifying).
+      const todayStart = `${date}T00:00:00.000Z`;
+      const todayEnd   = `${date}T23:59:59.999Z`;
+      const { data: sentToday } = await this.supabase.admin
+        .from('notifications')
+        .select('recipient_id, metadata')
+        .eq('type', 'ABSENT_STUDENT')
+        .gte('created_at', todayStart)
+        .lte('created_at', todayEnd);
+
+      const alreadySent = new Set(
+        (sentToday ?? []).map((n) => `${n.recipient_id}:${(n.metadata as Record<string,string>)?.studentId}`),
+      );
 
       // Look up guardian user rows for school_id scoping
       const guardianUserIds = guardianRows.map((g) => g.user_id);
@@ -250,7 +265,11 @@ export class AttendanceService {
       const guardianSchoolIds = new Set((guardianUsers ?? []).map((u) => u.id));
 
       const payloads = guardianRows
-        .filter((g) => guardianSchoolIds.has(g.user_id))
+        .filter((g) => {
+          if (!guardianSchoolIds.has(g.user_id)) return false;
+          // Skip if already notified for this student today
+          return !alreadySent.has(`${g.user_id}:${g.student_id}`);
+        })
         .map((g) => {
           const studentName = (g.student as { user?: { full_name?: string } })?.user?.full_name ?? 'Your child';
           return {
@@ -259,7 +278,7 @@ export class AttendanceService {
             type: 'ABSENT_STUDENT' as const,
             title: `Absence alert — ${studentName}`,
             body: `${studentName} was marked absent on ${date}. Please contact the school if this is incorrect.`,
-            metadata: { date, classId },
+            metadata: { date, classId, studentId: g.student_id },
           };
         });
 

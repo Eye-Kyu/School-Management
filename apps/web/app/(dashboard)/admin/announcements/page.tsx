@@ -5,7 +5,7 @@ import AnnouncementsClient from './AnnouncementsClient';
 export default async function AdminAnnouncementsPage() {
   const supabase = createClient();
 
-  const [{ data: announcements }, { data: classes }] = await Promise.all([
+  const [{ data: announcements }, { data: classes }, { data: notifStats }] = await Promise.all([
     supabase
       .from('announcements')
       .select('id, title, body, audience, target_grade_level, target_class_id, published_at, author:users!inner(full_name)')
@@ -15,7 +15,21 @@ export default async function AdminAnnouncementsPage() {
       .select('id, name, grade_level')
       .eq('is_active', true)
       .order('name'),
+    supabase
+      .from('notifications')
+      .select('metadata, is_read')
+      .eq('type', 'NEW_ANNOUNCEMENT'),
   ]);
+
+  // Build per-announcement delivery stats
+  const statsMap: Record<string, { sent: number; read: number }> = {};
+  for (const n of notifStats ?? []) {
+    const id = (n.metadata as Record<string, string> | null)?.announcementId;
+    if (!id) continue;
+    if (!statsMap[id]) statsMap[id] = { sent: 0, read: 0 };
+    statsMap[id]!.sent++;
+    if (n.is_read) statsMap[id]!.read++;
+  }
 
   return (
     <div className="space-y-6">
@@ -27,7 +41,7 @@ export default async function AdminAnnouncementsPage() {
         </div>
       </div>
 
-      <AnnouncementsClient announcements={(announcements ?? []) as any[]} classes={classes ?? []} />
+      <AnnouncementsClient announcements={(announcements ?? []) as any[]} classes={classes ?? []} statsMap={statsMap} />
     </div>
   );
 }

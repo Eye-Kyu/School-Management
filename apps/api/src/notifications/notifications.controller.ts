@@ -1,18 +1,22 @@
-import { Controller, Get, Patch, Post, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken } from '../common/decorators/current-user.decorator';
 
+@ApiTags('notifications')
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly svc: NotificationsService) {}
 
+  @ApiBearerAuth()
   @UseGuards(AuthGuard)
   @Get()
   list(@AccessToken() token: string) {
     return this.svc.list(token);
   }
 
+  @ApiBearerAuth()
   @UseGuards(AuthGuard)
   @Get('unread-count')
   async unreadCount(@AccessToken() token: string) {
@@ -20,12 +24,22 @@ export class NotificationsController {
     return { count };
   }
 
+  @ApiBearerAuth()
   @UseGuards(AuthGuard)
   @Patch('read')
   markRead(@AccessToken() token: string, @Body() body: { ids?: string[] }) {
     return this.svc.markRead(token, body.ids ?? []);
   }
 
+  @ApiOperation({ summary: 'Acknowledge an absence notification (marks it seen by parent)' })
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Patch(':id/acknowledge')
+  acknowledge(@AccessToken() token: string, @Param('id') id: string) {
+    return this.svc.acknowledge(token, id);
+  }
+
+  @ApiBearerAuth()
   @UseGuards(AuthGuard)
   @Post('test')
   sendTest(@AccessToken() token: string, @Body() body: { title?: string; message?: string }) {

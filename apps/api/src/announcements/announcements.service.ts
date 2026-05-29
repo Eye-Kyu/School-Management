@@ -74,6 +74,7 @@ export class AnnouncementsService {
     this.queueAnnouncementNotifications(
       school.id,
       authorRow.id,
+      id,
       input.title,
       input.body,
       input.audience,
@@ -87,6 +88,7 @@ export class AnnouncementsService {
   private async queueAnnouncementNotifications(
     schoolId: string,
     authorId: string,
+    announcementId: string,
     title: string,
     body: string,
     audience: string,
@@ -109,7 +111,7 @@ export class AnnouncementsService {
       type: 'NEW_ANNOUNCEMENT' as const,
       title: `New announcement: ${title}`,
       body: bodyPreview,
-      metadata: { audience, targetGradeLevel, targetClassId },
+      metadata: { announcementId, audience, targetGradeLevel, targetClassId },
       // In-app only — skip email/SMS dispatch
       skipExternalChannels: true,
     }));

@@ -11,6 +11,7 @@ if (!('WebSocket' in globalThis)) {
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
@@ -37,6 +38,16 @@ async function bootstrap() {
   // For decorators-based validation (class-validator). Zod schemas use
   // ZodValidationPipe per-route - see src/common/pipes/zod-validation.pipe.ts
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+  // ---------- OpenAPI / Swagger ----------
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('School Manager API')
+    .setDescription('REST API for the School Manager platform')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
 
   const port = Number(process.env.API_PORT) || 4000;
   await app.listen(port);

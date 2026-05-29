@@ -62,7 +62,8 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/parent/grades',       label: 'Grades' },
     { href: '/parent/attendance',   label: 'Attendance' },
     { href: '/parent/fees',         label: 'Fees' },
-    { href: '/parent/homework',     label: 'Homework' },
+    { href: '/parent/homework',           label: 'Homework' },
+    { href: '/parent/permission-slips',   label: 'Permission Slips' },
     { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
 };
