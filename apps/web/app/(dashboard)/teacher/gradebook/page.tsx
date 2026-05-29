@@ -7,18 +7,21 @@ export default async function GradebookPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: teacher } = await supabase
-    .from('teachers')
-    .select('id')
-    .eq('user_id', (await supabase.from('users').select('id').eq('auth_id', user.id).maybeSingle()).data?.id ?? '')
-    .maybeSingle();
+  // Two-step lookup: auth user → users row → teachers row
+  const { data: userRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
 
-  const [{ data: assignments }, { data: classes }, { data: subjects }, { data: terms }] = await Promise.all([
-    supabase
-      .from('subject_assignments')
-      .select('class_id, subject_id, class:classes(id, name, grade_level), subject:subjects(id, name)')
-      .eq('teacher_id', teacher?.id ?? ''),
-    supabase.from('classes').select('id, name, grade_level').eq('is_active', true).order('grade_level'),
+  const { data: teacher } = userRow
+    ? await supabase.from('teachers').select('id').eq('user_id', userRow.id).maybeSingle()
+    : { data: null };
+
+  const [{ data: assignments }, { data: subjects }, { data: terms }] = await Promise.all([
+    teacher
+      ? supabase
+          .from('subject_assignments')
+          .select('class_id, subject_id, class:classes!class_id(id, name, grade_level), subject:subjects!subject_id(id, name)')
+          .eq('teacher_id', teacher.id)
+      : { data: [] },
     supabase.from('subjects').select('id, name').order('name'),
     supabase.from('terms').select('id, name, is_current').order('start_date', { ascending: false }),
   ]);
@@ -27,7 +30,7 @@ export default async function GradebookPage() {
   const seen = new Set<string>();
   const myClasses = (assignments ?? [])
     .map((a) => a.class as unknown as { id: string; name: string; grade_level: number })
-    .filter((c) => c && !seen.has(c.id) && seen.add(c.id));
+    .filter((c) => c?.id && !seen.has(c.id) && seen.add(c.id));
 
   const currentTerm = (terms ?? []).find((t) => t.is_current) ?? (terms ?? [])[0];
 

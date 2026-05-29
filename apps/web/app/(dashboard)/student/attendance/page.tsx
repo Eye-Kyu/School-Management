@@ -13,11 +13,11 @@ export default async function StudentAttendancePage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: student } = await supabase
-    .from('students')
-    .select('id, user:users!inner(full_name)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _uRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
+  const { data: student } = _uRow
+    ? await supabase.from('students').select('id').eq('user_id', _uRow.id).maybeSingle()
+    : { data: null };
 
   const { data: currentTerm } = await supabase
     .from('terms')

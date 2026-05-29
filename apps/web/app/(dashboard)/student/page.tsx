@@ -10,11 +10,13 @@ export default async function StudentHomePage() {
 
   const today = todayEnum() as Day;
 
-  const { data: student } = await supabase
-    .from('students')
-    .select('id, current_class_id, user:users!inner(full_name)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _uRow } = await supabase
+    .from('users').select('id, full_name').eq('auth_id', user.id).maybeSingle();
+  const { data: student } = _uRow
+    ? await supabase.from('students').select('id, current_class_id').eq('user_id', _uRow.id).maybeSingle()
+    : { data: null };
+  // Attach name for greeting
+  const studentUser = _uRow;
 
   const classId = student?.current_class_id;
   const studentId = student?.id;
@@ -69,7 +71,7 @@ export default async function StudentHomePage() {
     .order('starts_at')
     .limit(10);
 
-  const firstName = (student?.user as any)?.full_name?.split(' ')[0] ?? 'Student';
+  const firstName = (studentUser?.full_name as string | null)?.split(' ')[0] ?? 'Student';
 
   return (
     <div className="space-y-8">

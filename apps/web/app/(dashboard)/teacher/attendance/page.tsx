@@ -18,12 +18,17 @@ export default async function TeacherAttendancePage({
   const date = searchParams.date ?? todayIso();
   const selectedClassId = searchParams.classId ?? '';
 
-  // Fetch teacher record (includes which class they are class teacher of)
-  const { data: teacher } = await supabase
-    .from('teachers')
-    .select('id, is_class_teacher_of, user:users!inner(auth_id)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  // Resolve user row, then look up teacher record
+  const { data: userRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
+
+  const { data: teacher } = userRow
+    ? await supabase
+        .from('teachers')
+        .select('id, is_class_teacher_of')
+        .eq('user_id', userRow.id)
+        .maybeSingle()
+    : { data: null };
 
   const { data: assignments } = teacher
     ? await supabase

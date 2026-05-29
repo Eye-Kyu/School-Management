@@ -7,11 +7,11 @@ export default async function TeacherAssessmentsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: teacher } = await supabase
-    .from('teachers')
-    .select('id')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _uRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
+  const { data: teacher } = _uRow
+    ? await supabase.from('teachers').select('id').eq('user_id', _uRow.id).maybeSingle()
+    : { data: null };
 
   const { data: currentTerm } = await supabase
     .from('terms')

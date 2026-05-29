@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
-import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './auth/auth.module';
 import { AttendanceModule } from './attendance/attendance.module';
@@ -27,7 +26,6 @@ import { MessagingModule } from './messaging/messaging.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    PrismaModule,
     SupabaseModule,
     AuthModule,
     AttendanceModule,

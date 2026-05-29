@@ -10,11 +10,12 @@ export default async function TeacherHomePage() {
 
   const today = todayEnum() as Day;
 
-  const { data: teacher } = await supabase
-    .from('teachers')
-    .select('id, user:users!inner(full_name)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _uRow } = await supabase
+    .from('users').select('id, full_name').eq('auth_id', user.id).maybeSingle();
+  const { data: teacher } = _uRow
+    ? await supabase.from('teachers').select('id').eq('user_id', _uRow.id).maybeSingle()
+    : { data: null };
+  const teacherFullName = _uRow?.full_name as string | null;
 
   const { data: todaySlots } = teacher
     ? await supabase
@@ -64,7 +65,7 @@ export default async function TeacherHomePage() {
     .order('starts_at')
     .limit(10);
 
-  const firstName = (teacher?.user as any)?.full_name?.split(' ')[0] ?? 'Teacher';
+  const firstName = teacherFullName?.split(' ')[0] ?? 'Teacher';
 
   return (
     <div className="space-y-8">

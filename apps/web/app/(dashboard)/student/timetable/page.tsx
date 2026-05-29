@@ -9,11 +9,11 @@ export default async function StudentTimetablePage() {
 
   const today = todayEnum() as Day;
 
-  const { data: student } = await supabase
-    .from('students')
-    .select('current_class_id, user:users!inner(full_name)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _uRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
+  const { data: student } = _uRow
+    ? await supabase.from('students').select('current_class_id').eq('user_id', _uRow.id).maybeSingle()
+    : { data: null };
 
   const classId = student?.current_class_id;
 

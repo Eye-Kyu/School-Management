@@ -9,11 +9,11 @@ export default async function TeacherSchedulePage() {
 
   const today = todayEnum() as Day;
 
-  const { data: teacher } = await supabase
-    .from('teachers')
-    .select('id, user:users!inner(full_name)')
-    .eq('users.auth_id', user.id)
-    .maybeSingle();
+  const { data: _userRow } = await supabase
+    .from('users').select('id').eq('auth_id', user.id).maybeSingle();
+  const { data: teacher } = _userRow
+    ? await supabase.from('teachers').select('id').eq('user_id', _userRow.id).maybeSingle()
+    : { data: null };
 
   const { data: weekSlots } = teacher
     ? await supabase
