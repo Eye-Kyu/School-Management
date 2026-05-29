@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 
 type Quiz = {
   id: string; title: string; is_published: boolean; time_limit_mins: number | null;
@@ -30,8 +31,8 @@ export default function QuizzesTeacherClient({
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
-    const { data } = await supabase.from('quizzes').insert({
+    const userRow = await getCurrentUserRow('id, school_id');
+    const { data, error } = await supabase.from('quizzes').insert({
       school_id: userRow?.school_id,
       class_id: classId,
       subject_id: subjectId || null,
@@ -41,6 +42,7 @@ export default function QuizzesTeacherClient({
       time_limit_mins: timeLimit ? parseInt(timeLimit) : null,
     }).select('id, title, is_published, time_limit_mins, class:classes(name), subject:subjects(name)').single();
 
+    if (error) { alert(`Failed to create quiz: ${error.message}`); setSaving(false); return; }
     if (data) {
       setQuizzes((p) => [data as any, ...p]);
       setShowForm(false);

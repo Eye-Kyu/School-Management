@@ -20,7 +20,8 @@ export default function TeacherBehaviourPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: userRow } = await supabase.from('users').select('id').maybeSingle();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: userRow } = await supabase.from('users').select('id').eq('auth_id', authUser?.id ?? '').maybeSingle();
       const { data: teacher } = await supabase.from('teachers').select('id').eq('user_id', userRow?.id ?? '').maybeSingle();
       setTeacherId(teacher?.id ?? '');
 
@@ -49,7 +50,8 @@ export default function TeacherBehaviourPage() {
   async function handleLog(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authUser?.id ?? '').maybeSingle();
     const { data } = await supabase.from('behaviour_points').insert({
       school_id: userRow?.school_id,
       student_id: studentId,

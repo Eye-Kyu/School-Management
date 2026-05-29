@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 
 type Student = { id: string; user: { full_name: string } };
 type Submission = {
@@ -41,7 +42,7 @@ export default function SubmissionsClient({
     const g = grading[studentId];
     if (!g) return;
     setSaving((p) => ({ ...p, [studentId]: true }));
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    const userRow = await getCurrentUserRow('id, school_id');
     const score = g.score === '' ? null : parseFloat(g.score);
     await supabase.from('submissions').update({
       grade_score: score,

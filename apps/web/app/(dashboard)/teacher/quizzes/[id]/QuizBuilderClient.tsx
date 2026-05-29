@@ -46,7 +46,8 @@ function ShortAnswerReview({
       .eq('id', attempt.id);
 
     // Write to grades table
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    const { data: authData } = await supabase.auth.getUser();
+    const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
     await supabase.from('grades').upsert({
       school_id: userRow?.school_id,
       assessment_id: quizId, // quiz acts as an assessment
@@ -133,7 +134,8 @@ export default function QuizBuilderClient({
     if (!body.trim()) return;
     setSaving(true);
 
-    const { data: userRow } = await supabase.from('users').select('school_id').maybeSingle();
+    const { data: authData } = await supabase.auth.getUser();
+    const { data: userRow } = await supabase.from('users').select('school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
     const isMCQ = adding === 'MCQ';
     const validOptions = isMCQ ? options.filter((o) => o.text.trim()) : null;
 

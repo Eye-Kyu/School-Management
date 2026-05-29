@@ -170,63 +170,90 @@ export class MessagingService {
     }, 0);
   }
 
-  // Teacher's list of parents available to message (own class parents)
+  // Contacts available to message — flat queries to avoid PostgREST nested-array issues
   async availableContacts(accessToken: string) {
     const client = this.supabase.forUser(accessToken);
     const { data: userRow } = await client.from('users').select('id, role, school_id').maybeSingle();
     if (!userRow) throw new UnauthorizedException();
 
     if (userRow.role === 'TEACHER') {
-      // Return parents of students in teacher's assigned classes
+      // Resolve teachers.id from users.id
+      const { data: teacherRow } = await this.supabase.admin
+        .from('teachers').select('id').eq('user_id', userRow.id).maybeSingle();
+      if (!teacherRow) return { role: 'TEACHER', contacts: [] };
+
+      // Classes this teacher is assigned to
       const { data: assignments } = await this.supabase.admin
-        .from('subject_assignments')
-        .select('class_id')
-        .eq('school_id', userRow.school_id);
-      const classIds = [...new Set((assignments ?? []).map((a) => a.class_id))];
+        .from('subject_assignments').select('class_id').eq('teacher_id', teacherRow.id);
+      const classIds = [...new Set((assignments ?? []).map((a) => a.class_id).filter(Boolean))];
+      if (!classIds.length) return { role: 'TEACHER', contacts: [] };
 
-      const { data: students } = classIds.length
-        ? await this.supabase.admin.from('students').select('id').in('current_class_id', classIds)
-        : { data: [] };
+      // Students in those classes
+      const { data: students } = await this.supabase.admin
+        .from('students').select('id').in('current_class_id', classIds).eq('is_active', true);
       const studentIds = (students ?? []).map((s) => s.id);
+      if (!studentIds.length) return { role: 'TEACHER', contacts: [] };
 
-      const { data: guardians } = studentIds.length
-        ? await this.supabase.admin
-            .from('guardians')
-            .select('user:users!user_id(id, full_name, avatar_url), student:students!student_id(id, user:users!user_id(full_name))')
-            .in('student_id', studentIds)
-        : { data: [] };
-      return { role: 'TEACHER', contacts: guardians ?? [] };
+      // Guardian user IDs for those students
+      const { data: guardians } = await this.supabase.admin
+        .from('guardians').select('user_id, student_id').in('student_id', studentIds);
+      const guardianUserIds = [...new Set((guardians ?? []).map((g) => g.user_id).filter(Boolean))];
+      if (!guardianUserIds.length) return { role: 'TEACHER', contacts: [] };
+
+      // Fetch guardian user info
+      const { data: guardianUsers } = await this.supabase.admin
+        .from('users').select('id, full_name, avatar_url').in('id', guardianUserIds);
+
+      const contacts = (guardianUsers ?? []).map((u) => ({
+        user_id: u.id,
+        user: { id: u.id, full_name: u.full_name as string, avatar_url: u.avatar_url as string | null },
+      }));
+
+      // Also return student list for context
+      const { data: studentUsers } = await this.supabase.admin
+        .from('students').select('id, user_id, current_class_id, user:users!user_id(full_name)').in('id', studentIds);
+
+      return { role: 'TEACHER', contacts, students: studentUsers ?? [] };
     }
 
     if (userRow.role === 'PARENT') {
-      // Return teachers of the parent's children's classes
+      // Children of this parent
       const { data: guardians } = await this.supabase.admin
-        .from('guardians')
-        .select('student:students!student_id(id, current_class_id, user:users!user_id(full_name))')
-        .eq('user_id', userRow.id);
+        .from('guardians').select('student_id').eq('user_id', userRow.id);
+      const studentIds = (guardians ?? []).map((g) => g.student_id).filter(Boolean);
+      if (!studentIds.length) return { role: 'PARENT', contacts: [], students: [] };
 
-      const classIds = [...new Set(
-        (guardians ?? [])
-          .flatMap((g) => (g.student as unknown as { current_class_id: string }[]) ?? [])
-          .map((s) => s.current_class_id)
-          .filter(Boolean),
-      )];
+      const { data: studentRows } = await this.supabase.admin
+        .from('students').select('id, current_class_id, user:users!user_id(full_name)').in('id', studentIds);
+      const classIds = [...new Set((studentRows ?? []).map((s) => s.current_class_id).filter(Boolean))];
 
-      const { data: assignments } = classIds.length
-        ? await this.supabase.admin
-            .from('subject_assignments')
-            .select('teacher:teachers!teacher_id(user_id, user:users!user_id(id, full_name, avatar_url))')
-            .in('class_id', classIds)
+      if (!classIds.length) return { role: 'PARENT', contacts: [], students: studentRows ?? [] };
+
+      // Teachers assigned to those classes
+      const { data: saRows } = await this.supabase.admin
+        .from('subject_assignments')
+        .select('teacher:teachers!teacher_id(user_id)')
+        .in('class_id', classIds);
+
+      const teacherUserIds = [
+        ...new Set(
+          (saRows ?? [])
+            .flatMap((a) => (a.teacher as unknown as { user_id: string }[]) ?? [])
+            .map((t) => t.user_id)
+            .filter(Boolean),
+        ),
+      ];
+
+      const { data: teacherUsers } = teacherUserIds.length
+        ? await this.supabase.admin.from('users').select('id, full_name, avatar_url').in('id', teacherUserIds)
         : { data: [] };
 
-      // Deduplicate by teacher user_id
-      const seen = new Set<string>();
-      const teachers = (assignments ?? [])
-        .flatMap((a) => (a.teacher as unknown as { user_id: string; user: { id: string; full_name: string; avatar_url?: string } }[]) ?? [])
-        .filter((t) => t?.user_id && !seen.has(t.user_id) && seen.add(t.user_id));
+      const contacts = (teacherUsers ?? []).map((u) => ({
+        user_id: u.id,
+        user: { id: u.id, full_name: u.full_name as string, avatar_url: u.avatar_url as string | null },
+      }));
 
-      const students = (guardians ?? []).map((g) => g.student);
-      return { role: 'PARENT', contacts: teachers, students };
+      return { role: 'PARENT', contacts, students: studentRows ?? [] };
     }
 
     return { role: userRow.role, contacts: [] };

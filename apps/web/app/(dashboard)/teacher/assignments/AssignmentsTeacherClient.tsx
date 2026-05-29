@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 
 type Assignment = {
   id: string; title: string; description: string | null; due_date: string;
@@ -37,7 +38,7 @@ export default function AssignmentsTeacherClient({
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setErr('');
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    const userRow = await getCurrentUserRow('id, school_id');
     const { data, error } = await supabase.from('assignments').insert({
       school_id: userRow?.school_id,
       class_id: classId,

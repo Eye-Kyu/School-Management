@@ -232,15 +232,15 @@ export class AttendanceService {
   ) {
     try {
       // Look up each absent student's name and their guardians
+      // Use flat queries to avoid PostgREST join type issues
       const { data: guardianRows } = await this.supabase.admin
         .from('guardians')
-        .select('user_id, student_id, student:students!student_id(user:users!user_id(full_name))')
+        .select('user_id, student_id')
         .in('student_id', absentStudentIds);
 
       if (!guardianRows?.length) return;
 
-      // Throttle: skip guardians who already received an absence notification for
-      // this student today (handles re-marking attendance without double-notifying).
+      // Throttle: skip if already notified for this student today
       const todayStart = `${date}T00:00:00.000Z`;
       const todayEnd   = `${date}T23:59:59.999Z`;
       const { data: sentToday } = await this.supabase.admin
@@ -251,34 +251,46 @@ export class AttendanceService {
         .lte('created_at', todayEnd);
 
       const alreadySent = new Set(
-        (sentToday ?? []).map((n) => `${n.recipient_id}:${(n.metadata as Record<string,string>)?.studentId}`),
+        (sentToday ?? []).map((n) => {
+          const meta = n.metadata as Record<string, string> | null;
+          return `${n.recipient_id}:${meta?.studentId ?? ''}`;
+        }),
       );
 
       // Look up guardian user rows for school_id scoping
-      const guardianUserIds = guardianRows.map((g) => g.user_id);
+      const guardianUserIds = guardianRows.map((g) => g.user_id as string).filter(Boolean);
       const { data: guardianUsers } = await this.supabase.admin
-        .from('users')
-        .select('id, school_id')
-        .in('id', guardianUserIds)
-        .eq('school_id', schoolId);
+        .from('users').select('id, school_id').in('id', guardianUserIds).eq('school_id', schoolId);
 
       const guardianSchoolIds = new Set((guardianUsers ?? []).map((u) => u.id));
 
+      // Fetch student names separately
+      const { data: studentUsers } = await this.supabase.admin
+        .from('students').select('id, user:users!user_id(full_name)').in('id', absentStudentIds);
+      const studentNameMap: Record<string, string> = {};
+      for (const s of studentUsers ?? []) {
+        const fullName = ((s.user as unknown as { full_name: string }[])?.[0]?.full_name) ?? 'Your child';
+        studentNameMap[s.id] = fullName;
+      }
+
       const payloads = guardianRows
         .filter((g) => {
-          if (!guardianSchoolIds.has(g.user_id)) return false;
-          // Skip if already notified for this student today
-          return !alreadySent.has(`${g.user_id}:${g.student_id}`);
+          const uid = g.user_id as string;
+          const sid = g.student_id as string;
+          if (!guardianSchoolIds.has(uid)) return false;
+          return !alreadySent.has(`${uid}:${sid}`);
         })
         .map((g) => {
-          const studentName = (g.student as { user?: { full_name?: string } })?.user?.full_name ?? 'Your child';
+          const uid = g.user_id as string;
+          const sid = g.student_id as string;
+          const studentName = studentNameMap[sid] ?? 'Your child';
           return {
             schoolId,
-            recipientId: g.user_id as string,
+            recipientId: uid,
             type: 'ABSENT_STUDENT' as const,
             title: `Absence alert — ${studentName}`,
             body: `${studentName} was marked absent on ${date}. Please contact the school if this is incorrect.`,
-            metadata: { date, classId, studentId: g.student_id },
+            metadata: { date, classId, studentId: sid },
           };
         });
 

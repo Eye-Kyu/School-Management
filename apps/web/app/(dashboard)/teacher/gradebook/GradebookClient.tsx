@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 import { createClient } from '@/lib/supabase/client';
 
 type ClassItem  = { id: string; name: string; grade_level: number };
@@ -83,7 +84,7 @@ export default function GradebookClient({
     e.preventDefault();
     if (!classId || !subjectId) return;
     setCreating(true);
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+    const userRow = await getCurrentUserRow('id, school_id');
     await supabase.from('assessments').insert({
       school_id: userRow?.school_id,
       class_id: classId,

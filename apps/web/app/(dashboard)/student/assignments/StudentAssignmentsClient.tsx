@@ -45,7 +45,8 @@ export default function StudentAssignmentsClient({
     setSubmitting(true); setErr(''); setUploadProgress('');
 
     try {
-      const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
       const isLate = new Date() > new Date(assignment.due_date);
 
       // Upload files to Supabase Storage
