@@ -235,15 +235,15 @@ export class NotificationsService {
       .eq('id', studentId)
       .maybeSingle();
 
-    const studentName = (studentRow?.user as { full_name: string } | null)?.full_name ?? 'your child';
-    const schoolId = (studentRow as { school_id?: string } | null)?.school_id ?? '';
+    const studentName = (studentRow?.user as unknown as { full_name: string }[])?.[0]?.full_name ?? 'your child';
+    const schoolId = (studentRow as unknown as { school_id?: string } | null)?.school_id ?? '';
 
     const senderEmail = this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app';
     const senderName = this.config.get<string>('BREVO_SENDER_NAME') ?? 'School Manager';
 
     let sent = 0;
     for (const g of guardians ?? []) {
-      const guardian = g.user as { id: string; full_name: string; email: string | null } | null;
+      const guardian = (g.user as unknown as { id: string; full_name: string; email: string | null }[])?.[0] ?? null;
       if (!guardian?.email) continue;
 
       await this.sendEmail(
