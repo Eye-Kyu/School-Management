@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 
 type Balance = {
@@ -57,6 +58,30 @@ export default function ParentFeesClient({
   const [history, setHistory] = useState<Record<string, PaymentRecord[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('payment') === 'done') setPaymentSuccess(true);
+  }, [searchParams]);
+
+  async function handlePay(b: Balance) {
+    const amount = parseFloat(payAmount[b.id] ?? '') || (Number(b.amount_due) - Number(b.amount_paid));
+    if (!amount || amount <= 0) return;
+    setPayingId(b.id);
+    try {
+      const { authorizationUrl } = await apiFetch<{ authorizationUrl: string; reference: string }>(
+        '/payments/initialize',
+        { method: 'POST', body: JSON.stringify({ feeBalanceId: b.id, amount, currency: b.currency }) },
+      );
+      window.location.href = authorizationUrl;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Payment initialization failed');
+      setPayingId(null);
+    }
+  }
 
   async function toggleHistory(balanceId: string) {
     if (expanded[balanceId]) {
@@ -91,6 +116,20 @@ export default function ParentFeesClient({
             {totalOutstanding > 0 ? 'Outstanding' : 'All paid'}
           </p>
         </div>
+      </div>
+
+      {paymentSuccess && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-4 flex items-center gap-3">
+          <span className="text-2xl">✓</span>
+          <div>
+            <p className="font-semibold text-emerald-800">Payment received!</p>
+            <p className="text-sm text-emerald-600">Your payment has been confirmed. Your balance will update shortly.</p>
+          </div>
+          <button onClick={() => setPaymentSuccess(false)} className="ml-auto text-emerald-400 hover:text-emerald-600 text-xl">×</button>
+        </div>
+      )}
+
+      <div className="hidden">{/* spacer — stats grid ends above */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
           <p className="text-3xl font-bold text-slate-700">{currency} {totalDue.toLocaleString()}</p>
           <p className="text-sm text-slate-500 mt-1">Total billed</p>
@@ -161,6 +200,31 @@ export default function ParentFeesClient({
                     <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${paidPct}%` }} />
                   </div>
                 </div>
+
+                {/* Pay Now section */}
+                {outstanding > 0 && (
+                  <div className="px-5 pb-3 border-t border-slate-100 pt-3 space-y-2">
+                    <p className="text-xs font-medium text-slate-600">Pay online via M-Pesa or card</p>
+                    <div className="flex gap-2 items-center flex-wrap">
+                      <input
+                        type="number"
+                        min="1"
+                        max={outstanding}
+                        value={payAmount[b.id] ?? ''}
+                        onChange={(e) => setPayAmount((p) => ({ ...p, [b.id]: e.target.value }))}
+                        placeholder={`${outstanding.toLocaleString()} (full amount)`}
+                        className="flex-1 min-w-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                      />
+                      <button
+                        onClick={() => handlePay(b)}
+                        disabled={payingId === b.id}
+                        className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        {payingId === b.id ? 'Redirecting…' : `Pay ${b.currency}`}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Payment history toggle */}
                 <div className="px-5 pb-3 border-t border-slate-100 pt-3">

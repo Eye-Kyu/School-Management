@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
+import EmailReportCardButton from './EmailReportCardButton';
 
 export default async function AdminReportCardsPage({
   searchParams,
@@ -130,6 +131,13 @@ export default async function AdminReportCardsPage({
                   >
                     Edit
                   </Link>
+                  {rc?.is_published && (
+                    <EmailReportCardButton
+                      studentId={(s as any).id}
+                      termId={termId ?? ''}
+                      reportCardUrl={`${process.env.NEXT_PUBLIC_APP_URL ?? ''}/print/report-card/${(s as any).id}?termId=${termId}`}
+                    />
+                  )}
                 </div>
               </div>
             );

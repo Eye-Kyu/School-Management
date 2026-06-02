@@ -32,6 +32,8 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin/safety-tips',     label: 'Safety Tips' },
     { href: '/admin/substitutes',     label: 'Substitutes' },
     { href: '/admin/compliance',      label: 'Compliance & API' },
+    { href: '/admin/payments',        label: 'Payments' },
+    { href: '/admin/setup',           label: 'Setup checklist' },
   ],
   TEACHER: [
     { href: '/teacher',             label: 'Dashboard' },

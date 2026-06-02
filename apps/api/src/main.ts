@@ -20,7 +20,7 @@ async function bootstrap() {
     Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0 });
   }
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   // ---------- CORS ----------
   // Only the configured web origin can call the API in dev.

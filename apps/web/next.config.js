@@ -3,10 +3,15 @@ const { withPostHogConfig } = require('@posthog/nextjs-config');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Shared workspace packages need to be transpiled by Next.
   transpilePackages: ['@school-manager/types', '@school-manager/ui'],
   experimental: {
     serverActions: { bodySizeLimit: '2mb' },
+  },
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: '*.supabase.co', pathname: '/storage/v1/object/public/**' },
+      { protocol: 'https', hostname: 'api.dicebear.com' },
+    ],
   },
 };
 

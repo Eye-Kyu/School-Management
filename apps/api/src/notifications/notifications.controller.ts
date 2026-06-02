@@ -46,6 +46,17 @@ export class NotificationsController {
     return this.svc.sendTest(token, body.title, body.message);
   }
 
+  @ApiOperation({ summary: 'Email a report card link to the student\'s guardians' })
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Post('report-card-email')
+  sendReportCardEmail(
+    @AccessToken() token: string,
+    @Body() body: { studentId: string; termId: string; reportCardUrl: string },
+  ) {
+    return this.svc.sendReportCardEmail(token, body.studentId, body.termId, body.reportCardUrl);
+  }
+
   // Public — no AuthGuard; signature is verified inside the service
   @Get('unsubscribe')
   unsubscribe(@Query('token') token: string) {

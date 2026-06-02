@@ -1,14 +1,10 @@
 'use client';
 
+import NextImage from 'next/image';
+
 const COLORS = [
-  'bg-violet-500',
-  'bg-blue-500',
-  'bg-emerald-500',
-  'bg-amber-500',
-  'bg-rose-500',
-  'bg-cyan-500',
-  'bg-indigo-500',
-  'bg-teal-500',
+  'bg-violet-500', 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500',
+  'bg-rose-500',   'bg-cyan-500', 'bg-indigo-500',  'bg-teal-500',
 ];
 
 export default function UserAvatar({
@@ -34,11 +30,14 @@ export default function UserAvatar({
 
   if (avatarUrl) {
     return (
-      <img
+      <NextImage
         src={avatarUrl}
         alt={name}
+        width={size}
+        height={size}
         className="rounded-full object-cover shrink-0"
         style={{ width: px, height: px }}
+        unoptimized={avatarUrl.startsWith('https://api.dicebear.com')}
       />
     );
   }

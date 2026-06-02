@@ -176,7 +176,16 @@ export class NotificationsService {
       if (emailEnabled && user.email) {
         const unsubToken = this.buildUnsubscribeToken(row.recipient_id, row.type);
         const sent = await this.sendEmail(senderEmail, senderName, user.email, row.title, row.body, unsubToken);
-        if (sent) emailSentAt = new Date().toISOString();
+        if (sent) {
+          emailSentAt = new Date().toISOString();
+        } else {
+          // Email failed — record error so admins can see it; retry next minute
+          await this.supabase.admin
+            .from('notifications')
+            .update({ error_message: 'Email delivery failed — will retry' })
+            .eq('id', row.id);
+          continue; // do not mark email_sent_at — retry on next dispatch
+        }
       } else {
         // No email address or user opted out — mark done so it's not re-attempted
         emailSentAt = new Date().toISOString();
@@ -206,6 +215,58 @@ export class NotificationsService {
       title: title ?? 'Test notification',
       body: message ?? 'This is a test notification from your admin panel.',
     }]);
+  }
+
+  async sendReportCardEmail(
+    accessToken: string,
+    studentId: string,
+    termId: string,
+    reportCardUrl: string,
+  ): Promise<{ sent: number }> {
+    // Get student's guardians
+    const { data: guardians } = await this.supabase.admin
+      .from('guardians')
+      .select('user:users!user_id(id, full_name, email)')
+      .eq('student_id', studentId);
+
+    const { data: studentRow } = await this.supabase.admin
+      .from('students')
+      .select('user:users!user_id(full_name), school_id')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    const studentName = (studentRow?.user as { full_name: string } | null)?.full_name ?? 'your child';
+    const schoolId = (studentRow as { school_id?: string } | null)?.school_id ?? '';
+
+    const senderEmail = this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app';
+    const senderName = this.config.get<string>('BREVO_SENDER_NAME') ?? 'School Manager';
+
+    let sent = 0;
+    for (const g of guardians ?? []) {
+      const guardian = g.user as { id: string; full_name: string; email: string | null } | null;
+      if (!guardian?.email) continue;
+
+      await this.sendEmail(
+        senderEmail,
+        senderName,
+        guardian.email,
+        `${studentName}'s report card is ready`,
+        `Dear ${guardian.full_name ?? 'Parent/Guardian'},\n\n${studentName}'s end-of-term report card is now available.\n\nView and print it here:\n${reportCardUrl}\n\nThank you.`,
+      );
+
+      await this.queue([{
+        schoolId,
+        recipientId: guardian.id,
+        type: 'NEW_ANNOUNCEMENT',
+        title: `${studentName}'s report card is ready`,
+        body: `View and print it at: ${reportCardUrl}`,
+        metadata: { studentId, termId, reportCardUrl },
+        skipExternalChannels: true, // already sent email above
+      }]);
+
+      sent++;
+    }
+    return { sent };
   }
 
   async handleUnsubscribe(token: string): Promise<{ message: string }> {
