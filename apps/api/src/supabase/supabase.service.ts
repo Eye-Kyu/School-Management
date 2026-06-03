@@ -41,6 +41,34 @@ export class SupabaseService {
       global: { headers: { Authorization: `Bearer ${accessToken}` } },
     });
   }
+
+  /**
+   * Reliably fetch the current user's role by decoding the JWT to get the
+   * auth UID, then querying via the admin client (bypasses RLS).
+   * This avoids the multi-row maybeSingle() failure that occurs when the
+   * school-wide RLS policy returns all users in the school.
+   */
+  async getUserRole(accessToken: string): Promise<string | null> {
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length < 2) return null;
+      const payload = JSON.parse(
+        Buffer.from(parts[1]!, 'base64').toString('utf8'),
+      ) as { sub?: string };
+      const authUserId = payload.sub;
+      if (!authUserId) return null;
+
+      const { data } = await this.admin
+        .from('users')
+        .select('role')
+        .eq('auth_id', authUserId)
+        .maybeSingle();
+
+      return (data?.role as string | null) ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 function required(key: string): string {

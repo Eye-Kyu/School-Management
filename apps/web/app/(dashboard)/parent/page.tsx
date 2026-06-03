@@ -44,13 +44,13 @@ export default async function ParentHomePage() {
     .eq('is_current', true)
     .maybeSingle();
 
-  const { data: attendanceRecords } = firstStudent && currentTerm
-    ? await supabase
-        .from('attendance_records')
-        .select('status')
-        .eq('student_id', firstStudent.id)
-        .gte('date', currentTerm.start_date)
-        .lte('date', currentTerm.end_date)
+  const parentAttQuery = firstStudent
+    ? supabase.from('attendance_records').select('status').eq('student_id', firstStudent.id)
+    : null;
+  const { data: attendanceRecords } = parentAttQuery
+    ? currentTerm
+      ? await parentAttQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+      : await parentAttQuery
     : { data: [] };
 
   const attTotal = (attendanceRecords ?? []).length;

@@ -22,7 +22,7 @@ export class TeachersService {
 
   async create(accessToken: string, input: CreateTeacherInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -99,7 +99,7 @@ export class TeachersService {
 
   async update(accessToken: string, teacherId: string, input: UpdateTeacherInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: teacher } = await client
       .from('teachers')
@@ -132,7 +132,7 @@ export class TeachersService {
 
   async softDelete(accessToken: string, teacherId: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: teacher } = await client
       .from('teachers')
@@ -151,9 +151,9 @@ export class TeachersService {
     return { deleted: true };
   }
 
-  private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
-    const { data } = await client.from('users').select('role').maybeSingle();
-    if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  private async requireAdmin(accessToken: string) {
+    const role = await this.supabase.getUserRole(accessToken);
+    if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
   private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {

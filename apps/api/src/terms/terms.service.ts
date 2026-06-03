@@ -19,7 +19,7 @@ export class TermsService {
 
   async create(accessToken: string, input: CreateTermInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -49,7 +49,7 @@ export class TermsService {
 
   async setCurrent(accessToken: string, termId: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: term } = await client.from('terms').select('school_id').eq('id', termId).maybeSingle();
     if (!term) throw new NotFoundException('Term not found');
@@ -69,9 +69,9 @@ export class TermsService {
     return data;
   }
 
-  private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
-    const { data } = await client.from('users').select('role').maybeSingle();
-    if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  private async requireAdmin(accessToken: string) {
+    const role = await this.supabase.getUserRole(accessToken);
+    if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
   private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {

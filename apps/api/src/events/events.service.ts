@@ -19,7 +19,7 @@ export class EventsService {
 
   async create(accessToken: string, authUserId: string, input: CreateEventInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -65,7 +65,7 @@ export class EventsService {
 
   async update(accessToken: string, eventId: string, input: UpdateEventInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (input.title !== undefined) patch.title = input.title;
@@ -87,7 +87,7 @@ export class EventsService {
 
   async remove(accessToken: string, eventId: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { error } = await client.from('events').delete().eq('id', eventId);
     if (error) throw new Error(error.message);
@@ -141,8 +141,8 @@ export class EventsService {
     return lines.join('\r\n');
   }
 
-  private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
-    const { data } = await client.from('users').select('role').maybeSingle();
-    if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  private async requireAdmin(accessToken: string) {
+    const role = await this.supabase.getUserRole(accessToken);
+    if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 }

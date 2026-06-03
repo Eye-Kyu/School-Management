@@ -25,7 +25,7 @@ export class StudentsService {
 
   async create(accessToken: string, input: CreateStudentInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -96,7 +96,7 @@ export class StudentsService {
 
   async update(accessToken: string, studentId: string, input: UpdateUserInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: student } = await client
       .from('students').select('user_id, school_id').eq('id', studentId).maybeSingle();
@@ -117,7 +117,7 @@ export class StudentsService {
 
   async softDelete(accessToken: string, studentId: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: student } = await client
       .from('students').select('user_id, school_id').eq('id', studentId).maybeSingle();
@@ -140,7 +140,7 @@ export class StudentsService {
 
   async importCsv(accessToken: string, callerAuthId: string, csvText: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -270,14 +270,14 @@ export class StudentsService {
     };
   }
 
-  private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
-    const { data } = await client.from('users').select('role').maybeSingle();
-    if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  private async requireAdmin(accessToken: string) {
+    const role = await this.supabase.getUserRole(accessToken);
+    if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
   async promote(accessToken: string, authUserId: string, input: PromoteStudentsInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const now = new Date().toISOString();
 

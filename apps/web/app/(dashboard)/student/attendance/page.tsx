@@ -25,14 +25,19 @@ export default async function StudentAttendancePage() {
     .eq('is_current', true)
     .maybeSingle();
 
-  const { data: records } = student && currentTerm
-    ? await supabase
+  // Fetch records: scoped to current term if one exists, otherwise all records
+  const recordsQuery = student
+    ? supabase
         .from('attendance_records')
         .select('id, date, status, note')
         .eq('student_id', student.id)
-        .gte('date', currentTerm.start_date)
-        .lte('date', currentTerm.end_date)
         .order('date', { ascending: false })
+    : null;
+
+  const { data: records } = recordsQuery
+    ? currentTerm
+      ? await recordsQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+      : await recordsQuery
     : { data: [] };
 
   const total = (records ?? []).length;
@@ -48,11 +53,12 @@ export default async function StudentAttendancePage() {
         <BackButton href="/student" />
         <div>
           <h1 className="text-2xl font-semibold">My attendance</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{currentTerm?.name ?? 'Current term'}</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {currentTerm ? currentTerm.name : 'All records'}
+          </p>
         </div>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
           <p className="text-3xl font-bold text-emerald-700">{present}</p>
@@ -72,7 +78,6 @@ export default async function StudentAttendancePage() {
         </div>
       </div>
 
-      {/* Rate bar */}
       {rate !== null && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
@@ -83,7 +88,7 @@ export default async function StudentAttendancePage() {
           </div>
           <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${rate >= 80 ? 'bg-emerald-500' : rate >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`}
+              className={`h-full rounded-full ${rate >= 80 ? 'bg-emerald-500' : rate >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`}
               style={{ width: `${rate}%` }}
             />
           </div>
@@ -91,10 +96,9 @@ export default async function StudentAttendancePage() {
         </div>
       )}
 
-      {/* Records table */}
       {(records ?? []).length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-400">
-          No attendance records yet this term.
+          No attendance records yet.
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">

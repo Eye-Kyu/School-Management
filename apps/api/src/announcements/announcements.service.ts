@@ -24,7 +24,7 @@ export class AnnouncementsService {
 
   async create(accessToken: string, authUserId: string, input: CreateAnnouncementInput) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
     if (!school) throw new ForbiddenException('No school found');
@@ -219,7 +219,7 @@ export class AnnouncementsService {
 
   async remove(accessToken: string, announcementId: string) {
     const client = this.supabase.forUser(accessToken);
-    await this.requireAdmin(client);
+    await this.requireAdmin(accessToken);
 
     const { error } = await client
       .from('announcements')
@@ -229,8 +229,8 @@ export class AnnouncementsService {
     return { deleted: true };
   }
 
-  private async requireAdmin(client: ReturnType<SupabaseService['forUser']>) {
-    const { data } = await client.from('users').select('role').maybeSingle();
-    if (data?.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+  private async requireAdmin(accessToken: string) {
+    const role = await this.supabase.getUserRole(accessToken);
+    if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 }

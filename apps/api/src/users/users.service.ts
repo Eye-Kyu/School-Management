@@ -37,12 +37,22 @@ export class UsersService {
     accessToken: string,
     prefs: { type: string; emailEnabled: boolean }[],
   ) {
-    const client = this.supabase.forUser(accessToken);
-    const { data: userRow } = await client
+    // Use getUserRole pattern to safely get user row without multi-row RLS collision
+    const role = await this.supabase.getUserRole(accessToken);
+    if (!role) throw new BadRequestException('User not found');
+
+    const parts = accessToken.split('.');
+    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64').toString()) as { sub?: string };
+    const authUserId = payload.sub ?? '';
+
+    const { data: userRow } = await this.supabase.admin
       .from('users')
       .select('id, school_id')
+      .eq('auth_id', authUserId)
       .maybeSingle();
     if (!userRow) throw new BadRequestException('User not found');
+
+    const client = this.supabase.forUser(accessToken);
 
     for (const p of prefs) {
       await client.from('notification_preferences').upsert(

@@ -38,14 +38,14 @@ export default async function StudentHomePage() {
     .eq('is_current', true)
     .maybeSingle();
 
-  // Attendance summary
-  const { data: attendanceRecords } = studentId && currentTerm
-    ? await supabase
-        .from('attendance_records')
-        .select('status')
-        .eq('student_id', studentId)
-        .gte('date', currentTerm.start_date)
-        .lte('date', currentTerm.end_date)
+  // Attendance summary — show regardless of whether a current term is set
+  const attQuery = studentId
+    ? supabase.from('attendance_records').select('status').eq('student_id', studentId)
+    : null;
+  const { data: attendanceRecords } = attQuery
+    ? currentTerm
+      ? await attQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+      : await attQuery
     : { data: [] };
 
   const attTotal = (attendanceRecords ?? []).length;
