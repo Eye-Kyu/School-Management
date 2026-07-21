@@ -45,12 +45,13 @@ export default async function TeacherAssessmentsPage() {
     }
   }
 
-  // Fetch assessments
+  // Fetch assessments — `assessments` has no teacher_id column, so a
+  // teacher's own assessments are the ones they created.
   const { data: assessments } = teacher
     ? await supabase
         .from('assessments')
-        .select('id, name, max_marks, assessment_date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)')
-        .eq('teacher_id', teacher.id)
+        .select('id, name, max_marks:max_score, assessment_date:date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)')
+        .eq('created_by_id', _uRow!.id)
         .order('created_at', { ascending: false })
     : { data: [] };
 

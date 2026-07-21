@@ -38,6 +38,7 @@ const ROLE_HOME: Record<string, string> = {
   TEACHER: '/teacher',
   STUDENT: '/student',
   PARENT: '/parent',
+  SUPER_ADMIN: '/super-admin',
 };
 
 function LoginPageInner() {
