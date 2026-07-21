@@ -12,10 +12,15 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import ws from 'ws';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 const TIMEOUT = 30_000;
+// Node.js < 22 has no native WebSocket global, which @supabase/realtime-js
+// requires at construction time — see SupabaseService for the full rationale.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const REALTIME_OPTIONS = { transport: ws } as any;
 
 describe('Cross-tenant isolation (e2e)', () => {
   let app: INestApplication;
@@ -65,6 +70,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: `Bearer ${token}` } },
+      realtime: REALTIME_OPTIONS,
     });
   }
 
@@ -95,7 +101,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     admin = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } },
+      { auth: { autoRefreshToken: false, persistSession: false }, realtime: REALTIME_OPTIONS },
     );
 
     // 3. Create two test schools
@@ -134,6 +140,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       // Sign in to get access token
       const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
         auth: { autoRefreshToken: false, persistSession: false },
+        realtime: REALTIME_OPTIONS,
       });
       const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
       if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);

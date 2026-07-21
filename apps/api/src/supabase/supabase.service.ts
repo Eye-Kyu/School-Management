@@ -14,6 +14,16 @@
 
 import { Injectable } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import ws from 'ws';
+
+// Node.js < 22 has no native WebSocket global, which @supabase/realtime-js
+// requires. Passing `ws` as the transport works deterministically regardless
+// of Node version or global state — unlike a `globalThis.WebSocket = ws`
+// polyfill, this doesn't depend on running before every createClient() call
+// (e.g. e2e tests that construct this service directly via NestJS DI,
+// bypassing main.ts's top-level polyfill entirely).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const REALTIME_OPTIONS = { transport: ws } as any;
 
 @Injectable()
 export class SupabaseService {
@@ -28,6 +38,7 @@ export class SupabaseService {
 
     this.admin = createClient(this.url, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
     });
   }
 
@@ -39,6 +50,7 @@ export class SupabaseService {
     return createClient(this.url, this.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      realtime: REALTIME_OPTIONS,
     });
   }
 
