@@ -1,0 +1,50 @@
+{
+  "info": {
+    "_postman_id": "4c2f8e91-6a3b-4d5c-8e1f-9b0a7c6d5e4f",
+    "name": "School Manager - Auth (Supabase Login)",
+    "description": "Run 'Login (Supabase)' once to populate {{accessToken}} in the School Manager API environment. The NestJS API never issues tokens itself — apps/api/src/auth/auth.guard.ts validates whatever Supabase access token it's given, exactly like the frontend does via supabase.auth.signInWithPassword.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Login (Supabase)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('login succeeded', function () {",
+              "    pm.expect(pm.response.code).to.equal(200);",
+              "    pm.expect(json.access_token).to.be.a('string');",
+              "});",
+              "if (json.access_token) {",
+              "    pm.environment.set('accessToken', json.access_token);",
+              "    console.log('accessToken saved to environment');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{supabaseAnonKey}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{supabaseUrl}}/auth/v1/token?grant_type=password",
+          "host": ["{{supabaseUrl}}"],
+          "path": ["auth", "v1", "token"],
+          "query": [{ "key": "grant_type", "value": "password" }]
+        }
+      }
+    }
+  ]
+}

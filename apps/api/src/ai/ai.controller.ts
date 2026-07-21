@@ -1,10 +1,11 @@
 import {
-  Controller, Post, Body, Res, UseGuards, Get, Query,
+  Controller, Post, Body, Res, UseGuards, Get, Query, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { randomUUID } from 'crypto';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
-import { AccessToken } from '../common/decorators/current-user.decorator';
+import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiService } from './ai.service';
 import { SupabaseService } from '../supabase/supabase.service';
 
@@ -51,14 +52,17 @@ export class AiController {
   ) {
     const client = this.supabase.forUser(token);
 
-    // Fetch student name
-    const { data: studentRow } = await this.supabase.admin
+    // RLS-scoped (students_select): only resolves for this school's ADMIN/
+    // TEACHER, the student themself, or their guardian — a cross-school
+    // studentId simply won't resolve.
+    const { data: studentRow } = await client
       .from('students')
       .select('user:users!user_id(full_name)')
       .eq('id', body.studentId)
       .maybeSingle();
+    if (!studentRow) throw new NotFoundException('Student not found');
 
-    const studentName = (studentRow?.user as unknown as { full_name: string }[])?.[0]?.full_name ?? 'Student';
+    const studentName = (studentRow.user as unknown as { full_name: string }[])?.[0]?.full_name ?? 'Student';
 
     // Fetch grade averages for this term
     const { data: assessments } = await client
@@ -115,45 +119,88 @@ export class AiController {
     return { comment };
   }
 
+  // ── Document processing (extract + chunk for tutor retrieval) ─
+
+  @ApiOperation({ summary: 'Extract text from an uploaded document and chunk it for AI tutor retrieval' })
+  @Post('process-document')
+  async processDocument(
+    @AccessToken() token: string,
+    @Body() body: { documentId: string },
+  ) {
+    const client = this.supabase.forUser(token);
+
+    // RLS-scoped (docs_select): only resolves for a document in the caller's
+    // own school — no ownership check needed beyond letting RLS decide.
+    const { data: doc } = await client
+      .from('documents')
+      .select('id, school_id, file_url, title')
+      .eq('id', body.documentId)
+      .maybeSingle();
+    if (!doc) throw new NotFoundException('Document not found');
+
+    // Chunk insertion needs the service-role client — chunks_insert RLS
+    // requires ADMIN/TEACHER, but docs_select also permits STUDENT/PARENT,
+    // so this stays on `admin` now that ownership is already verified above.
+    const chunked = await this.ai.extractAndChunkDocument(doc.id, doc.school_id, doc.file_url, doc.title);
+    return { chunked };
+  }
+
   // ── AI Tutor (streaming SSE) ─────────────────────────────────
 
   @ApiOperation({ summary: 'Stream an AI tutor response grounded in school documents' })
   @Post('tutor')
   async tutor(
-    @AccessToken() token: string,
+    @CurrentUser() user: { id: string },
     @Body() body: {
       question: string;
       documentIds?: string[];
+      conversationId?: string;
       history?: { role: 'user' | 'assistant'; content: string }[];
     },
     @Res() res: Response,
   ) {
-    const client = this.supabase.forUser(token);
-
-    // Fetch relevant curriculum documents
-    const docsQuery = client
-      .from('documents')
-      .select('title, file_url')
-      .limit(5);
-
-    if (body.documentIds?.length) {
-      docsQuery.in('id', body.documentIds);
+    const { data: userRow } = await this.supabase.admin
+      .from('users')
+      .select('id, school_id')
+      .eq('auth_id', user.id)
+      .maybeSingle();
+    if (!userRow?.school_id) {
+      throw new ForbiddenException('No school associated with this account');
     }
 
-    const { data: docs } = await docsQuery;
+    // Retrieve relevant curriculum chunks via full-text search — real RAG,
+    // not just document titles. Fail-closed: always scoped by school_id,
+    // never an unscoped query.
+    let chunksQuery = this.supabase.admin
+      .from('document_chunks')
+      .select('content, document_id, document:documents(title)')
+      .eq('school_id', userRow.school_id)
+      .textSearch('content', body.question, { type: 'plain', config: 'english' })
+      .limit(8);
 
-    // For text-based documents stored in DB — in production you'd fetch file content
-    // For now we include the title as context; full RAG would fetch text from storage
-    const documents = (docs ?? []).map((d) => ({
-      title: d.title as string,
-      content: `[Document: ${d.title} — available in school library]`,
+    if (body.documentIds?.length) {
+      chunksQuery = chunksQuery.in('document_id', body.documentIds);
+    }
+
+    const { data: chunks } = await chunksQuery;
+
+    const documents = (chunks ?? []).map((c) => ({
+      title: (c.document as unknown as { title: string }[])?.[0]?.title ?? 'Untitled document',
+      content: c.content as string,
     }));
+    const documentTitles = [...new Set(documents.map((d) => d.title))];
 
     await this.ai.streamTutorResponse(
       body.question,
       documents,
       body.history ?? [],
       res,
+      {
+        schoolId: userRow?.school_id ?? null,
+        studentId: userRow?.id ?? null,
+        conversationId: body.conversationId ?? randomUUID(),
+        documentTitles,
+      },
     );
   }
 

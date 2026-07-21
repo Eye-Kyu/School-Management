@@ -58,11 +58,31 @@ export default function AiQuizGenerator({
   }
 
   function addAll() {
-    onQuestionsAdded(preview);
-    setPreview([]);
-    setOpen(false);
-    setContent('');
-    setPdfFile(null);
+    setAdding(true);
+    try {
+      onQuestionsAdded(preview);
+      setPreview([]);
+      setOpen(false);
+      setContent('');
+      setPdfFile(null);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  function updateQuestion(i: number, patch: Partial<GeneratedQuestion>) {
+    setPreview((p) => p.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
+  }
+
+  function updateOption(i: number, optionId: string, text: string) {
+    setPreview((p) => p.map((q, idx) => {
+      if (idx !== i || !q.options) return q;
+      return { ...q, options: q.options.map((o) => (o.id === optionId ? { ...o, text } : o)) };
+    }));
+  }
+
+  function removeQuestion(i: number) {
+    setPreview((p) => p.filter((_, idx) => idx !== i));
   }
 
   if (!open) {
@@ -166,26 +186,62 @@ export default function AiQuizGenerator({
               {adding ? 'Adding…' : `Add all ${preview.length} to quiz`}
             </button>
           </div>
-          <div className="max-h-64 overflow-y-auto space-y-2">
+          <div className="max-h-96 overflow-y-auto space-y-2">
             {preview.map((q, i) => (
               <div key={i} className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
                 <div className="flex items-start gap-2">
-                  <span className="shrink-0 w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
-                  <div>
-                    <p className="text-sm text-slate-800">{q.body}</p>
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded mt-1 inline-block ${q.kind === 'MCQ' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'}`}>
-                      {q.kind === 'MCQ' ? 'Multiple choice' : 'Short answer'} · {q.points} pt
-                    </span>
+                  <span className="shrink-0 w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-xs flex items-center justify-center font-semibold mt-1.5">{i + 1}</span>
+                  <div className="flex-1 space-y-1.5">
+                    <textarea
+                      value={q.body}
+                      onChange={(e) => updateQuestion(i, { body: e.target.value })}
+                      rows={2}
+                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm resize-none bg-white"
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded inline-block ${q.kind === 'MCQ' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'}`}>
+                        {q.kind === 'MCQ' ? 'Multiple choice' : 'Short answer'}
+                      </span>
+                      <label className="text-xs text-slate-500 flex items-center gap-1">
+                        Points
+                        <input
+                          type="number"
+                          min={1}
+                          value={q.points}
+                          onChange={(e) => updateQuestion(i, { points: parseInt(e.target.value) || 1 })}
+                          className="w-14 rounded-md border border-slate-200 px-1.5 py-0.5 text-xs bg-white"
+                        />
+                      </label>
+                    </div>
                     {q.kind === 'MCQ' && q.options && (
-                      <div className="mt-1.5 space-y-0.5">
+                      <div className="space-y-1">
                         {q.options.map((o) => (
-                          <p key={o.id} className={`text-xs px-2 py-0.5 rounded ${o.id === q.correct_option_id ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-500'}`}>
-                            {o.id === q.correct_option_id && '✓ '}{o.id}. {o.text}
-                          </p>
+                          <div key={o.id} className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name={`correct-${i}`}
+                              checked={o.id === q.correct_option_id}
+                              onChange={() => updateQuestion(i, { correct_option_id: o.id })}
+                              className="shrink-0"
+                            />
+                            <span className="text-xs text-slate-500 w-4">{o.id}.</span>
+                            <input
+                              value={o.text}
+                              onChange={(e) => updateOption(i, o.id, e.target.value)}
+                              className={`flex-1 rounded-md border px-2 py-0.5 text-xs bg-white ${o.id === q.correct_option_id ? 'border-emerald-300' : 'border-slate-200'}`}
+                            />
+                          </div>
                         ))}
                       </div>
                     )}
                   </div>
+                  <button
+                    onClick={() => removeQuestion(i)}
+                    title="Remove this question"
+                    className="shrink-0 text-slate-300 hover:text-rose-500 transition-colors text-lg leading-none px-1"
+                  >
+                    ×
+                  </button>
                 </div>
               </div>
             ))}

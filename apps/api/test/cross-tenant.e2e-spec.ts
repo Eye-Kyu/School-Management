@@ -42,10 +42,16 @@ describe('Cross-tenant isolation (e2e)', () => {
   let feeBId: string;
   let teacherATeacherId: string;
   let teacherBTeacherId: string;
+  let conversationAId: string;
+  let conversationBId: string;
+  let documentAId: string;
+  let documentBId: string;
 
   // JWT access tokens for each school's admin
   let tokenA: string;
   let tokenB: string;
+  // Non-staff token, used for the report-card-email role check
+  let tokenStudentA: string;
 
   beforeAll(async () => {
     // 1. Bootstrap NestJS app (loads .env via ConfigModule.forRoot)
@@ -76,7 +82,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     if (schoolErr) throw new Error(`School insert failed: ${schoolErr.message}`);
 
     // 4. Helper: create an auth user + public users row, return { authId, userId, token }
-    async function seedUser(schoolId: string, role: 'ADMIN' | 'TEACHER' | 'STUDENT', label: string) {
+    async function seedUser(schoolId: string, role: 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT', label: string) {
       const email = `${label}-${suffix}@test-isolation.internal`;
       const password = `TestPass${suffix}!`;
 
@@ -128,6 +134,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     // 7. Seed a student in each school
     const studentUserA = await seedUser(schoolAId, 'STUDENT', 'student-a');
     const studentUserB = await seedUser(schoolBId, 'STUDENT', 'student-b');
+    tokenStudentA = studentUserA.token;
 
     studentAId = randomUUID();
     studentBId = randomUUID();
@@ -176,10 +183,34 @@ describe('Cross-tenant isolation (e2e)', () => {
       { id: feeBId, school_id: schoolBId, student_id: studentBId, amount_due: 6000, updated_at: now },
     ]);
     if (feeErr) throw new Error(`Fee balance insert failed: ${feeErr.message}`);
+
+    // 12. Seed a parent user + one conversation per school
+    const parentUserA = await seedUser(schoolAId, 'PARENT', 'parent-a');
+    const parentUserB = await seedUser(schoolBId, 'PARENT', 'parent-b');
+
+    conversationAId = randomUUID();
+    conversationBId = randomUUID();
+    const { error: convErr } = await admin.from('conversations').insert([
+      { id: conversationAId, school_id: schoolAId, parent_user_id: parentUserA.userId, teacher_user_id: teacherUserA.userId, student_id: studentAId },
+      { id: conversationBId, school_id: schoolBId, parent_user_id: parentUserB.userId, teacher_user_id: teacherUserB.userId, student_id: studentBId },
+    ]);
+    if (convErr) throw new Error(`Conversation insert failed: ${convErr.message}`);
+
+    // 13. Seed one document per school (for /ai/process-document)
+    documentAId = randomUUID();
+    documentBId = randomUUID();
+    const { error: docErr } = await admin.from('documents').insert([
+      { id: documentAId, school_id: schoolAId, uploaded_by_id: adminA.userId, title: 'Alpha Doc', file_url: 'https://example.com/a.pdf', file_name: 'a.pdf' },
+      { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  file_url: 'https://example.com/b.pdf', file_name: 'b.pdf' },
+    ]);
+    if (docErr) throw new Error(`Document insert failed: ${docErr.message}`);
   }, TIMEOUT);
 
   afterAll(async () => {
     // Clean up in FK-safe order using service-role client
+    await admin.from('messages').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('conversations').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('documents').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('attendance_records').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('fee_balances').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('announcements').delete().in('school_id', [schoolAId, schoolBId]);
@@ -339,5 +370,74 @@ describe('Cross-tenant isolation (e2e)', () => {
 
     const ids = (res.body as Array<{ id: string }>).map((f) => f.id);
     expect(ids).not.toContain(feeAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Payments — cross-school feeBalanceId must not resolve
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot initialize a payment against School B fee balance', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/payments/initialize')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ feeBalanceId: feeBId, amount: 1000 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not found/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Messaging — cross-school conversationId must not resolve
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot mark School B conversation as read', async () => {
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationBId}/read`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(404);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AI report-card comment — cross-school studentId must not resolve
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot draft a report-card comment for a School B student', async () => {
+    await request(app.getHttpServer())
+      .post('/ai/report-card-comment')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ studentId: studentBId, termId: randomUUID() })
+      .expect(404);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AI document processing — cross-school documentId must not resolve
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot trigger processing of a School B document', async () => {
+    await request(app.getHttpServer())
+      .post('/ai/process-document')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ documentId: documentBId })
+      .expect(404);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Notifications — report-card email: cross-school ownership + role check
+  // ---------------------------------------------------------------------------
+
+  it('School A admin cannot email a report card for a School B student', async () => {
+    await request(app.getHttpServer())
+      .post('/notifications/report-card-email')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ studentId: studentBId, termId: randomUUID(), reportCardUrl: 'https://example.com/rc.pdf' })
+      .expect(404);
+  });
+
+  it('A non-staff user cannot trigger a report-card email at all', async () => {
+    await request(app.getHttpServer())
+      .post('/notifications/report-card-email')
+      .set('Authorization', `Bearer ${tokenStudentA}`)
+      .send({ studentId: studentAId, termId: randomUUID(), reportCardUrl: 'https://example.com/rc.pdf' })
+      .expect(403);
   });
 });

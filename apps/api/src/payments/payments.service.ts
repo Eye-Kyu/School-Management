@@ -25,7 +25,9 @@ export class PaymentsService {
       .maybeSingle();
     if (!userRow) throw new BadRequestException('User not found');
 
-    const { data: feeBalance } = await this.supabase.admin
+    // RLS-scoped: a cross-school feeBalanceId simply won't resolve, instead of
+    // being trusted at face value.
+    const { data: feeBalance } = await client
       .from('fee_balances')
       .select('id, student_id, amount_due, amount_paid')
       .eq('id', input.feeBalanceId)

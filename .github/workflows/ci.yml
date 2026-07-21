@@ -50,6 +50,18 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: RLS check
+        run: bash infra/scripts/check-rls.sh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Cross-tenant isolation e2e test
+        run: pnpm --filter @school-manager/api test:e2e
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
       - name: Build
         run: pnpm build
         env:

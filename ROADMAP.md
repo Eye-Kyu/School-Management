@@ -1,5 +1,10 @@
 # School Management Platform — Feature Roadmap
 
+> **⚠️ RETIRED — superseded by [`EXECUTION_PLAN.md`](./EXECUTION_PLAN.md).**
+> This document is stale (last updated 2026-05-25) and no longer reflects actual project status —
+> `EXECUTION_PLAN.md` is the actively-maintained source of truth for what's shipped vs. planned.
+> Kept here for historical reference only. Do not update this file going forward.
+
 > Living document. Updated as each version ships.
 > Status: `[x]` shipped · `[~]` in progress · `[ ]` planned · `[-]` deferred
 

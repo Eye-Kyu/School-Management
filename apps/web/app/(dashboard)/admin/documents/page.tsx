@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api';
 import BackButton from '@/components/BackButton';
 
 type Doc = {
@@ -86,6 +87,12 @@ export default function DocumentsPage() {
     if (error) { setErr(error.message); } else {
       setDocs((p) => [data as any, ...p]);
       setShowUpload(false); setTitle(''); setAudience('SCHOOL_WIDE'); setTags(''); setFile(null); setGradeLevel(''); setClassId('');
+      // Extract + chunk the document text in the background so the AI tutor
+      // can retrieve real content instead of just the title.
+      apiFetch('/ai/process-document', {
+        method: 'POST',
+        body: JSON.stringify({ documentId: (data as any).id }),
+      }).catch(() => {});
     }
     setUploading(false);
   }

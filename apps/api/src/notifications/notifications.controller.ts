@@ -2,7 +2,7 @@ import { Controller, Get, Patch, Post, Param, Query, Body, UseGuards } from '@ne
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { AccessToken } from '../common/decorators/current-user.decorator';
+import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('notifications')
 @Controller('notifications')
@@ -51,10 +51,10 @@ export class NotificationsController {
   @UseGuards(AuthGuard)
   @Post('report-card-email')
   sendReportCardEmail(
-    @AccessToken() token: string,
+    @CurrentUser() user: { id: string },
     @Body() body: { studentId: string; termId: string; reportCardUrl: string },
   ) {
-    return this.svc.sendReportCardEmail(token, body.studentId, body.termId, body.reportCardUrl);
+    return this.svc.sendReportCardEmail(user.id, body.studentId, body.termId, body.reportCardUrl);
   }
 
   // Public — no AuthGuard; signature is verified inside the service

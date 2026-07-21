@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -218,25 +218,42 @@ export class NotificationsService {
   }
 
   async sendReportCardEmail(
-    accessToken: string,
+    authUserId: string,
     studentId: string,
     termId: string,
     reportCardUrl: string,
   ): Promise<{ sent: number }> {
-    // Get student's guardians
-    const { data: guardians } = await this.supabase.admin
-      .from('guardians')
-      .select('user:users!user_id(id, full_name, email)')
-      .eq('student_id', studentId);
+    // Resolve caller identity (id-filtered by JWT auth_id — safe on the
+    // service-role client) and enforce that only staff can trigger this.
+    const { data: caller } = await this.supabase.admin
+      .from('users')
+      .select('id, role, school_id')
+      .eq('auth_id', authUserId)
+      .maybeSingle();
+    if (!caller || !['ADMIN', 'TEACHER'].includes(caller.role)) {
+      throw new ForbiddenException('Only admins and teachers can send report card emails');
+    }
 
+    // Verify the student belongs to the caller's own school before doing
+    // anything else — this was previously trusted from the request body
+    // with no check at all.
     const { data: studentRow } = await this.supabase.admin
       .from('students')
       .select('user:users!user_id(full_name), school_id')
       .eq('id', studentId)
       .maybeSingle();
+    if (!studentRow || studentRow.school_id !== caller.school_id) {
+      throw new NotFoundException('Student not found');
+    }
 
-    const studentName = (studentRow?.user as unknown as { full_name: string }[])?.[0]?.full_name ?? 'your child';
-    const schoolId = (studentRow as unknown as { school_id?: string } | null)?.school_id ?? '';
+    // Get student's guardians — safe now that ownership is verified above
+    const { data: guardians } = await this.supabase.admin
+      .from('guardians')
+      .select('user:users!user_id(id, full_name, email)')
+      .eq('student_id', studentId);
+
+    const studentName = (studentRow.user as unknown as { full_name: string }[])?.[0]?.full_name ?? 'your child';
+    const schoolId = caller.school_id;
 
     const senderEmail = this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app';
     const senderName = this.config.get<string>('BREVO_SENDER_NAME') ?? 'School Manager';

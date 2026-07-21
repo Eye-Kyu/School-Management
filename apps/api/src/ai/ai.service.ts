@@ -156,6 +156,12 @@ Write a 2–3 sentence end-of-term comment for this student's report card.`;
     documents: { title: string; content: string }[],
     conversationHistory: { role: 'user' | 'assistant'; content: string }[],
     res: Response,
+    logCtx: {
+      schoolId: string | null;
+      studentId: string | null;
+      conversationId: string;
+      documentTitles: string[];
+    },
   ): Promise<void> {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (!apiKey) {
@@ -200,16 +206,35 @@ Write a 2–3 sentence end-of-term comment for this student's report card.`;
         messages,
       });
 
+      let fullAnswer = '';
       for await (const event of stream) {
         if (
           event.type === 'content_block_delta' &&
           event.delta.type === 'text_delta'
         ) {
+          fullAnswer += event.delta.text;
           res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
         }
       }
 
       res.write('data: [DONE]\n\n');
+
+      // Log the session for teacher review — best-effort, must never surface
+      // as a stream error since the answer has already been fully sent.
+      if (logCtx.schoolId && logCtx.studentId) {
+        try {
+          await this.supabase.admin.from('tutor_logs').insert({
+            school_id: logCtx.schoolId,
+            student_id: logCtx.studentId,
+            conversation_id: logCtx.conversationId,
+            question,
+            answer: fullAnswer,
+            documents_used: logCtx.documentTitles,
+          });
+        } catch {
+          // Logging failures are non-fatal — the student already has their answer.
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'AI error';
       res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);

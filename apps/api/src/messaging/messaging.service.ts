@@ -127,7 +127,10 @@ export class MessagingService {
     const { data: userRow } = await client.from('users').select('id, role').maybeSingle();
     if (!userRow) throw new UnauthorizedException();
 
-    const { data: conv } = await this.supabase.admin
+    // RLS-scoped (conv_select): only resolves if the caller is a participant
+    // or an admin in the same school as this conversation — no manual
+    // cross-tenant check needed, and no way to bypass it via role alone.
+    const { data: conv } = await client
       .from('conversations')
       .select('id, parent_user_id, teacher_user_id')
       .eq('id', conversationId)
@@ -136,19 +139,18 @@ export class MessagingService {
 
     const isParent = conv.parent_user_id === userRow.id;
     const isTeacher = conv.teacher_user_id === userRow.id;
-    if (!isParent && !isTeacher && userRow.role !== 'ADMIN') throw new ForbiddenException();
 
-    // Mark unread messages as read
-    await this.supabase.admin
+    // Mark unread messages as read (msg_update RLS: participant or admin, same school)
+    await client
       .from('messages')
       .update({ read_at: new Date().toISOString() })
       .eq('conversation_id', conversationId)
       .neq('sender_id', userRow.id)
       .is('read_at', null);
 
-    // Reset this user's unread counter on the conversation
+    // Reset this user's unread counter on the conversation (conv_update RLS)
     if (isParent || isTeacher) {
-      await this.supabase.admin
+      await client
         .from('conversations')
         .update(isParent ? { parent_unread_count: 0 } : { teacher_unread_count: 0 })
         .eq('id', conversationId);

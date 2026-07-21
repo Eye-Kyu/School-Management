@@ -15,6 +15,9 @@ export default function AiTutorPage() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // One id per page load, groups every turn in this chat into one
+  // conversation for the teacher-review log.
+  const [conversationId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,7 +51,7 @@ export default function AiTutorPage() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${await getToken()}`,
           },
-          body: JSON.stringify({ question: userMsg, history }),
+          body: JSON.stringify({ question: userMsg, history, conversationId }),
         },
       );
 
