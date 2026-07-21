@@ -22,6 +22,7 @@ import { HomeworkModule } from './homework/homework.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { PaymentsModule } from './payments/payments.module';
     NotificationsModule,
     MessagingModule,
     PaymentsModule,
+    AiModule,
   ],
   controllers: [AppController],
 })

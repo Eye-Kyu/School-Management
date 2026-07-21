@@ -57,6 +57,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/student/assignments', label: 'Assignments' },
     { href: '/student/quizzes',     label: 'Quizzes' },
     { href: '/student/analytics',   label: 'Analytics' },
+    { href: '/student/tutor',       label: '✨ AI Tutor' },
   ],
   PARENT: [
     { href: '/parent',              label: 'Dashboard' },

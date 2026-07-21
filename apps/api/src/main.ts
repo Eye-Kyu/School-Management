@@ -49,7 +49,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
-  const port = Number(process.env.API_PORT) || 4000;
+  const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 4000;
   await app.listen(port);
   logger.log(`API listening on http://localhost:${port}`);
   logger.log(`CORS allowed origin: ${webOrigin}`);

@@ -3,6 +3,13 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+// Skip static prerendering: this page creates a Supabase client at render
+// time, which requires NEXT_PUBLIC_SUPABASE_URL/ANON_KEY to be present.
+// Forcing dynamic rendering avoids build-time failures if those env vars
+// aren't injected during the build step, and this page has no static content
+// worth pre-rendering anyway.
+export const dynamic = 'force-dynamic';
+
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);

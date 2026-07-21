@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+// Skip static prerendering: see (auth)/reset-password/page.tsx for rationale.
+export const dynamic = 'force-dynamic';
+
 export default function SafetyTipPage() {
   const supabase = createClient();
   const [message, setMessage] = useState('');

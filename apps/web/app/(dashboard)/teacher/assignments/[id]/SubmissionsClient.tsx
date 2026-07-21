@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getCurrentUserRow } from '@/lib/supabase/currentUser';
+import { apiFetch } from '@/lib/api';
 
 type Student = { id: string; user: { full_name: string } };
 type Submission = {
@@ -24,6 +25,22 @@ export default function SubmissionsClient({
   );
   const [grading, setGrading] = useState<Record<string, { score: string; comment: string }>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [plagiarismResults, setPlagiarismResults] = useState<Record<string, { ai_probability: number; plagiarism_risk: string; recommendation: string; flags: string[] }>>({});
+  const [checkingPlagiarism, setCheckingPlagiarism] = useState<Record<string, boolean>>({});
+
+  async function checkPlagiarism(studentId: string, text: string | null) {
+    if (!text?.trim()) return;
+    setCheckingPlagiarism((p) => ({ ...p, [studentId]: true }));
+    try {
+      const result = await apiFetch<{ ai_probability: number; plagiarism_risk: string; recommendation: string; flags: string[] }>(
+        '/ai/detect-plagiarism',
+        { method: 'POST', body: JSON.stringify({ text }) },
+      );
+      setPlagiarismResults((p) => ({ ...p, [studentId]: result }));
+    } catch { /* silent */ } finally {
+      setCheckingPlagiarism((p) => ({ ...p, [studentId]: false }));
+    }
+  }
 
   const submitted = students.filter((s) => submissions[s.id]);
   const pending = students.filter((s) => !submissions[s.id]);
@@ -108,8 +125,34 @@ export default function SubmissionsClient({
                 </div>
 
                 {sub.content && (
-                  <div className="bg-slate-50 rounded-lg px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                    {sub.content}
+                  <div className="space-y-2">
+                    <div className="bg-slate-50 rounded-lg px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                      {sub.content}
+                    </div>
+                    {/* AI integrity check */}
+                    {plagiarismResults[s.id] ? (
+                      <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${
+                        plagiarismResults[s.id]!.recommendation === 'flag' ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                        : plagiarismResults[s.id]!.recommendation === 'review' ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        <span>{plagiarismResults[s.id]!.recommendation === 'flag' ? '🚩' : plagiarismResults[s.id]!.recommendation === 'review' ? '⚠️' : '✓'}</span>
+                        <span className="font-medium">AI: {(plagiarismResults[s.id]!.ai_probability * 100).toFixed(0)}%</span>
+                        <span>·</span>
+                        <span>Plagiarism risk: {plagiarismResults[s.id]!.plagiarism_risk}</span>
+                        {plagiarismResults[s.id]!.flags.length > 0 && (
+                          <span className="ml-1 opacity-70">· {plagiarismResults[s.id]!.flags[0]}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => checkPlagiarism(s.id, sub.content)}
+                        disabled={checkingPlagiarism[s.id]}
+                        className="text-xs text-slate-400 hover:text-violet-600 transition-colors disabled:opacity-50"
+                      >
+                        {checkingPlagiarism[s.id] ? '🔍 Checking…' : '🔍 Check with AI'}
+                      </button>
+                    )}
                   </div>
                 )}
 

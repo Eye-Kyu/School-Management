@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import AiCommentButton from './AiCommentButton';
 
 export default function CommentForm({
   studentId, termId, existing,
@@ -41,7 +42,10 @@ export default function CommentForm({
       <h3 style={{ fontSize: 13, fontWeight: 'bold', marginBottom: 12 }}>Edit comments</h3>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 'bold', marginBottom: 4 }}>Class Teacher&apos;s Comment</label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 'bold' }}>Class Teacher&apos;s Comment</label>
+            <AiCommentButton studentId={studentId} termId={termId} onDraft={(draft) => setCt(draft)} />
+          </div>
           <textarea value={ct} onChange={(e) => setCt(e.target.value)} rows={4} maxLength={500}
             style={{ width: '100%', borderRadius: 6, border: '1px solid #cbd5e1', padding: '6px 10px', fontSize: 11, resize: 'vertical' }} />
         </div>

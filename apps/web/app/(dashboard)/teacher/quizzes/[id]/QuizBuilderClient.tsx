@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import AiQuizGenerator from './AiQuizGenerator';
 
 type Option = { id: string; text: string };
 type Question = {
@@ -163,6 +164,26 @@ export default function QuizBuilderClient({
     setQuestions((p) => p.filter((q) => q.id !== id));
   }
 
+  // Save AI-generated questions in bulk
+  async function handleAiQuestions(generated: { body: string; kind: 'MCQ' | 'SHORT_ANSWER'; options?: { id: string; text: string }[]; correct_option_id?: string | null; points: number }[]) {
+    const { data: authData } = await supabase.auth.getUser();
+    const { data: userRow } = await supabase.from('users').select('school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
+    for (let i = 0; i < generated.length; i++) {
+      const q = generated[i]!;
+      const { data } = await supabase.from('quiz_questions').insert({
+        quiz_id: quiz.id,
+        school_id: userRow?.school_id,
+        position: questions.length + i,
+        kind: q.kind,
+        body: q.body,
+        options: q.kind === 'MCQ' && q.options ? q.options : null,
+        correct_option_id: q.kind === 'MCQ' ? (q.correct_option_id ?? null) : null,
+        points: q.points ?? 1,
+      }).select('id, position, kind, body, options, correct_option_id, points').single();
+      if (data) setQuestions((p) => [...p, data as Question]);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Questions list */}
@@ -198,6 +219,9 @@ export default function QuizBuilderClient({
           </div>
         ))}
       </div>
+
+      {/* AI Generator */}
+      <AiQuizGenerator quizId={quiz.id} onQuestionsAdded={handleAiQuestions} />
 
       {/* Add question */}
       {!adding ? (
