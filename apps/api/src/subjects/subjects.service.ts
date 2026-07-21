@@ -37,7 +37,7 @@ export class SubjectsService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, school.id, 'subject.create', 'subject', data.id, { name: input.name });
+    await this.audit(client, accessToken, school.id, 'subject.create', 'subject', data.id, { name: input.name });
     return data;
   }
 
@@ -54,7 +54,7 @@ export class SubjectsService {
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('Subject not found');
 
-    await this.audit(client, data.school_id, 'subject.delete', 'subject', id, {});
+    await this.audit(client, accessToken, data.school_id, 'subject.delete', 'subject', id, {});
     return { deleted: true };
   }
 
@@ -77,7 +77,7 @@ export class SubjectsService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, school.id, 'subject_assignment.create', 'subject_assignment', data.id, input);
+    await this.audit(client, accessToken, school.id, 'subject_assignment.create', 'subject_assignment', data.id, input);
     return data;
   }
 
@@ -89,7 +89,7 @@ export class SubjectsService {
     const { error } = await client.from('subject_assignments').delete().eq('id', id);
     if (error) throw new Error(error.message);
 
-    if (school) await this.audit(client, school.id, 'subject_assignment.delete', 'subject_assignment', id, {});
+    if (school) await this.audit(client, accessToken, school.id, 'subject_assignment.delete', 'subject_assignment', id, {});
     return { deleted: true };
   }
 
@@ -98,8 +98,8 @@ export class SubjectsService {
     if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
-  private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+  private async audit(client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({ id: randomUUID(), school_id: schoolId, user_id: me?.id ?? null, action, entity_type: entityType, entity_id: entityId, metadata });
   }
 }

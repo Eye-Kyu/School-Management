@@ -43,12 +43,8 @@ export class MessagingService {
   }
 
   async getOrCreateConversation(accessToken: string, input: CreateConversationInput) {
-    const client = this.supabase.forUser(accessToken);
-
-    const { data: userRow } = await client
-      .from('users')
-      .select('id, role, school_id, full_name')
-      .maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role, school_id, full_name') as
+      { id: string; role: string; school_id: string; full_name: string } | null;
     if (!userRow || userRow.role !== 'PARENT') throw new ForbiddenException('Parent role required');
 
     // Upsert conversation (idempotent — same parent+teacher+student = one thread)
@@ -90,12 +86,8 @@ export class MessagingService {
   }
 
   async sendMessage(accessToken: string, conversationId: string, input: SendMessageInput) {
-    const client = this.supabase.forUser(accessToken);
-
-    const { data: userRow } = await client
-      .from('users')
-      .select('id, role, full_name')
-      .maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role, full_name') as
+      { id: string; role: string; full_name: string } | null;
     if (!userRow) throw new UnauthorizedException();
 
     // Fetch conversation via admin to verify participant
@@ -124,7 +116,7 @@ export class MessagingService {
   async markRead(accessToken: string, conversationId: string) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client.from('users').select('id, role').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
     if (!userRow) throw new UnauthorizedException();
 
     // RLS-scoped (conv_select): only resolves if the caller is a participant
@@ -159,7 +151,7 @@ export class MessagingService {
 
   async unreadCount(accessToken: string): Promise<number> {
     const client = this.supabase.forUser(accessToken);
-    const { data: userRow } = await client.from('users').select('id, role').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
     if (!userRow) return 0;
 
     const { data: convs } = await client
@@ -174,8 +166,8 @@ export class MessagingService {
 
   // Contacts available to message — flat queries to avoid PostgREST nested-array issues
   async availableContacts(accessToken: string) {
-    const client = this.supabase.forUser(accessToken);
-    const { data: userRow } = await client.from('users').select('id, role, school_id').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role, school_id') as
+      { id: string; role: string; school_id: string } | null;
     if (!userRow) throw new UnauthorizedException();
 
     if (userRow.role === 'TEACHER') {

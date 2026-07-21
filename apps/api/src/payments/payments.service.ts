@@ -19,10 +19,8 @@ export class PaymentsService {
   ) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client
-      .from('users')
-      .select('id, email, school_id, full_name')
-      .maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, email, school_id, full_name') as
+      { id: string; email: string | null; school_id: string; full_name: string } | null;
     if (!userRow) throw new BadRequestException('User not found');
 
     // RLS-scoped: a cross-school feeBalanceId simply won't resolve, instead of
@@ -285,7 +283,7 @@ export class PaymentsService {
 
   async createWebhookEndpoint(accessToken: string, input: { url: string; events: string[] }) {
     const client = this.supabase.forUser(accessToken);
-    const { data: userRow } = await client.from('users').select('school_id').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'school_id') as { school_id: string } | null;
     const secret = randomUUID().replace(/-/g, '');
     const { data, error } = await client.from('webhook_endpoints').insert({
       id: randomUUID(),

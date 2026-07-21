@@ -111,7 +111,7 @@ export class GuardiansService {
       if (gError) throw new Error(gError.message);
     }
 
-    await this.audit(client, school.id, 'guardian.create', 'user', actualUserId, {
+    await this.audit(client, accessToken, school.id, 'guardian.create', 'user', actualUserId, {
       fullName: input.fullName,
       childAdmissionNos: input.childAdmissionNos,
     });
@@ -138,7 +138,7 @@ export class GuardiansService {
       updated_at: new Date().toISOString(),
     }).eq('id', parentUserId);
 
-    await this.audit(client, user.school_id, 'guardian.delete', 'user', parentUserId, {});
+    await this.audit(client, accessToken, user.school_id, 'guardian.delete', 'user', parentUserId, {});
     return { deleted: true };
   }
 
@@ -149,13 +149,14 @@ export class GuardiansService {
 
   private async audit(
     client: ReturnType<SupabaseService['forUser']>,
+    accessToken: string,
     schoolId: string,
     action: string,
     entityType: string,
     entityId: string,
     metadata: unknown,
   ) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({
       id: randomUUID(),
       school_id: schoolId,

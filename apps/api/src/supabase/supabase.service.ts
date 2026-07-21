@@ -42,6 +42,35 @@ export class SupabaseService {
     });
   }
 
+  /** Decodes the JWT's `sub` claim (the Supabase auth user id) — no network call. */
+  getAuthUserId(accessToken: string): string | null {
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length < 2) return null;
+      const payload = JSON.parse(
+        Buffer.from(parts[1]!, 'base64').toString('utf8'),
+      ) as { sub?: string };
+      return payload.sub ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch the caller's own `users` row, filtered by their decoded auth id via
+   * the admin client. Use this instead of `client.from('users').select(...).
+   * maybeSingle()` with no filter — that pattern breaks as soon as a school
+   * has more than one user, because the school-wide RLS SELECT policy
+   * legitimately returns every user in the school, and `.maybeSingle()`
+   * errors out (not just returns null) on more than one row.
+   */
+  async currentUserRow(accessToken: string, select: string): Promise<Record<string, unknown> | null> {
+    const authUserId = this.getAuthUserId(accessToken);
+    if (!authUserId) return null;
+    const { data } = await this.admin.from('users').select(select).eq('auth_id', authUserId).maybeSingle();
+    return data as unknown as Record<string, unknown> | null;
+  }
+
   /**
    * Reliably fetch the current user's role by decoding the JWT to get the
    * auth UID, then querying via the admin client (bypasses RLS).
@@ -49,25 +78,8 @@ export class SupabaseService {
    * school-wide RLS policy returns all users in the school.
    */
   async getUserRole(accessToken: string): Promise<string | null> {
-    try {
-      const parts = accessToken.split('.');
-      if (parts.length < 2) return null;
-      const payload = JSON.parse(
-        Buffer.from(parts[1]!, 'base64').toString('utf8'),
-      ) as { sub?: string };
-      const authUserId = payload.sub;
-      if (!authUserId) return null;
-
-      const { data } = await this.admin
-        .from('users')
-        .select('role')
-        .eq('auth_id', authUserId)
-        .maybeSingle();
-
-      return (data?.role as string | null) ?? null;
-    } catch {
-      return null;
-    }
+    const row = await this.currentUserRow(accessToken, 'role');
+    return (row?.role as string | null) ?? null;
   }
 }
 

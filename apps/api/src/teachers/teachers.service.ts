@@ -89,7 +89,7 @@ export class TeachersService {
       .single();
     if (teacherError) throw new Error(teacherError.message);
 
-    await this.audit(client, school.id, 'teacher.create', 'teacher', teacherId, {
+    await this.audit(client, accessToken, school.id, 'teacher.create', 'teacher', teacherId, {
       fullName: input.fullName,
       staffNo: input.staffNo,
     });
@@ -126,7 +126,7 @@ export class TeachersService {
       if (teacherErr) throw new Error(teacherErr.message);
     }
 
-    await this.audit(client, teacher.school_id, 'teacher.update', 'teacher', teacherId, { ...userPatch, department: input.department });
+    await this.audit(client, accessToken, teacher.school_id, 'teacher.update', 'teacher', teacherId, { ...userPatch, department: input.department });
     return { updated: true };
   }
 
@@ -147,7 +147,7 @@ export class TeachersService {
       updated_at: new Date().toISOString(),
     }).eq('id', teacher.user_id);
 
-    await this.audit(client, teacher.school_id, 'teacher.delete', 'teacher', teacherId, {});
+    await this.audit(client, accessToken, teacher.school_id, 'teacher.delete', 'teacher', teacherId, {});
     return { deleted: true };
   }
 
@@ -156,8 +156,8 @@ export class TeachersService {
     if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
-  private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+  private async audit(client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({ id: randomUUID(), school_id: schoolId, user_id: me?.id ?? null, action, entity_type: entityType, entity_id: entityId, metadata });
   }
 }

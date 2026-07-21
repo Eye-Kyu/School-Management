@@ -86,7 +86,7 @@ export class StudentsService {
       .single();
     if (studentError) throw new Error(studentError.message);
 
-    await this.audit(client, school.id, 'student.create', 'student', studentId, {
+    await this.audit(client, accessToken, school.id, 'student.create', 'student', studentId, {
       fullName: input.fullName,
       admissionNo: input.admissionNo,
     });
@@ -111,7 +111,7 @@ export class StudentsService {
     const { error } = await client.from('users').update(patch).eq('id', student.user_id);
     if (error) throw new Error(error.message);
 
-    await this.audit(client, student.school_id, 'student.update', 'student', studentId, patch);
+    await this.audit(client, accessToken, student.school_id, 'student.update', 'student', studentId, patch);
     return { updated: true };
   }
 
@@ -134,7 +134,7 @@ export class StudentsService {
       updated_at: new Date().toISOString(),
     }).eq('id', studentId);
 
-    await this.audit(client, student.school_id, 'student.delete', 'student', studentId, {});
+    await this.audit(client, accessToken, student.school_id, 'student.delete', 'student', studentId, {});
     return { deleted: true };
   }
 
@@ -302,8 +302,8 @@ export class StudentsService {
     }
   }
 
-  private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+  private async audit(client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({ id: randomUUID(), school_id: schoolId, user_id: me?.id ?? null, action, entity_type: entityType, entity_id: entityId, metadata });
   }
 }

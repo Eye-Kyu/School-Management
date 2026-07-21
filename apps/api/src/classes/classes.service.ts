@@ -44,7 +44,7 @@ export class ClassesService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, school.id, 'class.create', 'class', data.id, { name: input.name });
+    await this.audit(client, accessToken, school.id, 'class.create', 'class', data.id, { name: input.name });
     return data;
   }
 
@@ -66,7 +66,7 @@ export class ClassesService {
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('Class not found');
 
-    await this.audit(client, data.school_id, 'class.update', 'class', id, patch);
+    await this.audit(client, accessToken, data.school_id, 'class.update', 'class', id, patch);
     return data;
   }
 
@@ -83,7 +83,7 @@ export class ClassesService {
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('Class not found');
 
-    await this.audit(client, data.school_id, 'class.delete', 'class', id, {});
+    await this.audit(client, accessToken, data.school_id, 'class.delete', 'class', id, {});
     return { deleted: true };
   }
 
@@ -107,7 +107,7 @@ export class ClassesService {
       .eq('id', classId);
     if (error) throw new Error(error.message);
 
-    await this.audit(client, teacherRecord.school_id, 'class.set_prefect', 'class', classId, { studentId });
+    await this.audit(client, accessToken, teacherRecord.school_id, 'class.set_prefect', 'class', classId, { studentId });
     return { updated: true };
   }
 
@@ -118,13 +118,14 @@ export class ClassesService {
 
   private async audit(
     client: ReturnType<SupabaseService['forUser']>,
+    accessToken: string,
     schoolId: string,
     action: string,
     entityType: string,
     entityId: string,
     metadata: unknown,
   ) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({
       id: randomUUID(),
       school_id: schoolId,

@@ -43,7 +43,7 @@ export class TermsService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, school.id, 'term.create', 'term', data.id, { name: input.name });
+    await this.audit(client, accessToken, school.id, 'term.create', 'term', data.id, { name: input.name });
     return data;
   }
 
@@ -65,7 +65,7 @@ export class TermsService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, term.school_id, 'term.set_current', 'term', termId, {});
+    await this.audit(client, accessToken, term.school_id, 'term.set_current', 'term', termId, {});
     return data;
   }
 
@@ -74,8 +74,8 @@ export class TermsService {
     if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
-  private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+  private async audit(client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({ id: randomUUID(), school_id: schoolId, user_id: me?.id ?? null, action, entity_type: entityType, entity_id: entityId, metadata });
   }
 }

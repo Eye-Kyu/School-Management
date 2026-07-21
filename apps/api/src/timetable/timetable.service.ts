@@ -149,7 +149,7 @@ export class TimetableService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.audit(client, school.id, 'timetable_slot.create', 'timetable_slot', data.id, {
+    await this.audit(client, accessToken, school.id, 'timetable_slot.create', 'timetable_slot', data.id, {
       day: input.dayOfWeek,
       time: `${input.startTime}-${input.endTime}`,
     });
@@ -169,7 +169,7 @@ export class TimetableService {
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('Timetable slot not found');
 
-    await this.audit(client, data.school_id, 'timetable_slot.delete', 'timetable_slot', id, {});
+    await this.audit(client, accessToken, data.school_id, 'timetable_slot.delete', 'timetable_slot', id, {});
     return { deleted: true };
   }
 
@@ -178,8 +178,8 @@ export class TimetableService {
     if (role !== 'ADMIN') throw new ForbiddenException('Admin role required');
   }
 
-  private async audit(client: ReturnType<SupabaseService['forUser']>, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
-    const { data: me } = await client.from('users').select('id').maybeSingle();
+  private async audit(client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, action: string, entityType: string, entityId: string, metadata: unknown) {
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
     await client.from('audit_logs').insert({
       id: randomUUID(), school_id: schoolId, user_id: me?.id ?? null,
       action, entity_type: entityType, entity_id: entityId, metadata,

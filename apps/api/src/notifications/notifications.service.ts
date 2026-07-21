@@ -201,11 +201,7 @@ export class NotificationsService {
   }
 
   async sendTest(accessToken: string, title?: string, message?: string): Promise<void> {
-    const { data: userRow } = await this.supabase
-      .forUser(accessToken)
-      .from('users')
-      .select('id, school_id')
-      .maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, school_id') as { id: string; school_id: string } | null;
     if (!userRow) return;
 
     await this.queue([{

@@ -10,11 +10,10 @@ export class HomeworkService {
   async list(accessToken: string) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client
-      .from('users').select('id, role').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
     if (!userRow) throw new ForbiddenException('User not found');
 
-    const role = userRow.role as string;
+    const role = userRow.role;
 
     if (role === 'ADMIN') {
       const { data, error } = await client
@@ -154,9 +153,8 @@ export class HomeworkService {
   async remove(accessToken: string, homeworkId: string) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client
-      .from('users').select('id, role').maybeSingle();
-    if (!userRow || !['ADMIN', 'TEACHER'].includes(userRow.role as string)) {
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
+    if (!userRow || !['ADMIN', 'TEACHER'].includes(userRow.role)) {
       throw new ForbiddenException('Teacher or Admin role required');
     }
 
@@ -172,8 +170,7 @@ export class HomeworkService {
   async complete(accessToken: string, homeworkId: string) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client
-      .from('users').select('id, role').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
     if (userRow?.role !== 'STUDENT') throw new ForbiddenException('Student role required');
 
     const { data: studentRow } = await client
@@ -210,8 +207,7 @@ export class HomeworkService {
   async uncomplete(accessToken: string, homeworkId: string) {
     const client = this.supabase.forUser(accessToken);
 
-    const { data: userRow } = await client
-      .from('users').select('id, role').maybeSingle();
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
     if (userRow?.role !== 'STUDENT') throw new ForbiddenException('Student role required');
 
     const { data: studentRow } = await client

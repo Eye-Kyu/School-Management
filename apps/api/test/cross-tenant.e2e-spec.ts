@@ -72,14 +72,24 @@ describe('Cross-tenant isolation (e2e)', () => {
     // 1. Bootstrap NestJS app (loads .env via ConfigModule.forRoot)
     // PrismaService is mocked — none of the tested routes use Prisma, and the
     // pooler DATABASE_URL is incompatible with Prisma's connection mode in tests.
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    })
-      .overrideProvider(PrismaService)
-      .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
-      .compile();
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    try {
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(PrismaService)
+        .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
+        .compile();
+      app = moduleFixture.createNestApplication();
+      await app.init();
+    } catch (err) {
+      // Surface the REAL cause loudly — without this, a compile/init failure
+      // here just leaves `app`/`admin` undefined, and afterAll's cleanup
+      // throws a second, more confusing "Cannot read properties of
+      // undefined" error that buries whatever actually went wrong.
+      // eslint-disable-next-line no-console
+      console.error('[cross-tenant e2e] FATAL: app bootstrap failed:', err);
+      throw err;
+    }
 
     // 2. Service-role client for seeding and cleanup (bypasses RLS)
     admin = createClient(
@@ -237,6 +247,11 @@ describe('Cross-tenant isolation (e2e)', () => {
   }, TIMEOUT);
 
   afterAll(async () => {
+    // If beforeAll failed before assigning admin/app, there's nothing to
+    // clean up — bail quietly instead of throwing a second, misleading
+    // "Cannot read properties of undefined" error on top of the real one.
+    if (!admin) return;
+
     // Clean up in FK-safe order using service-role client
     // (school_modules rows cascade-delete with their school, no separate cleanup needed)
     await admin.from('users').delete().is('school_id', null).eq('role', 'SUPER_ADMIN').ilike('email', `%-${suffix}@test-isolation.internal`);
