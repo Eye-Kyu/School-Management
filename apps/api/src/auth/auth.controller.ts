@@ -29,6 +29,8 @@ export class AuthController {
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('User profile not found');
 
+    const enabledModules = data.school_id ? await this.getEnabledModules(client, data.school_id) : [];
+
     return {
       id: data.id,
       schoolId: data.school_id,
@@ -36,7 +38,22 @@ export class AuthController {
       phone: data.phone,
       fullName: data.full_name,
       role: data.role,
+      enabledModules,
     };
+  }
+
+  /** All module keys currently enabled for a school — no row for a key means enabled. */
+  private async getEnabledModules(client: ReturnType<SupabaseService['forUser']>, schoolId: string): Promise<string[]> {
+    const { data: allModules } = await client.from('modules').select('key');
+    const { data: schoolModules } = await client
+      .from('school_modules')
+      .select('module_key, enabled')
+      .eq('school_id', schoolId);
+
+    const disabled = new Set(
+      (schoolModules ?? []).filter((m) => m.enabled === false).map((m) => m.module_key as string),
+    );
+    return (allModules ?? []).map((m) => m.key as string).filter((key) => !disabled.has(key));
   }
 
   @Post('events')

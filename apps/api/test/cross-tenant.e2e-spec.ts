@@ -46,12 +46,27 @@ describe('Cross-tenant isolation (e2e)', () => {
   let conversationBId: string;
   let documentAId: string;
   let documentBId: string;
+  let quizAId: string;
+  let quizBId: string;
 
   // JWT access tokens for each school's admin
   let tokenA: string;
   let tokenB: string;
   // Non-staff token, used for the report-card-email role check
   let tokenStudentA: string;
+  // Platform-level token, used for module-toggle tests
+  let tokenSuperAdmin: string;
+  // Teacher tokens, used for RLS-only module-toggle tests (quizzes has no NestJS route)
+  let tokenTeacherA: string;
+  let tokenTeacherB: string;
+
+  /** A Supabase client that sends the given JWT — for testing RLS directly, bypassing Nest entirely. */
+  function clientAs(token: string): SupabaseClient {
+    return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+  }
 
   beforeAll(async () => {
     // 1. Bootstrap NestJS app (loads .env via ConfigModule.forRoot)
@@ -82,7 +97,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     if (schoolErr) throw new Error(`School insert failed: ${schoolErr.message}`);
 
     // 4. Helper: create an auth user + public users row, return { authId, userId, token }
-    async function seedUser(schoolId: string, role: 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT', label: string) {
+    async function seedUser(schoolId: string | null, role: 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'SUPER_ADMIN', label: string) {
       const email = `${label}-${suffix}@test-isolation.internal`;
       const password = `TestPass${suffix}!`;
 
@@ -147,6 +162,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     // 8. Seed teacher users + teachers rows (needed for attendance marked_by_id)
     const teacherUserA = await seedUser(schoolAId, 'TEACHER', 'teacher-a');
     const teacherUserB = await seedUser(schoolBId, 'TEACHER', 'teacher-b');
+    tokenTeacherA = teacherUserA.token;
+    tokenTeacherB = teacherUserB.token;
 
     teacherATeacherId = randomUUID();
     teacherBTeacherId = randomUUID();
@@ -204,13 +221,29 @@ describe('Cross-tenant isolation (e2e)', () => {
       { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  file_url: 'https://example.com/b.pdf', file_name: 'b.pdf' },
     ]);
     if (docErr) throw new Error(`Document insert failed: ${docErr.message}`);
+
+    // 14. Seed a platform-level SUPER_ADMIN (no school)
+    const superAdmin = await seedUser(null, 'SUPER_ADMIN', 'super-admin');
+    tokenSuperAdmin = superAdmin.token;
+
+    // 15. Seed one quiz per school (for module-toggle RLS tests — quizzes has no NestJS route)
+    quizAId = randomUUID();
+    quizBId = randomUUID();
+    const { error: quizErr } = await admin.from('quizzes').insert([
+      { id: quizAId, school_id: schoolAId, class_id: classAId, created_by_id: teacherUserA.userId, title: 'Alpha Quiz', is_published: true },
+      { id: quizBId, school_id: schoolBId, class_id: classBId, created_by_id: teacherUserB.userId, title: 'Beta Quiz', is_published: true },
+    ]);
+    if (quizErr) throw new Error(`Quiz insert failed: ${quizErr.message}`);
   }, TIMEOUT);
 
   afterAll(async () => {
     // Clean up in FK-safe order using service-role client
+    // (school_modules rows cascade-delete with their school, no separate cleanup needed)
+    await admin.from('users').delete().is('school_id', null).eq('role', 'SUPER_ADMIN').ilike('email', `%-${suffix}@test-isolation.internal`);
     await admin.from('messages').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('conversations').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('documents').delete().in('school_id', [schoolAId, schoolBId]);
+    await admin.from('quizzes').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('attendance_records').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('fee_balances').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('announcements').delete().in('school_id', [schoolAId, schoolBId]);
@@ -439,5 +472,106 @@ describe('Cross-tenant isolation (e2e)', () => {
       .set('Authorization', `Bearer ${tokenStudentA}`)
       .send({ studentId: studentAId, termId: randomUUID(), reportCardUrl: 'https://example.com/rc.pdf' })
       .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Module toggles — SUPER_ADMIN access, enable/disable/re-enable, dependencies
+  // ---------------------------------------------------------------------------
+
+  it('SUPER_ADMIN can list all schools', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(schoolAId);
+    expect(ids).toContain(schoolBId);
+  });
+
+  it('A regular ADMIN cannot access super-admin routes', async () => {
+    await request(app.getHttpServer())
+      .get('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(403);
+  });
+
+  it('School A teacher can see their quiz before it is disabled', async () => {
+    const { data } = await clientAs(tokenTeacherA).from('quizzes').select('id').eq('id', quizAId);
+    expect((data ?? []).map((q) => q.id)).toContain(quizAId);
+  });
+
+  it('SUPER_ADMIN disables quizzes for School A only', async () => {
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/quizzes`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+  });
+
+  it('School A teacher loses access to quizzes after disabling', async () => {
+    const { data } = await clientAs(tokenTeacherA).from('quizzes').select('id').eq('id', quizAId);
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it('School B teacher is unaffected by School A disabling quizzes', async () => {
+    const { data } = await clientAs(tokenTeacherB).from('quizzes').select('id').eq('id', quizBId);
+    expect((data ?? []).map((q) => q.id)).toContain(quizBId);
+  });
+
+  it('SUPER_ADMIN re-enables quizzes for School A', async () => {
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/quizzes`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: true })
+      .expect(200);
+  });
+
+  it('School A teacher regains access with the original quiz data intact', async () => {
+    const { data } = await clientAs(tokenTeacherA).from('quizzes').select('id, title').eq('id', quizAId);
+    expect(data?.[0]?.title).toBe('Alpha Quiz');
+  });
+
+  it('Enabling a module with an unmet dependency is rejected', async () => {
+    // ai_features depends on document_library
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/document_library`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/ai_features`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: true })
+      .expect(400);
+    expect(res.body.message).toMatch(/document_library/);
+
+    // Restore for cleanliness
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/document_library`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: true })
+      .expect(200);
+  });
+
+  it('Disabling a core module is rejected', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/attendance`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(400);
+    expect(res.body.message).toMatch(/core|cannot be disabled/i);
+  });
+
+  it('A regular ADMIN cannot toggle modules via a direct Supabase call (RLS write-blocked)', async () => {
+    const { data } = await clientAs(tokenA)
+      .from('school_modules')
+      .update({ enabled: false })
+      .eq('school_id', schoolAId)
+      .eq('module_key', 'quizzes')
+      .select();
+    // RLS silently filters the row out of the UPDATE — zero rows affected, not an error.
+    expect(data ?? []).toHaveLength(0);
   });
 });

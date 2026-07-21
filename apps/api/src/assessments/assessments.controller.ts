@@ -2,6 +2,8 @@ import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@n
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import {
   CreateAssessmentInput,
   UpsertScoresInput,
@@ -11,7 +13,8 @@ import {
 import { AssessmentsService } from './assessments.service';
 
 @Controller('assessments')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, FeatureGuard)
+@RequireModule('assessments')
 export class AssessmentsController {
   constructor(private readonly assessments: AssessmentsService) {}
 

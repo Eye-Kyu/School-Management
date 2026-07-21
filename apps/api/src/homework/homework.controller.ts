@@ -2,11 +2,14 @@ import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/c
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import { CreateHomeworkInput, type CreateHomeworkInput as CreateHomeworkInputType } from '@school-manager/types';
 import { HomeworkService } from './homework.service';
 
 @Controller('homework')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, FeatureGuard)
+@RequireModule('homework')
 export class HomeworkController {
   constructor(private readonly homework: HomeworkService) {}
 

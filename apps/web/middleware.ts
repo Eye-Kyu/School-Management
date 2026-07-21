@@ -6,6 +6,7 @@ const ROLE_HOME: Record<string, string> = {
   TEACHER: '/teacher',
   STUDENT: '/student',
   PARENT: '/parent',
+  SUPER_ADMIN: '/super-admin',
 };
 
 const PUBLIC_PATHS = ['/login', '/reset-password', '/update-password', '/', '/pricing', '/safety'];
@@ -38,7 +39,7 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
-  const isDashboard = /^\/(admin|teacher|student|parent)/.test(pathname);
+  const isDashboard = /^\/(admin|teacher|student|parent|super-admin)/.test(pathname);
 
   if (!user && isDashboard) {
     const url = request.nextUrl.clone();

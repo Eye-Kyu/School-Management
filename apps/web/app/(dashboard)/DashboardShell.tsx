@@ -6,8 +6,9 @@ import Link from 'next/link';
 import LogoutButton from './LogoutButton';
 import AvatarDropdown from '@/components/AvatarDropdown';
 import { apiFetch } from '@/lib/api';
+import { useModuleAccess } from '@/lib/hooks/useModuleAccess';
 
-type NavItem = { href: string; label: string; badgeKey?: string };
+type NavItem = { href: string; label: string; badgeKey?: string; moduleKey?: string };
 
 const NAV: Record<string, NavItem[]> = {
   ADMIN: [
@@ -22,30 +23,30 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/admin/fees',          label: 'Fees' },
     { href: '/admin/attendance',    label: 'Attendance' },
     { href: '/admin/announcements', label: 'Announcements' },
-    { href: '/admin/events',        label: 'Events' },
+    { href: '/admin/events',        label: 'Events', moduleKey: 'events' },
     { href: '/admin/messages',      label: 'Messages' },
-    { href: '/admin/documents',       label: 'Documents' },
-    { href: '/admin/report-cards',    label: 'Report Cards' },
+    { href: '/admin/documents',       label: 'Documents', moduleKey: 'document_library' },
+    { href: '/admin/report-cards',    label: 'Report Cards', moduleKey: 'assessments' },
     { href: '/admin/analytics',       label: 'Analytics' },
-    { href: '/admin/behaviour',       label: 'Behaviour' },
-    { href: '/admin/permission-slips',label: 'Permission Slips' },
-    { href: '/admin/safety-tips',     label: 'Safety Tips' },
-    { href: '/admin/substitutes',     label: 'Substitutes' },
-    { href: '/admin/compliance',      label: 'Compliance & API' },
-    { href: '/admin/payments',        label: 'Payments' },
+    { href: '/admin/behaviour',       label: 'Behaviour', moduleKey: 'behaviour_tracking' },
+    { href: '/admin/permission-slips',label: 'Permission Slips', moduleKey: 'permission_slips' },
+    { href: '/admin/safety-tips',     label: 'Safety Tips', moduleKey: 'safety_tipline' },
+    { href: '/admin/substitutes',     label: 'Substitutes', moduleKey: 'substitute_management' },
+    { href: '/admin/compliance',      label: 'Compliance & API', moduleKey: 'compliance_api' },
+    { href: '/admin/payments',        label: 'Payments', moduleKey: 'payments' },
     { href: '/admin/setup',           label: 'Setup checklist' },
   ],
   TEACHER: [
     { href: '/teacher',             label: 'Dashboard' },
     { href: '/teacher/schedule',    label: 'Schedule' },
     { href: '/teacher/attendance',  label: 'Attendance' },
-    { href: '/teacher/assessments', label: 'Assessments' },
-    { href: '/teacher/homework',    label: 'Homework' },
+    { href: '/teacher/assessments', label: 'Assessments', moduleKey: 'assessments' },
+    { href: '/teacher/homework',    label: 'Homework', moduleKey: 'homework' },
     { href: '/teacher/assignments',  label: 'Assignments' },
-    { href: '/teacher/quizzes',     label: 'Quizzes' },
-    { href: '/teacher/gradebook',   label: 'Gradebook' },
+    { href: '/teacher/quizzes',     label: 'Quizzes', moduleKey: 'quizzes' },
+    { href: '/teacher/gradebook',   label: 'Gradebook', moduleKey: 'assessments' },
     { href: '/teacher/analytics',   label: 'Analytics' },
-    { href: '/teacher/behaviour',   label: 'Behaviour' },
+    { href: '/teacher/behaviour',   label: 'Behaviour', moduleKey: 'behaviour_tracking' },
     { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
   STUDENT: [
@@ -53,11 +54,11 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/student/timetable',   label: 'Timetable' },
     { href: '/student/grades',      label: 'Grades' },
     { href: '/student/attendance',  label: 'Attendance' },
-    { href: '/student/homework',    label: 'Homework' },
+    { href: '/student/homework',    label: 'Homework', moduleKey: 'homework' },
     { href: '/student/assignments', label: 'Assignments' },
-    { href: '/student/quizzes',     label: 'Quizzes' },
+    { href: '/student/quizzes',     label: 'Quizzes', moduleKey: 'quizzes' },
     { href: '/student/analytics',   label: 'Analytics' },
-    { href: '/student/tutor',       label: '✨ AI Tutor' },
+    { href: '/student/tutor',       label: '✨ AI Tutor', moduleKey: 'ai_features' },
   ],
   PARENT: [
     { href: '/parent',              label: 'Dashboard' },
@@ -65,9 +66,12 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/parent/grades',       label: 'Grades' },
     { href: '/parent/attendance',   label: 'Attendance' },
     { href: '/parent/fees',         label: 'Fees' },
-    { href: '/parent/homework',           label: 'Homework' },
-    { href: '/parent/permission-slips',   label: 'Permission Slips' },
+    { href: '/parent/homework',           label: 'Homework', moduleKey: 'homework' },
+    { href: '/parent/permission-slips',   label: 'Permission Slips', moduleKey: 'permission_slips' },
     { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
+  ],
+  SUPER_ADMIN: [
+    { href: '/super-admin', label: 'Schools' },
   ],
 };
 
@@ -108,6 +112,7 @@ export default function DashboardShell({
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [msgUnread, setMsgUnread] = useState(0);
+  const { isModuleEnabled } = useModuleAccess();
 
   useEffect(() => {
     if (role === 'TEACHER' || role === 'PARENT') {
@@ -117,9 +122,11 @@ export default function DashboardShell({
     }
   }, [role, pathname]);
 
-  const links = (NAV[role] ?? []).map((link) =>
-    link.badgeKey === 'messages' ? { ...link, badge: msgUnread || undefined } : link,
-  );
+  const links = (NAV[role] ?? [])
+    .filter((link) => !link.moduleKey || isModuleEnabled(link.moduleKey))
+    .map((link) =>
+      link.badgeKey === 'messages' ? { ...link, badge: msgUnread || undefined } : link,
+    );
   const close = () => setSidebarOpen(false);
 
   return (

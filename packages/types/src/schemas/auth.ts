@@ -2,9 +2,11 @@ import { z } from 'zod';
 import { PhoneNumber } from './common';
 
 // =============================================================================
-// User roles - the four core personas
+// User roles - the four tenant-scoped personas, plus the platform-level
+// SUPER_ADMIN (no home school; never accepted as client input on any
+// create/update-user endpoint — assignment stays a backend/manual operation).
 // =============================================================================
-export const UserRole = z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT']);
+export const UserRole = z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'SUPER_ADMIN']);
 export type UserRole = z.infer<typeof UserRole>;
 
 // =============================================================================
@@ -51,10 +53,11 @@ export type PasswordResetConfirmInput = z.infer<typeof PasswordResetConfirmInput
 // =============================================================================
 export const AuthenticatedUser = z.object({
   id: z.string().uuid(),
-  schoolId: z.string().uuid(),
+  schoolId: z.string().uuid().nullable(),
   email: z.string().email().nullable(),
   phone: z.string().nullable(),
   fullName: z.string(),
   role: UserRole,
+  enabledModules: z.array(z.string()),
 });
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUser>;

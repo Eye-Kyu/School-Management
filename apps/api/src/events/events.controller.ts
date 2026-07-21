@@ -3,6 +3,8 @@ import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import {
   CreateEventInput, type CreateEventInput as CreateEventInputType,
   UpdateEventInput, type UpdateEventInput as UpdateEventInputType,
@@ -10,7 +12,8 @@ import {
 import { EventsService } from './events.service';
 
 @Controller('events')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, FeatureGuard)
+@RequireModule('events')
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 

@@ -23,6 +23,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AiModule } from './ai/ai.module';
+import { SuperAdminModule } from './super-admin/super-admin.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { AiModule } from './ai/ai.module';
     MessagingModule,
     PaymentsModule,
     AiModule,
+    SuperAdminModule,
   ],
   controllers: [AppController],
 })

@@ -6,12 +6,15 @@ import { randomUUID } from 'crypto';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
+import { FeatureGuard } from '../common/guards/feature.guard';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import { AiService } from './ai.service';
 import { SupabaseService } from '../supabase/supabase.service';
 
 @ApiTags('ai')
 @ApiBearerAuth()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, FeatureGuard)
+@RequireModule('ai_features')
 @Controller('ai')
 export class AiController {
   constructor(
