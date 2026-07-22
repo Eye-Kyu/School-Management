@@ -28,7 +28,7 @@ export default async function StudentAnalyticsPage({ searchParams }: { searchPar
   // Grades
   const { data: assessments } = student && termId
     ? await supabase.from('assessments')
-        .select('id, name, max_score, weight, subject:subjects(id, name)')
+        .select('id, name, max_marks, subject:subjects(id, name)')
         .eq('class_id', student.current_class_id ?? '').eq('term_id', termId)
     : { data: [] };
 
@@ -59,15 +59,13 @@ export default async function StudentAnalyticsPage({ searchParams }: { searchPar
     const subAssessments = (assessments ?? []).filter((x) => (x.subject as any)?.id === sub.id);
     const scored = subAssessments.filter((x) => gradeMap[x.id] != null);
     if (scored.length) {
-      const ws = scored.reduce((s, x) => s + (gradeMap[x.id]! / x.max_score) * x.weight, 0);
-      const wt = scored.reduce((s, x) => s + x.weight, 0);
-      row.myAvg = wt > 0 ? (ws / wt) * 100 : null;
+      const pctSum = scored.reduce((s, x) => s + (gradeMap[x.id]! / x.max_marks) * 100, 0);
+      row.myAvg = pctSum / scored.length;
     }
     const classSc = subAssessments.filter((x) => classAvgMap[x.id] != null);
     if (classSc.length) {
-      const ws = classSc.reduce((s, x) => s + (classAvgMap[x.id]! / x.max_score) * x.weight, 0);
-      const wt = classSc.reduce((s, x) => s + x.weight, 0);
-      row.classAvg = wt > 0 ? (ws / wt) * 100 : null;
+      const pctSum = classSc.reduce((s, x) => s + (classAvgMap[x.id]! / x.max_marks) * 100, 0);
+      row.classAvg = pctSum / classSc.length;
     }
   }
 

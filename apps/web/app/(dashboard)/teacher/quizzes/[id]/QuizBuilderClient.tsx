@@ -18,11 +18,10 @@ type Attempt = {
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
 function ShortAnswerReview({
-  attempts, questions, quizId, onScoreUpdate,
+  attempts, questions, onScoreUpdate,
 }: {
   attempts: Attempt[];
   questions: Question[];
-  quizId: string;
   onScoreUpdate: (attemptId: string, newScore: number) => void;
 }) {
   const supabase = createClient();
@@ -46,18 +45,9 @@ function ShortAnswerReview({
       .update({ score: newScore })
       .eq('id', attempt.id);
 
-    // Write to grades table
-    const { data: authData } = await supabase.auth.getUser();
-    const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
-    await supabase.from('grades').upsert({
-      school_id: userRow?.school_id,
-      assessment_id: quizId, // quiz acts as an assessment
-      student_id: attempt.student_id,
-      score: newScore,
-      comment: `Quiz score (${attempt.max_score ? `${newScore}/${attempt.max_score}` : newScore})`,
-      graded_by_id: userRow?.id,
-      graded_at: new Date().toISOString(),
-    }, { onConflict: 'assessment_id,student_id' });
+    // Quiz scores live entirely in quiz_attempts (their own score/max_score
+    // columns) — quiz results are never pushed into the gradebook's `grades`
+    // table, which is scoped to real teacher-created `assessments` rows only.
 
     onScoreUpdate(attempt.id, newScore);
     setSaving((p) => ({ ...p, [key]: false }));
@@ -80,7 +70,7 @@ function ShortAnswerReview({
                 disabled={saving[key]}
                 className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500 disabled:opacity-50"
               >
-                {saving[key] ? 'Saving…' : 'Finalise & push to grades'}
+                {saving[key] ? 'Saving…' : 'Finalise score'}
               </button>
             </div>
             {questions.map((q) => (
@@ -286,7 +276,6 @@ export default function QuizBuilderClient({
         <ShortAnswerReview
           attempts={attempts}
           questions={questions.filter((q) => q.kind === 'SHORT_ANSWER')}
-          quizId={quiz.id}
           onScoreUpdate={(attemptId, newScore) =>
             setAttempts((prev) =>
               prev.map((a) => a.id === attemptId ? { ...a, score: newScore } : a)

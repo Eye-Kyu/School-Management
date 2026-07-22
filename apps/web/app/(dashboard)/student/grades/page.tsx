@@ -36,7 +36,7 @@ export default async function StudentGradesPage({
   if (student && currentTermId) {
     const { data: assessments } = await supabase
       .from('assessments')
-      .select('id, name, kind, max_score, weight, date, subject:subjects(id, name)')
+      .select('id, name, max_marks, assessment_date, subject:subjects(id, name)')
       .eq('class_id', student.current_class_id ?? '')
       .eq('term_id', currentTermId);
 
@@ -67,12 +67,11 @@ export default async function StudentGradesPage({
     (bySubject[sub.id] ??= { name: sub.name, rows: [] }).rows.push(row);
   }
 
-  function weightedAvg(rows: any[]) {
+  function average(rows: any[]) {
     const scored = rows.filter((r) => r.grade?.score != null);
     if (!scored.length) return null;
-    const ws = scored.reduce((s: number, r: any) => s + (r.grade.score / r.max_score) * r.weight, 0);
-    const wt = scored.reduce((s: number, r: any) => s + r.weight, 0);
-    return wt > 0 ? ((ws / wt) * 100).toFixed(1) : null;
+    const pctSum = scored.reduce((s: number, r: any) => s + (r.grade.score / r.max_marks) * 100, 0);
+    return (pctSum / scored.length).toFixed(1);
   }
 
   const selectedTermName = (terms ?? []).find((t) => t.id === currentTermId)?.name ?? 'this term';
@@ -118,7 +117,7 @@ export default async function StudentGradesPage({
       ) : (
         <div className="space-y-5">
           {Object.entries(bySubject).map(([, group]) => {
-            const avg = weightedAvg(group.rows);
+            const avg = average(group.rows);
             return (
               <div key={group.name} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -137,7 +136,6 @@ export default async function StudentGradesPage({
                   <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                     <tr>
                       <th className="px-5 py-2 text-left font-medium">Assessment</th>
-                      <th className="px-4 py-2 text-center font-medium">Type</th>
                       <th className="px-4 py-2 text-center font-medium">Score</th>
                       <th className="px-4 py-2 text-center font-medium">%</th>
                       <th className="px-5 py-2 text-left font-medium hidden sm:table-cell">Comment</th>
@@ -146,7 +144,7 @@ export default async function StudentGradesPage({
                   <tbody>
                     {group.rows.map((row) => {
                       const score = row.grade?.score;
-                      const pct = typeof score === 'number' ? ((score / row.max_score) * 100).toFixed(1) : null;
+                      const pct = typeof score === 'number' ? ((score / row.max_marks) * 100).toFixed(1) : null;
                       const color = pct === null ? 'text-slate-400'
                         : parseFloat(pct) >= 70 ? 'text-emerald-700 font-semibold'
                         : parseFloat(pct) >= 50 ? 'text-amber-600 font-semibold'
@@ -154,9 +152,8 @@ export default async function StudentGradesPage({
                       return (
                         <tr key={row.id} className="border-t border-slate-100">
                           <td className="px-5 py-2.5 text-slate-800">{row.name}</td>
-                          <td className="px-4 py-2.5 text-center text-slate-500 text-xs">{row.kind}</td>
                           <td className="px-4 py-2.5 text-center">
-                            {typeof score === 'number' ? `${score} / ${row.max_score}` : '—'}
+                            {typeof score === 'number' ? `${score} / ${row.max_marks}` : '—'}
                           </td>
                           <td className={`px-4 py-2.5 text-center ${color}`}>{pct ? `${pct}%` : '—'}</td>
                           <td className="px-5 py-2.5 text-slate-400 text-xs hidden sm:table-cell">

@@ -10,7 +10,7 @@ export default async function GradeEntryPage({ params }: { params: { id: string 
 
   const { data: assessment } = await supabase
     .from('assessments')
-    .select('id, name, max_marks:max_score, assessment_date:date, class:classes(id, name), subject:subjects(name, code), term:terms(name)')
+    .select('id, name, max_marks, assessment_date, class:classes(id, name), subject:subjects(name, code), term:terms(name)')
     .eq('id', params.id)
     .maybeSingle();
 

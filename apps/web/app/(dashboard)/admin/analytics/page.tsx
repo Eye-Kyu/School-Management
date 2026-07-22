@@ -71,7 +71,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
 
   // Exam pass rates per subject (grades ≥50%)
   const { data: assessments } = termId
-    ? await supabase.from('assessments').select('id, subject_id, max_score').eq('term_id', termId)
+    ? await supabase.from('assessments').select('id, subject_id, max_marks').eq('term_id', termId)
     : { data: [] };
   const aIds = (assessments ?? []).map((a) => a.id);
   const { data: allGrades } = aIds.length
@@ -85,7 +85,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
     if (!subGrades.length) return null;
     const passing = subGrades.filter((g) => {
       const a = subAssessments.find((x) => x.id === g.assessment_id)!;
-      return (g.score! / a.max_score) * 100 >= 50;
+      return (g.score! / a.max_marks) * 100 >= 50;
     }).length;
     return { name: s.name, rate: (passing / subGrades.length) * 100, total: subGrades.length };
   }).filter(Boolean) as { name: string; rate: number; total: number }[];

@@ -24,6 +24,12 @@ import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AiModule } from './ai/ai.module';
 import { SuperAdminModule } from './super-admin/super-admin.module';
+import { PrivilegedAccessModule } from './privileged-access/privileged-access.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { BillingModule } from './billing/billing.module';
+import { SystemHealthModule } from './system-health/system-health.module';
+import { PlatformUsersModule } from './platform-users/platform-users.module';
+import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 
 @Module({
   imports: [
@@ -50,6 +56,12 @@ import { SuperAdminModule } from './super-admin/super-admin.module';
     PaymentsModule,
     AiModule,
     SuperAdminModule,
+    PrivilegedAccessModule,
+    AuditLogsModule,
+    BillingModule,
+    SystemHealthModule,
+    PlatformUsersModule,
+    PlatformSettingsModule,
   ],
   controllers: [AppController],
 })

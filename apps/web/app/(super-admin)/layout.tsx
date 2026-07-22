@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import DashboardShell from '../(dashboard)/DashboardShell';
+import SuperAdminShell from './SuperAdminShell';
 
 export default async function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -19,8 +19,8 @@ export default async function SuperAdminLayout({ children }: { children: React.R
   const displayName = userRow?.full_name ?? user.email ?? 'Super Admin';
 
   return (
-    <DashboardShell role="SUPER_ADMIN" displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
+    <SuperAdminShell displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
       {children}
-    </DashboardShell>
+    </SuperAdminShell>
   );
 }

@@ -49,6 +49,33 @@ export const PasswordResetConfirmInput = z
 export type PasswordResetConfirmInput = z.infer<typeof PasswordResetConfirmInput>;
 
 // =============================================================================
+// Platform permissions - granular capabilities within the SUPER_ADMIN role.
+// Additive on top of UserRole so capabilities can later be split across
+// multiple platform-level roles (PLATFORM_SUPPORT, PLATFORM_FINANCE, etc.)
+// without a schema change. See docs on the SuperAdmin control plane refactor.
+// =============================================================================
+export const PlatformPermission = z.enum([
+  'VIEW_SCHOOLS',
+  'MANAGE_SCHOOLS',
+  'VIEW_MODULES',
+  'MANAGE_MODULES',
+  'VIEW_PACKAGES',
+  'MANAGE_PACKAGES',
+  'VIEW_CURRICULUM',
+  'MANAGE_CURRICULUM',
+  'VIEW_PLATFORM_USERS',
+  'MANAGE_PLATFORM_USERS',
+  'VIEW_BILLING',
+  'MANAGE_BILLING',
+  'VIEW_PLATFORM_ANALYTICS',
+  'VIEW_AUDIT_LOGS',
+  'GRANT_PRIVILEGED_ACCESS',
+  'VIEW_SYSTEM_HEALTH',
+  'MANAGE_PLATFORM_SETTINGS',
+]);
+export type PlatformPermission = z.infer<typeof PlatformPermission>;
+
+// =============================================================================
 // Authenticated user payload (returned by /me)
 // =============================================================================
 export const AuthenticatedUser = z.object({
@@ -59,5 +86,6 @@ export const AuthenticatedUser = z.object({
   fullName: z.string(),
   role: UserRole,
   enabledModules: z.array(z.string()),
+  platformPermissions: z.array(PlatformPermission),
 });
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUser>;

@@ -28,7 +28,7 @@ model School {
   address   String?
   logoUrl   String?  @map("logo_url")
   timezone  String   @default("Africa/Nairobi")
-  isActive  Boolean  @default(true) @map("is_active")
+  status    String   @default("ACTIVE") // ACTIVE | INACTIVE | SUSPENDED | ARCHIVED
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

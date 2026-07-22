@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import BackButton from '@/components/BackButton';
+import { API_BASE } from '@/lib/api';
 
 type Message = { role: 'user' | 'assistant'; content: string; loading?: boolean };
 
@@ -44,7 +45,7 @@ export default function AiTutorPage() {
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/ai/tutor`,
+        `${API_BASE}/ai/tutor`,
         {
           method: 'POST',
           headers: {

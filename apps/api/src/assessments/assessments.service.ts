@@ -3,6 +3,8 @@ import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { CreateAssessmentInput, UpsertScoresInput } from '@school-manager/types';
 
+const ASSESSMENT_COLUMNS = 'id, name, max_marks, assessment_date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)';
+
 @Injectable()
 export class AssessmentsService {
   constructor(private readonly supabase: SupabaseService) {}
@@ -15,7 +17,7 @@ export class AssessmentsService {
     if (userRow?.role === 'ADMIN') {
       const { data, error } = await client
         .from('assessments')
-        .select('id, name, max_marks:max_score, assessment_date:date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)')
+        .select(ASSESSMENT_COLUMNS)
         .order('created_at', { ascending: false });
       if (error) throw new BadRequestException(error.message);
       return data ?? [];
@@ -29,12 +31,12 @@ export class AssessmentsService {
 
     if (!teacher) throw new ForbiddenException('Teacher record not found');
 
-    // `assessments` has no teacher_id column — a teacher's own assessments
-    // are the ones they created (created_by_id), not a per-row FK to teachers.
+    // A teacher's own assessments are the ones assigned to them (teacher_id),
+    // not the ones they happened to click "create" on.
     const { data, error } = await client
       .from('assessments')
-      .select('id, name, max_marks:max_score, assessment_date:date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)')
-      .eq('created_by_id', userRow!.id)
+      .select(ASSESSMENT_COLUMNS)
+      .eq('teacher_id', teacher.id)
       .order('created_at', { ascending: false });
     if (error) throw new BadRequestException(error.message);
     return data ?? [];
@@ -50,6 +52,7 @@ export class AssessmentsService {
       { id: string; role: string } | null;
     if (!userRow) throw new ForbiddenException('User record not found');
 
+    let teacherId: string;
     if (userRow.role === 'ADMIN') {
       const { data: assignment } = await client
         .from('subject_assignments')
@@ -58,6 +61,7 @@ export class AssessmentsService {
         .eq('subject_id', input.subjectId)
         .maybeSingle();
       if (!assignment) throw new BadRequestException('No teacher assigned to this class/subject combination');
+      teacherId = assignment.teacher_id;
     } else if (userRow.role === 'TEACHER') {
       const { data: teacher } = await client
         .from('teachers')
@@ -74,12 +78,11 @@ export class AssessmentsService {
         .eq('subject_id', input.subjectId)
         .maybeSingle();
       if (!assignment) throw new ForbiddenException('You are not assigned to teach this subject in this class');
+      teacherId = teacher.id;
     } else {
       throw new ForbiddenException('Only teachers and admins can create assessments');
     }
 
-    // `assessments` has no description/teacher_id/updated_at columns; `kind`
-    // is required with no client-facing equivalent, so default it to OTHER.
     const { data, error } = await client
       .from('assessments')
       .insert({
@@ -88,13 +91,13 @@ export class AssessmentsService {
         term_id: input.termId,
         class_id: input.classId,
         subject_id: input.subjectId,
-        created_by_id: userRow.id,
+        teacher_id: teacherId,
         name: input.name,
-        kind: 'OTHER',
-        max_score: input.maxMarks,
-        date: input.assessmentDate ?? null,
+        description: input.description ?? null,
+        max_marks: input.maxMarks,
+        assessment_date: input.assessmentDate ?? null,
       })
-      .select('id, name, max_marks:max_score, assessment_date:date, term:terms(name), class:classes(name), subject:subjects(name, code)')
+      .select('id, name, max_marks, assessment_date, term:terms(name), class:classes(name), subject:subjects(name, code)')
       .single();
     if (error) throw new BadRequestException(error.message);
     return data;
@@ -105,7 +108,7 @@ export class AssessmentsService {
 
     const { data: assessment } = await client
       .from('assessments')
-      .select('id, max_marks:max_score')
+      .select('id, max_marks')
       .eq('id', assessmentId)
       .maybeSingle();
     if (!assessment) throw new NotFoundException('Assessment not found');
@@ -159,7 +162,7 @@ export class AssessmentsService {
 
     let q = client
       .from('grades')
-      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks:max_score, assessment_date:date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
+      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks, assessment_date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
       .eq('student_id', studentId)
       .order('created_at', { ascending: false });
 

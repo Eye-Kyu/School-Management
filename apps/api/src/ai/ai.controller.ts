@@ -70,7 +70,7 @@ export class AiController {
     // Fetch grade averages for this term
     const { data: assessments } = await client
       .from('assessments')
-      .select('id, max_score, subject:subjects!subject_id(name)')
+      .select('id, max_marks, subject:subjects!subject_id(name)')
       .eq('term_id', body.termId);
 
     const aIds = (assessments ?? []).map((a) => a.id);
@@ -86,8 +86,8 @@ export class AiController {
       const subName = (a.subject as unknown as { name: string }[])?.[0]?.name ?? 'Unknown';
       if (!subjectMap[subName]) subjectMap[subName] = { sum: 0, count: 0, name: subName };
       const score = gradeMap[a.id];
-      if (score != null && a.max_score > 0) {
-        subjectMap[subName]!.sum += (score / a.max_score) * 100;
+      if (score != null && a.max_marks > 0) {
+        subjectMap[subName]!.sum += (score / a.max_marks) * 100;
         subjectMap[subName]!.count++;
       }
     }

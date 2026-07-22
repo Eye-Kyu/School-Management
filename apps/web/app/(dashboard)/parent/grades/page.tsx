@@ -45,7 +45,7 @@ export default async function ParentGradesPage({
   if (activeStudentId && termId) {
     const { data } = await supabase
       .from('grades')
-      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks:max_score, assessment_date:date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
+      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks, assessment_date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
       .eq('student_id', activeStudentId)
       .eq('assessments.term_id', termId)
       .order('created_at', { ascending: false });

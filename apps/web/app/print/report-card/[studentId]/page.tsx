@@ -47,7 +47,7 @@ export default async function ReportCardPage({
   // Grades grouped by subject
   const { data: assessments } = await supabase
     .from('assessments')
-    .select('id, name, kind, max_score, weight, subject:subjects(id, name)')
+    .select('id, name, max_marks, subject:subjects(id, name)')
     .eq('class_id', student.current_class_id ?? '')
     .eq('term_id', termId ?? '');
 
@@ -58,7 +58,7 @@ export default async function ReportCardPage({
 
   const gradeMap = Object.fromEntries((grades ?? []).map((g) => [g.assessment_id, g.score]));
 
-  // Group by subject → weighted average
+  // Group by subject → average
   type SubjectRow = { name: string; assessmentCount: number; avg: number | null };
   const bySubject: Record<string, SubjectRow> = {};
   for (const a of assessments ?? []) {
@@ -68,14 +68,13 @@ export default async function ReportCardPage({
     const row = bySubject[sub.id]!;
     row.assessmentCount++;
   }
-  // Compute weighted avg per subject
+  // Compute average percentage per subject
   for (const subId of Object.keys(bySubject)) {
     const subAssessments = (assessments ?? []).filter((a) => (a.subject as any)?.id === subId);
     const scored = subAssessments.filter((a) => gradeMap[a.id] != null);
     if (scored.length === 0) { bySubject[subId]!.avg = null; continue; }
-    const ws = scored.reduce((s, a) => s + (gradeMap[a.id]! / a.max_score) * a.weight, 0);
-    const wt = scored.reduce((s, a) => s + a.weight, 0);
-    bySubject[subId]!.avg = wt > 0 ? (ws / wt) * 100 : null;
+    const pctSum = scored.reduce((s, a) => s + (gradeMap[a.id]! / a.max_marks) * 100, 0);
+    bySubject[subId]!.avg = pctSum / scored.length;
   }
 
   // Attendance for the term

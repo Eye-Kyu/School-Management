@@ -7,11 +7,9 @@ import { createClient } from '@/lib/supabase/client';
 type ClassItem  = { id: string; name: string; grade_level: number };
 type Subject    = { id: string; name: string };
 type Term       = { id: string; name: string; is_current: boolean };
-type Assessment = { id: string; name: string; kind: string; max_score: number; weight: number; date: string | null };
+type Assessment = { id: string; name: string; max_marks: number; assessment_date: string | null };
 type Student    = { id: string; user: { full_name: string } };
 type Grade      = { student_id: string; score: number | null; comment: string | null };
-
-const KINDS = ['QUIZ','TEST','EXAM','CAT','ASSIGNMENT','OTHER'];
 
 export default function GradebookClient({
   teacherId, myClasses, subjects, terms, currentTermId,
@@ -36,9 +34,7 @@ export default function GradebookClient({
   // New assessment form
   const [showForm, setShowForm]   = useState(false);
   const [aName, setAName]         = useState('');
-  const [aKind, setAKind]         = useState('TEST');
   const [aMax, setAMax]           = useState('100');
-  const [aWeight, setAWeight]     = useState('1');
   const [aDate, setADate]         = useState('');
   const [creating, setCreating]   = useState(false);
 
@@ -49,9 +45,9 @@ export default function GradebookClient({
     setLoading(true);
     const [{ data: aData }, { data: sData }] = await Promise.all([
       supabase.from('assessments')
-        .select('id, name, kind, max_score, weight, date')
+        .select('id, name, max_marks, assessment_date')
         .eq('class_id', classId).eq('subject_id', subjectId).eq('term_id', termId)
-        .order('date', { ascending: true }),
+        .order('assessment_date', { ascending: true }),
       supabase.from('students')
         .select('id, user:users!user_id(full_name)')
         .eq('current_class_id', classId).eq('is_active', true)
@@ -90,12 +86,10 @@ export default function GradebookClient({
       class_id: classId,
       subject_id: subjectId,
       term_id: termId || null,
-      created_by_id: userRow?.id,
+      teacher_id: teacherId,
       name: aName.trim(),
-      kind: aKind,
-      max_score: parseFloat(aMax) || 100,
-      weight: parseFloat(aWeight) || 1,
-      date: aDate || null,
+      max_marks: parseFloat(aMax) || 100,
+      assessment_date: aDate || null,
     });
     setAName(''); setADate(''); setShowForm(false); setCreating(false);
     load();
@@ -118,34 +112,30 @@ export default function GradebookClient({
         assessment_id: assessmentId,
         student_id: studentId,
         score: score,
-        graded_by_id: userRow?.id,
-        graded_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'assessment_id,student_id' });
     }, 800);
   }
 
-  function classAvg(assessmentId: string, maxScore: number): string {
+  function classAvg(assessmentId: string, maxMarks: number): string {
     const scores = students
       .map((s) => grades[assessmentId]?.[s.id])
       .filter((v): v is number => typeof v === 'number');
     if (!scores.length) return '—';
     const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-    return `${avg.toFixed(1)} / ${maxScore}`;
+    return `${avg.toFixed(1)} / ${maxMarks}`;
   }
 
   function studentAvg(studentId: string): string {
     const scored = assessments
       .map((a) => ({
         score: grades[a.id]?.[studentId],
-        max: a.max_score,
-        weight: a.weight,
+        max: a.max_marks,
       }))
       .filter((x) => typeof x.score === 'number');
     if (!scored.length) return '—';
-    const weightedSum = scored.reduce((s, x) => s + (x.score! / x.max) * x.weight, 0);
-    const totalWeight = scored.reduce((s, x) => s + x.weight, 0);
-    return `${((weightedSum / totalWeight) * 100).toFixed(1)}%`;
+    const avgPct = scored.reduce((s, x) => s + (x.score! / x.max) * 100, 0) / scored.length;
+    return `${avgPct.toFixed(1)}%`;
   }
 
   const filteredSubjects = subjects; // all subjects (teacher can enter grades for any)
@@ -187,7 +177,7 @@ export default function GradebookClient({
               {assessments.length > 0 && students.length > 0 && (
                 <button
                   onClick={() => {
-                    const header = ['Student', ...assessments.map((a) => `${a.name} (/${a.max_score})`), 'Avg %'];
+                    const header = ['Student', ...assessments.map((a) => `${a.name} (/${a.max_marks})`), 'Avg %'];
                     const rows = students.map((s) => [
                       (s.user as any)?.full_name ?? '',
                       ...assessments.map((a) => {
@@ -227,20 +217,8 @@ export default function GradebookClient({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
-                <select value={aKind} onChange={(e) => setAKind(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  {KINDS.map((k) => <option key={k}>{k}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Max score</label>
                 <input type="number" min="1" value={aMax} onChange={(e) => setAMax(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Weight</label>
-                <input type="number" min="0.1" step="0.1" value={aWeight} onChange={(e) => setAWeight(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
               <div>
@@ -275,8 +253,8 @@ export default function GradebookClient({
                     {assessments.map((a) => (
                       <th key={a.id} className="px-3 py-3 text-center font-medium text-slate-600 min-w-[100px]">
                         <div>{a.name}</div>
-                        <div className="text-xs font-normal text-slate-400">{a.kind} · /{a.max_score}</div>
-                        {a.date && <div className="text-xs font-normal text-slate-400">{new Date(a.date).toLocaleDateString('en-KE', { day:'numeric', month:'short' })}</div>}
+                        <div className="text-xs font-normal text-slate-400">/{a.max_marks}</div>
+                        {a.assessment_date && <div className="text-xs font-normal text-slate-400">{new Date(a.assessment_date).toLocaleDateString('en-KE', { day:'numeric', month:'short' })}</div>}
                       </th>
                     ))}
                     <th className="px-4 py-3 text-center font-medium text-slate-600 min-w-[80px]">Avg</th>
@@ -290,14 +268,14 @@ export default function GradebookClient({
                       </td>
                       {assessments.map((a) => {
                         const score = grades[a.id]?.[s.id];
-                        const pct = typeof score === 'number' ? (score / a.max_score) * 100 : null;
+                        const pct = typeof score === 'number' ? (score / a.max_marks) * 100 : null;
                         const color = pct === null ? '' : pct >= 70 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-600' : 'text-rose-600';
                         return (
                           <td key={a.id} className="px-2 py-1.5 text-center">
                             <input
                               type="number"
                               min={0}
-                              max={a.max_score}
+                              max={a.max_marks}
                               step="0.5"
                               value={typeof score === 'number' ? score : ''}
                               onChange={(e) => handleScoreChange(a.id, s.id, e.target.value)}
@@ -318,7 +296,7 @@ export default function GradebookClient({
                     <td className="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-slate-600">Class avg</td>
                     {assessments.map((a) => (
                       <td key={a.id} className="px-4 py-2 text-center text-slate-600 text-xs">
-                        {classAvg(a.id, a.max_score)}
+                        {classAvg(a.id, a.max_marks)}
                       </td>
                     ))}
                     <td />

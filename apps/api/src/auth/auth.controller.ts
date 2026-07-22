@@ -22,14 +22,14 @@ export class AuthController {
 
     const { data, error } = await client
       .from('users')
-      .select('id, school_id, email, phone, full_name, role')
+      .select('id, school_id, email, phone, full_name, role, platform_permissions')
       .eq('auth_id', user.id)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
     if (!data) throw new NotFoundException('User profile not found');
 
-    const enabledModules = data.school_id ? await this.getEnabledModules(client, data.school_id) : [];
+    const enabledModules = data.school_id ? await this.getEnabledModules(data.school_id) : [];
 
     return {
       id: data.id,
@@ -39,21 +39,20 @@ export class AuthController {
       fullName: data.full_name,
       role: data.role,
       enabledModules,
+      platformPermissions: (data.platform_permissions as string[] | null) ?? [],
     };
   }
 
-  /** All module keys currently enabled for a school — no row for a key means enabled. */
-  private async getEnabledModules(client: ReturnType<SupabaseService['forUser']>, schoolId: string): Promise<string[]> {
-    const { data: allModules } = await client.from('modules').select('key');
-    const { data: schoolModules } = await client
-      .from('school_modules')
-      .select('module_key, enabled')
-      .eq('school_id', schoolId);
-
-    const disabled = new Set(
-      (schoolModules ?? []).filter((m) => m.enabled === false).map((m) => m.module_key as string),
-    );
-    return (allModules ?? []).map((m) => m.key as string).filter((key) => !disabled.has(key));
+  /**
+   * All module keys currently enabled for a school — single source of truth
+   * via the effective_enabled_modules() SQL function (school_modules
+   * override > core > package entitlement > default-enabled). Uses the
+   * admin client for the RPC call, matching FeatureGuard's existing pattern
+   * for calling module_enabled()-family functions.
+   */
+  private async getEnabledModules(schoolId: string): Promise<string[]> {
+    const { data } = await this.supabase.admin.rpc('effective_enabled_modules', { p_school_id: schoolId });
+    return ((data as { module_key: string }[] | null) ?? []).map((r) => r.module_key);
   }
 
   @Post('events')

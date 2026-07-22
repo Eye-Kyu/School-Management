@@ -50,7 +50,7 @@ export default async function ReportCardPage({
   const { data: rawScores } = termId
     ? await supabase
         .from('grades')
-        .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks:max_score, assessment_date:date, subject:subjects(id, name, code))')
+        .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks, assessment_date, subject:subjects(id, name, code))')
         .eq('student_id', studentId)
         .eq('assessments.term_id', termId)
         .order('created_at', { ascending: true })

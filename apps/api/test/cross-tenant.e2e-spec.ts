@@ -53,6 +53,20 @@ describe('Cross-tenant isolation (e2e)', () => {
   let documentBId: string;
   let quizAId: string;
   let quizBId: string;
+  // Set by the Phase 2 school-management "create" test; cleaned up in afterAll.
+  let createdSchoolId: string | undefined;
+  // Set by the Phase 3 onboarding tests; cleaned up in afterAll.
+  let onboardedSchoolId: string | undefined;
+  let onboardedAdminAuthId: string | undefined;
+  // Set by the Phase 5 package tests; cleaned up in afterAll.
+  let createdPackageId: string | undefined;
+  // Set by the Phase 6 entitlement-engine tests; cleaned up in afterAll.
+  let entitlementSchoolId: string | undefined;
+  // Set by the Phase 8 curriculum tests; cleaned up in afterAll.
+  let createdCurriculumId: string | undefined;
+  // Set by the Phase 12 billing tests — no separate afterAll cleanup needed,
+  // platform_invoices.school_id cascades away when schoolAId is deleted below.
+  let createdInvoiceId: string | undefined;
 
   // JWT access tokens for each school's admin
   let tokenA: string;
@@ -61,6 +75,12 @@ describe('Cross-tenant isolation (e2e)', () => {
   let tokenStudentA: string;
   // Platform-level token, used for module-toggle tests
   let tokenSuperAdmin: string;
+  // The above token's `users.id` — needed to seed privileged_access_grants
+  // rows directly (e.g. an already-expired grant) for the Phase 10 tests.
+  let superAdminUserId: string;
+  // Platform-level (SUPER_ADMIN role) token with zero platform_permissions,
+  // used to prove PlatformPermissionGuard is a real, independent check.
+  let tokenReducedSuperAdmin: string;
   // Teacher tokens, used for RLS-only module-toggle tests (quizzes has no NestJS route)
   let tokenTeacherA: string;
   let tokenTeacherB: string;
@@ -242,6 +262,14 @@ describe('Cross-tenant isolation (e2e)', () => {
     // 14. Seed a platform-level SUPER_ADMIN (no school)
     const superAdmin = await seedUser(null, 'SUPER_ADMIN', 'super-admin');
     tokenSuperAdmin = superAdmin.token;
+    superAdminUserId = superAdmin.userId;
+
+    // 14b. Seed a SUPER_ADMIN-role account with zero platform_permissions,
+    // to prove PlatformPermissionGuard is a real, independent check on top
+    // of SuperAdminGuard's role check, not just a rename of it.
+    const reducedSuperAdmin = await seedUser(null, 'SUPER_ADMIN', 'reduced-super-admin');
+    await admin.from('users').update({ platform_permissions: [] }).eq('auth_id', reducedSuperAdmin.authId);
+    tokenReducedSuperAdmin = reducedSuperAdmin.token;
 
     // 15. Seed one quiz per school (for module-toggle RLS tests — quizzes has no NestJS route)
     quizAId = randomUUID();
@@ -277,6 +305,17 @@ describe('Cross-tenant isolation (e2e)', () => {
     await admin.from('classes').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('users').delete().in('school_id', [schoolAId, schoolBId]);
     await admin.from('schools').delete().in('id', [schoolAId, schoolBId]);
+    // Phase 2 school-management tests create their own extra school
+    if (createdSchoolId) await admin.from('schools').delete().eq('id', createdSchoolId);
+    // Phase 3 onboarding tests create a school + admin auth user outside seedUser()
+    if (onboardedSchoolId) await admin.from('schools').delete().eq('id', onboardedSchoolId);
+    if (onboardedAdminAuthId) await admin.auth.admin.deleteUser(onboardedAdminAuthId).catch(() => {});
+    // Phase 5 package tests create their own extra package (package_modules cascades)
+    if (createdPackageId) await admin.from('packages').delete().eq('id', createdPackageId);
+    // Phase 6 entitlement-engine tests create their own extra school
+    if (entitlementSchoolId) await admin.from('schools').delete().eq('id', entitlementSchoolId);
+    // Phase 8 curriculum tests create their own extra curriculum (curriculum_subjects cascades)
+    if (createdCurriculumId) await admin.from('curricula').delete().eq('id', createdCurriculumId);
     for (const id of authUserIds) {
       await admin.auth.admin.deleteUser(id);
     }
@@ -516,6 +555,1352 @@ describe('Cross-tenant isolation (e2e)', () => {
       .get('/super-admin/schools')
       .set('Authorization', `Bearer ${tokenA}`)
       .expect(403);
+  });
+
+  it('A SUPER_ADMIN with no platform_permissions is rejected by PlatformPermissionGuard', async () => {
+    await request(app.getHttpServer())
+      .get('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+  });
+
+  it('A SUPER_ADMIN with no platform_permissions is rejected on the dashboard route too', async () => {
+    await request(app.getHttpServer())
+      .get('/super-admin/dashboard')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+  });
+
+  it('SUPER_ADMIN dashboard stats reflect real counts', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/dashboard')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.totalSchools).toBeGreaterThanOrEqual(2);
+    expect(res.body.usersByRole).toHaveProperty('ADMIN');
+    expect(res.body.usersByRole).toHaveProperty('TEACHER');
+    expect(res.body.usersByRole).toHaveProperty('STUDENT');
+    expect(res.body.usersByRole).toHaveProperty('PARENT');
+  });
+
+  // ---------------------------------------------------------------------------
+  // School management — create/update/status transitions (Phase 2)
+  // ---------------------------------------------------------------------------
+
+  it('SUPER_ADMIN can create a school', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ name: `Test Created School ${suffix}`, slug: `test-created-${suffix}` })
+      .expect(201);
+
+    expect(res.body.status).toBe('ACTIVE');
+    createdSchoolId = res.body.id;
+
+    const list = await request(app.getHttpServer())
+      .get('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((list.body as Array<{ id: string }>).map((s) => s.id)).toContain(createdSchoolId);
+  });
+
+  it('Creating a school with a duplicate slug fails with a clear 400', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ name: 'Duplicate slug attempt', slug: `test-created-${suffix}` })
+      .expect(400);
+  });
+
+  it('SUPER_ADMIN can update a school profile', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ phone: '+254700000001' })
+      .expect(200);
+    expect(res.body.id).toBe(createdSchoolId);
+  });
+
+  it('SUPER_ADMIN can transition a school status, and it is audit logged', async () => {
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}/status`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ status: 'SUSPENDED', reason: 'e2e test' })
+      .expect(200);
+
+    const get = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${createdSchoolId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(get.body.status).toBe('SUSPENDED');
+
+    const { data: logs } = await admin
+      .from('audit_logs')
+      .select('action, metadata')
+      .eq('entity_id', createdSchoolId)
+      .eq('action', 'school.status_change');
+    expect(logs?.length).toBeGreaterThanOrEqual(1);
+    expect(logs?.[0]?.metadata).toMatchObject({ from: 'ACTIVE', to: 'SUSPENDED' });
+  });
+
+  it('A regular ADMIN cannot create, update, or change status of a school', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Should fail', slug: `should-fail-${suffix}` })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Should fail' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}/status`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ status: 'ARCHIVED' })
+      .expect(403);
+  });
+
+  it('A SUPER_ADMIN with no platform_permissions cannot create, update, or change status of a school', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ name: 'Should fail', slug: `should-fail-2-${suffix}` })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ name: 'Should fail' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${createdSchoolId}/status`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ status: 'ARCHIVED' })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // School onboarding — one-call create school + first admin (Phase 3)
+  // ---------------------------------------------------------------------------
+
+  it('SUPER_ADMIN can onboard a school with a working admin login in one call', async () => {
+    const adminEmail = `onboarded-admin-${suffix}@test-isolation.internal`;
+    const res = await request(app.getHttpServer())
+      .post('/super-admin/schools/onboard')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({
+        school: { name: `Onboarded School ${suffix}`, slug: `onboarded-${suffix}` },
+        admin: { fullName: 'Onboarded Admin', email: adminEmail },
+        disabledModuleKeys: ['quizzes'],
+      })
+      .expect(201);
+
+    expect(res.body.school.status).toBe('ACTIVE');
+    expect(res.body.admin.temporaryPassword).toEqual(expect.any(String));
+    onboardedSchoolId = res.body.school.id;
+
+    const { data: authUser } = await admin.from('users').select('auth_id').eq('email', adminEmail).single();
+    onboardedAdminAuthId = authUser?.auth_id;
+
+    // The new admin can actually log in and act as ADMIN for their school.
+    const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session, error: signInErr } = await anon.auth.signInWithPassword({
+      email: adminEmail,
+      password: res.body.admin.temporaryPassword,
+    });
+    expect(signInErr).toBeNull();
+
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${session!.session!.access_token}`)
+      .expect(200);
+    expect(me.body.role).toBe('ADMIN');
+    expect(me.body.schoolId).toBe(onboardedSchoolId);
+
+    // The disabledModuleKeys override took effect immediately.
+    const modules = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${onboardedSchoolId}/modules`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const quizModule = (modules.body as Array<{ key: string; enabled: boolean }>).find((m) => m.key === 'quizzes');
+    expect(quizModule?.enabled).toBe(false);
+  });
+
+  it('Onboarding with a duplicate slug fails and leaves no orphaned auth user', async () => {
+    const adminEmail = `orphan-check-${suffix}@test-isolation.internal`;
+    await request(app.getHttpServer())
+      .post('/super-admin/schools/onboard')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({
+        school: { name: 'Duplicate slug onboarding', slug: `onboarded-${suffix}` }, // same slug as above
+        admin: { fullName: 'Should Not Exist', email: adminEmail },
+        disabledModuleKeys: [],
+      })
+      .expect(400);
+
+    const { data: orphan } = await admin.from('users').select('id').eq('email', adminEmail).maybeSingle();
+    expect(orphan).toBeNull();
+  });
+
+  it('The bare module catalogue endpoint works without a school context', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/modules')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((res.body as Array<{ key: string }>).map((m) => m.key)).toContain('quizzes');
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot onboard schools', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/schools/onboard')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ school: { name: 'Should fail', slug: `onboard-fail-${suffix}` }, admin: { fullName: 'X', email: 'x@test-isolation.internal' } })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/super-admin/schools/onboard')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ school: { name: 'Should fail', slug: `onboard-fail-2-${suffix}` }, admin: { fullName: 'X', email: 'x@test-isolation.internal' } })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // School overview — real per-school stats, not fabricated (Phase 4)
+  // ---------------------------------------------------------------------------
+
+  it('School A overview reflects the real seeded users, scoped to School A only', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/overview`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.users.total).toBe(4); // adminA, teacherUserA, studentUserA, parentUserA
+    expect(res.body.users.byRole).toMatchObject({ ADMIN: 1, TEACHER: 1, STUDENT: 1, PARENT: 1 });
+    expect(res.body.academic.classCount).toBeGreaterThanOrEqual(1);
+    expect(res.body.engagement).toHaveProperty('dau');
+    expect(res.body.engagement).toHaveProperty('wau');
+    expect(res.body.engagement).toHaveProperty('mau');
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view a school overview', async () => {
+    await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/overview`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/overview`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Packages & school subscriptions (Phase 5) — data-only, no enforcement yet
+  // ---------------------------------------------------------------------------
+
+  it('The 3 seeded starter packages are listed with their module entitlements', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/packages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    const names = (res.body as Array<{ name: string; modules: unknown[] }>).map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['Essential', 'Professional', 'Enterprise']));
+    const enterprise = (res.body as Array<{ name: string; modules: { moduleKey: string }[] }>).find((p) => p.name === 'Enterprise');
+    expect(enterprise?.modules.map((m) => m.moduleKey)).toEqual(expect.arrayContaining(['ai_features', 'payments']));
+  });
+
+  it('SUPER_ADMIN can create a package and set its module entitlements', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/packages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ name: `Test Package ${suffix}`, price: 1000, billingCycle: 'MONTHLY' })
+      .expect(201);
+    createdPackageId = createRes.body.id;
+
+    await request(app.getHttpServer())
+      .put(`/super-admin/packages/${createdPackageId}/modules`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ modules: [{ moduleKey: 'homework', entitlement: 'INCLUDED' }, { moduleKey: 'quizzes', entitlement: 'OPTIONAL_ADD_ON' }] })
+      .expect(200);
+
+    const get = await request(app.getHttpServer())
+      .get(`/super-admin/packages/${createdPackageId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(get.body.modules).toEqual(expect.arrayContaining([
+      { moduleKey: 'homework', entitlement: 'INCLUDED' },
+      { moduleKey: 'quizzes', entitlement: 'OPTIONAL_ADD_ON' },
+    ]));
+  });
+
+  it('Assigning School A a package, then switching, leaves only one ACTIVE subscription', async () => {
+    const { data: packages } = await admin.from('packages').select('id, name').order('display_order');
+    const essential = packages!.find((p) => p.name === 'Essential')!;
+    const professional = packages!.find((p) => p.name === 'Professional')!;
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ packageId: essential.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ packageId: professional.id })
+      .expect(201);
+
+    const { data: activeRows } = await admin
+      .from('school_subscriptions')
+      .select('package_id, status')
+      .eq('school_id', schoolAId)
+      .eq('status', 'ACTIVE');
+    expect(activeRows?.length).toBe(1);
+    expect(activeRows?.[0]?.package_id).toBe(professional.id);
+
+    const current = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(current.body.package.name).toBe('Professional');
+
+    const { data: logs } = await admin
+      .from('audit_logs')
+      .select('action')
+      .eq('school_id', schoolAId)
+      .eq('action', 'school.subscription_change');
+    expect(logs?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot manage packages or subscriptions', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/packages')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Should fail', price: 100 })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/super-admin/packages')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ name: 'Should fail', price: 100 })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/subscription`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ packageId: createdPackageId })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/subscription`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ packageId: createdPackageId })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Entitlement engine — packages + overrides = effective modules (Phase 6)
+  // ---------------------------------------------------------------------------
+
+  it('A school with no subscription still defaults every module to enabled (regression)', async () => {
+    const { data: school, error } = await admin
+      .from('schools')
+      .insert({ id: randomUUID(), name: `Entitlement Test School ${suffix}`, slug: `entitlement-test-${suffix}`, updated_at: new Date().toISOString() })
+      .select('id')
+      .single();
+    expect(error).toBeNull();
+    entitlementSchoolId = school!.id;
+
+    const { data: enabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'ai_features' });
+    expect(enabled).toBe(true);
+  });
+
+  it('Assigning a restrictive package disables modules the package does not include', async () => {
+    const { data: essential } = await admin.from('packages').select('id').eq('name', 'Essential').single();
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${entitlementSchoolId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ packageId: essential!.id })
+      .expect(201);
+
+    const { data: aiEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'ai_features' });
+    expect(aiEnabled).toBe(false); // Essential does not include ai_features, no override
+
+    const { data: homeworkEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'homework' });
+    expect(homeworkEnabled).toBe(true); // Essential DOES include homework
+
+    // The FeatureGuard-guarded NestJS route reflects the same restriction —
+    // no code change needed there, it inherits module_enabled() automatically.
+    const modules = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${entitlementSchoolId}/modules`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const aiRow = (modules.body as Array<{ key: string; enabled: boolean; entitlementSource: string }>).find((m) => m.key === 'ai_features');
+    expect(aiRow?.enabled).toBe(false);
+    expect(aiRow?.entitlementSource).toBe('PACKAGE_UNAVAILABLE');
+  });
+
+  it('A core module stays enabled regardless of package', async () => {
+    const { data: enabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'attendance' });
+    expect(enabled).toBe(true);
+  });
+
+  it('An explicit override wins over package state in both directions', async () => {
+    const now = new Date().toISOString();
+
+    // ai_features declares a hard dependency on document_library, enforced by
+    // a BEFORE INSERT/UPDATE trigger on school_modules (school_modules_check)
+    // that runs even for this direct admin-client write — not just the
+    // application-layer check in toggleModule(). Essential (this school's
+    // package) doesn't include document_library, so it must be satisfied with
+    // its own temporary override first, or the trigger rejects the insert
+    // below outright. Removed at the end of this test so later tests (the
+    // upgrade-preview assertions) still see document_library resolved from
+    // the package, not a lingering override.
+    const { error: depErr, data: depOverride } = await admin.from('school_modules')
+      .insert({ id: randomUUID(), school_id: entitlementSchoolId, module_key: 'document_library', enabled: true, updated_at: now })
+      .select('id')
+      .single();
+    expect(depErr).toBeNull();
+
+    const { error: aiErr } = await admin.from('school_modules').insert({ id: randomUUID(), school_id: entitlementSchoolId, module_key: 'ai_features', enabled: true, updated_at: now });
+    expect(aiErr).toBeNull();
+    const { data: aiEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'ai_features' });
+    expect(aiEnabled).toBe(true); // override beats "package doesn't include it"
+
+    const { error: hwErr } = await admin.from('school_modules').insert({ id: randomUUID(), school_id: entitlementSchoolId, module_key: 'homework', enabled: false, updated_at: now });
+    expect(hwErr).toBeNull();
+    const { data: hwEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'homework' });
+    expect(hwEnabled).toBe(false); // override beats "package includes it"
+
+    await admin.from('school_modules').delete().eq('id', depOverride!.id);
+  });
+
+  it("GET /auth/me's enabledModules reflects real package + override state, not just school_modules", async () => {
+    const email = `entitlement-admin-${suffix}@test-isolation.internal`;
+    const password = `TestPass${suffix}!`;
+    const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { school_id: entitlementSchoolId, role: 'ADMIN' },
+    });
+    expect(authErr).toBeNull();
+    authUserIds.push(authData!.user.id);
+
+    const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
+    expect(signInErr).toBeNull();
+
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${session!.session!.access_token}`)
+      .expect(200);
+
+    expect(me.body.enabledModules).toContain('ai_features'); // overridden enabled, package says no
+    expect(me.body.enabledModules).not.toContain('homework'); // overridden disabled, package says yes
+    expect(me.body.enabledModules).toContain('attendance'); // core, always on
+  });
+
+  // ---------------------------------------------------------------------------
+  // Package upgrade/downgrade preview (Phase 7) — reuses entitlementSchoolId,
+  // which at this point has an ACTIVE Essential subscription plus two
+  // overrides from the Phase 6 tests (ai_features enabled, homework disabled).
+  // ---------------------------------------------------------------------------
+
+  it('Preview correctly identifies an upgrade: gained modules, no losses, overrides unaffected', async () => {
+    const { data: professional } = await admin.from('packages').select('id').eq('name', 'Professional').single();
+
+    const res = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${entitlementSchoolId}/subscription/preview`)
+      .query({ packageId: professional!.id })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.changeType).toBe('UPGRADE');
+    const gainedKeys = (res.body.modulesGained as Array<{ key: string }>).map((m) => m.key);
+    expect(gainedKeys).toEqual(expect.arrayContaining(['document_library', 'assessments', 'quizzes', 'permission_slips', 'safety_tipline', 'behaviour_tracking']));
+    expect(res.body.modulesLost).toEqual([]);
+    // Overridden modules never appear as gained/lost — their state doesn't change with the package.
+    expect(gainedKeys).not.toContain('ai_features');
+    expect(gainedKeys).not.toContain('homework');
+  });
+
+  it('Actually switching to the upgrade preserves existing overrides and applies the new package', async () => {
+    const { data: professional } = await admin.from('packages').select('id').eq('name', 'Professional').single();
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${entitlementSchoolId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ packageId: professional!.id })
+      .expect(201);
+
+    const { data: docLibEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'document_library' });
+    expect(docLibEnabled).toBe(true);
+    const { data: aiStillEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'ai_features' });
+    expect(aiStillEnabled).toBe(true); // override survives the switch
+    const { data: homeworkStillDisabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'homework' });
+    expect(homeworkStillDisabled).toBe(false); // override survives the switch
+  });
+
+  it('Preview correctly identifies a downgrade: modules that would become unavailable', async () => {
+    const { data: essential } = await admin.from('packages').select('id').eq('name', 'Essential').single();
+
+    const res = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${entitlementSchoolId}/subscription/preview`)
+      .query({ packageId: essential!.id })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.changeType).toBe('DOWNGRADE');
+    const lostKeys = (res.body.modulesLost as Array<{ key: string }>).map((m) => m.key);
+    expect(lostKeys).toEqual(expect.arrayContaining(['document_library', 'assessments', 'quizzes', 'permission_slips', 'safety_tipline', 'behaviour_tracking']));
+  });
+
+  it('Downgrading with preserveModuleKeys keeps only the chosen module enabled via override', async () => {
+    const { data: essential } = await admin.from('packages').select('id').eq('name', 'Essential').single();
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${entitlementSchoolId}/subscription`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ packageId: essential!.id, preserveModuleKeys: ['quizzes'] })
+      .expect(201);
+
+    const { data: quizzesEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'quizzes' });
+    expect(quizzesEnabled).toBe(true); // preserved via override
+
+    const { data: assessmentsEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'assessments' });
+    expect(assessmentsEnabled).toBe(false); // not preserved, downgraded away
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot preview or change subscriptions', async () => {
+    const { data: essential } = await admin.from('packages').select('id').eq('name', 'Essential').single();
+
+    await request(app.getHttpServer())
+      .get(`/super-admin/schools/${entitlementSchoolId}/subscription/preview`)
+      .query({ packageId: essential!.id })
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/super-admin/schools/${entitlementSchoolId}/subscription/preview`)
+      .query({ packageId: essential!.id })
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${entitlementSchoolId}/subscription`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ packageId: essential!.id })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Curriculum catalog — informational reference layer only (Phase 8)
+  // ---------------------------------------------------------------------------
+
+  it('SUPER_ADMIN can create a curriculum and set its grade-level subjects', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/curricula')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ name: `Test Curriculum ${suffix}`, description: 'e2e test curriculum' })
+      .expect(201);
+    createdCurriculumId = createRes.body.id;
+
+    await request(app.getHttpServer())
+      .put(`/super-admin/curricula/${createdCurriculumId}/subjects`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ subjects: [{ gradeLevel: 4, name: 'Mathematics' }, { gradeLevel: 4, name: 'English' }] })
+      .expect(200);
+
+    const get = await request(app.getHttpServer())
+      .get(`/super-admin/curricula/${createdCurriculumId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((get.body.subjects as Array<{ grade_level: number; name: string }>)).toEqual(expect.arrayContaining([
+      { grade_level: 4, name: 'Mathematics', id: expect.any(String), code: null, display_order: 0 },
+      { grade_level: 4, name: 'English', id: expect.any(String), code: null, display_order: 0 },
+    ]));
+
+    const list = await request(app.getHttpServer())
+      .get('/super-admin/curricula')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const listed = (list.body as Array<{ id: string; subjectCount: number }>).find((c) => c.id === createdCurriculumId);
+    expect(listed?.subjectCount).toBe(2);
+  });
+
+  it('Assigning a curriculum to a school never touches that school\'s own subjects/classes/terms', async () => {
+    const { data: subjectsBefore } = await admin.from('subjects').select('id').eq('school_id', schoolAId);
+    const { data: classesBefore } = await admin.from('classes').select('id').eq('school_id', schoolAId);
+    const { data: termsBefore } = await admin.from('terms').select('id').eq('school_id', schoolAId);
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/curriculum`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ curriculumId: createdCurriculumId })
+      .expect(201);
+
+    const get = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/curriculum`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(get.body.id).toBe(createdCurriculumId);
+
+    const { data: subjectsAfter } = await admin.from('subjects').select('id').eq('school_id', schoolAId);
+    const { data: classesAfter } = await admin.from('classes').select('id').eq('school_id', schoolAId);
+    const { data: termsAfter } = await admin.from('terms').select('id').eq('school_id', schoolAId);
+    expect(subjectsAfter?.map((s) => s.id).sort()).toEqual(subjectsBefore?.map((s) => s.id).sort());
+    expect(classesAfter?.map((c) => c.id).sort()).toEqual(classesBefore?.map((c) => c.id).sort());
+    expect(termsAfter?.map((t) => t.id).sort()).toEqual(termsBefore?.map((t) => t.id).sort());
+
+    // Clearing works too.
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/curriculum`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ curriculumId: null })
+      .expect(201);
+    const cleared = await request(app.getHttpServer())
+      .get(`/super-admin/schools/${schoolAId}/curriculum`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    // superagent's JSON parser doesn't retain raw text (`.text` is always ''
+    // for application/json), and normalizes a literal `null` body to `{}` on
+    // `.body` (a long-standing `obj || {}` quirk) — `{}` is what a real `null`
+    // response looks like through supertest, not evidence of a populated object.
+    expect(cleared.body).toEqual({});
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot manage curricula or school curriculum tags', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/curricula')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Should fail' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/super-admin/curricula')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ name: 'Should fail' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/super-admin/schools/${schoolAId}/curriculum`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ curriculumId: createdCurriculumId })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Platform intelligence — real data only (Phase 9)
+  // ---------------------------------------------------------------------------
+
+  it('Growth analytics reflects the real schools/users created during this test run', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/analytics/growth')
+      .query({ days: 30 })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.totalNewSchools).toBeGreaterThanOrEqual(2); // at least School A + B
+    expect(res.body.totalNewUsers).toBeGreaterThanOrEqual(4);
+    expect(Array.isArray(res.body.schoolsByDay)).toBe(true);
+  });
+
+  it('Module adoption reflects real entitlement state across schools', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/analytics/modules')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    const rows = res.body as Array<{ key: string; enabledCount: number; totalSchools: number; percentage: number }>;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.percentage).toBeGreaterThanOrEqual(0);
+      expect(row.percentage).toBeLessThanOrEqual(100);
+    }
+    // quizzes is currently enabled (via override) for entitlementSchoolId, and
+    // defaults to enabled for every no-subscription school (School A/B, onboarded).
+    const quizzes = rows.find((r) => r.key === 'quizzes');
+    expect(quizzes?.enabledCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Package analytics shows real schools-per-package distribution and recent change activity', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/analytics/packages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    const names = (res.body.packages as Array<{ name: string }>).map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['Essential', 'Professional', 'Enterprise']));
+    // Several subscription changes happened earlier in this test run (Phase 5/7).
+    expect(res.body.subscriptionChangesLast30Days).toBeGreaterThanOrEqual(1);
+  });
+
+  it('School health marks a non-ACTIVE-status school as INACTIVE with a real reason', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/analytics/school-health')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    const rows = res.body as Array<{ id: string; status: string; reasons: string[] }>;
+    // createdSchoolId was left SUSPENDED at the end of the Phase 2 tests.
+    const suspendedSchool = rows.find((r) => r.id === createdSchoolId);
+    expect(suspendedSchool?.status).toBe('INACTIVE');
+    expect(suspendedSchool?.reasons.join(' ')).toMatch(/SUSPENDED/);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view platform analytics', async () => {
+    for (const path of ['/super-admin/analytics/growth', '/super-admin/analytics/modules', '/super-admin/analytics/packages', '/super-admin/analytics/school-health']) {
+      await request(app.getHttpServer()).get(path).set('Authorization', `Bearer ${tokenA}`).expect(403);
+      await request(app.getHttpServer()).get(path).set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Privileged tenant access (Phase 10) — explicit, scoped, time-limited
+  // grants. Enforcement is entirely in PlatformPrivilegedAccessService (an
+  // admin-client check per call), not RLS — these tests exercise that gate
+  // directly, and confirm it still respects the School A/B tenant boundary.
+  // ---------------------------------------------------------------------------
+
+  it('A SUPER_ADMIN with GRANT_PRIVILEGED_ACCESS can request a grant, read the granted school\'s aggregates and students, and every read is logged', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ schoolId: schoolAId, reason: 'Investigating a support ticket', scopes: ['SCHOOL_AGGREGATES', 'STUDENT_RECORDS'], durationMinutes: 60 })
+      .expect(201);
+    const grantId = createRes.body.id as string;
+    expect(createRes.body.status).toBe('ACTIVE');
+    expect(createRes.body.targetSchoolId).toBe(schoolAId);
+
+    const activeRes = await request(app.getHttpServer())
+      .get('/super-admin/privileged-access/grants/active')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(activeRes.body?.id).toBe(grantId);
+
+    const aggRes = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/aggregates`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(aggRes.body.users.total).toBeGreaterThanOrEqual(1);
+
+    const studentsRes = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/students`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const studentIds = (studentsRes.body as Array<{ id: string }>).map((s) => s.id);
+    expect(studentIds).toContain(studentAId);
+    expect(studentIds).not.toContain(studentBId);
+
+    // Every successful scoped read wrote an append-only log row.
+    const { data: logs } = await admin.from('privileged_access_logs').select('scope').eq('grant_id', grantId);
+    expect((logs ?? []).map((l) => l.scope).sort()).toEqual(['SCHOOL_AGGREGATES', 'STUDENT_RECORDS']);
+
+    // Tenant boundary: this grant is scoped to School A only — School B stays walled off.
+    await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolBId}/aggregates`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(403);
+
+    // Ending the session makes further reads fail immediately.
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/end`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(201);
+    await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/aggregates`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(403);
+    const activeAfterEnd = await request(app.getHttpServer())
+      .get('/super-admin/privileged-access/grants/active')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    // Same supertest `null`-body-becomes-`{}` quirk as the curriculum test above.
+    expect(activeAfterEnd.body).toEqual({});
+  });
+
+  it('A grant with all 7 scopes can read academic data, attendance, financials, documents, and conversations — the last with no message body ever exposed', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({
+        schoolId: schoolAId,
+        reason: 'Full-scope support investigation',
+        scopes: ['SCHOOL_AGGREGATES', 'STUDENT_RECORDS', 'ACADEMIC_DATA', 'ATTENDANCE', 'FINANCIAL_DATA', 'COMMUNICATION', 'DOCUMENTS'],
+        durationMinutes: 60,
+      })
+      .expect(201);
+    const grantId = createRes.body.id as string;
+
+    // ACADEMIC_DATA — no assessments were seeded for School A, so this just
+    // proves the endpoint is reachable and scoped correctly (an empty array
+    // is a valid, honest result — not something to fabricate around).
+    const academic = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/academic-data`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(Array.isArray(academic.body)).toBe(true);
+
+    const attendanceRes = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/attendance`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((attendanceRes.body as Array<{ id: string }>).map((r) => r.id)).toContain(attendanceAId);
+
+    const financials = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/financials`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((financials.body as Array<{ id: string }>).map((r) => r.id)).toContain(feeAId);
+
+    const documents = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/documents`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((documents.body as Array<{ id: string }>).map((r) => r.id)).toContain(documentAId);
+
+    const conversations = await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/conversations`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const conversationRows = conversations.body as Array<Record<string, unknown>>;
+    expect(conversationRows.map((r) => r.id)).toContain(conversationAId);
+    // Privacy check: message body text must never appear anywhere in the payload.
+    const serialized = JSON.stringify(conversationRows);
+    expect(serialized).not.toContain('last_message_body');
+    expect(serialized.includes('"body"')).toBe(false);
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/end`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(201);
+  });
+
+  it('A grant rejects reads for scopes outside its declared set', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ schoolId: schoolAId, reason: 'Aggregates only', scopes: ['SCHOOL_AGGREGATES'], durationMinutes: 60 })
+      .expect(201);
+    const grantId = createRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/aggregates`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/students`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/end`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(201);
+  });
+
+  it('An expired grant is rejected even though its stored status is still ACTIVE', async () => {
+    const grantId = randomUUID();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const { error: insertErr } = await admin.from('privileged_access_grants').insert({
+      id: grantId,
+      super_admin_user_id: superAdminUserId,
+      target_school_id: schoolAId,
+      reason: 'Expired test grant',
+      access_level: 'READ_ONLY',
+      scopes: ['SCHOOL_AGGREGATES'],
+      status: 'ACTIVE',
+      expires_at: past,
+      updated_at: past,
+    });
+    expect(insertErr).toBeNull();
+
+    await request(app.getHttpServer())
+      .get(`/super-admin/privileged-access/schools/${schoolAId}/aggregates`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(403);
+
+    // Rejection lazily flips the stored status too, for display purposes.
+    const { data: row } = await admin.from('privileged_access_grants').select('status').eq('id', grantId).single();
+    expect(row?.status).toBe('EXPIRED');
+  });
+
+  it('Grant history (Audit & Security) includes grants created during this run, and is only visible with VIEW_AUDIT_LOGS', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const schoolIds = (res.body as Array<{ targetSchoolId: string }>).map((g) => g.targetSchoolId);
+    expect(schoolIds).toContain(schoolAId);
+
+    await request(app.getHttpServer())
+      .get('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot request privileged access', async () => {
+    await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ schoolId: schoolAId, reason: 'Should fail', scopes: ['SCHOOL_AGGREGATES'], durationMinutes: 30 })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ schoolId: schoolAId, reason: 'Should fail', scopes: ['SCHOOL_AGGREGATES'], durationMinutes: 30 })
+      .expect(403);
+  });
+
+  it('School A admin still cannot see School B students — the general tenant boundary is unchanged by this phase', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/students')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).not.toContain(studentBId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Full audit log viewer (Phase 11) — a searchable, filterable, paginated
+  // read over the audit_logs rows every earlier phase in this test run has
+  // already generated (school.create, module.enable, privileged_access.grant,
+  // etc.) — real data, not seeded fakes.
+  // ---------------------------------------------------------------------------
+
+  it('Filtering by action returns the real school.create row for createdSchoolId', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ action: 'school.create', entityId: createdSchoolId })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.total).toBeGreaterThanOrEqual(1);
+    const rows = res.body.rows as Array<{ action: string; entity_id: string }>;
+    expect(rows.every((r) => r.action === 'school.create' && r.entity_id === createdSchoolId)).toBe(true);
+  });
+
+  it('A `to` date before this test run started excludes rows created during it', async () => {
+    const beforeRunStarted = new Date(suffix - 1000).toISOString();
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ entityId: createdSchoolId, to: beforeRunStarted })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(res.body.total).toBe(0);
+    expect(res.body.rows).toEqual([]);
+  });
+
+  it('The schoolId filter only returns rows for that school', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ schoolId: schoolAId, pageSize: 200 })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.total).toBeGreaterThanOrEqual(1);
+    const rows = res.body.rows as Array<{ school_id: string | null }>;
+    expect(rows.every((r) => r.school_id === schoolAId)).toBe(true);
+  });
+
+  it('Free-text search matches by school name and by action text', async () => {
+    const bySchoolName = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ q: `Test School Alpha ${suffix}`, pageSize: 200 })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const schoolIds = (bySchoolName.body.rows as Array<{ school_id: string | null }>).map((r) => r.school_id);
+    expect(schoolIds).toContain(schoolAId);
+
+    const byAction = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ q: 'curriculum_change' })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(byAction.body.total).toBeGreaterThanOrEqual(1);
+    expect((byAction.body.rows as Array<{ action: string }>).every((r) => r.action === 'school.curriculum_change')).toBe(true);
+  });
+
+  it('Pagination returns disjoint pages and a consistent total', async () => {
+    const page1 = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ pageSize: 5, page: 1 })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const page2 = await request(app.getHttpServer())
+      .get('/super-admin/audit-logs')
+      .query({ pageSize: 5, page: 2 })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(page1.body.total).toBe(page2.body.total);
+    expect(page1.body.total).toBeGreaterThan(5); // this run alone logs far more than 5 actions
+    const idsPage1 = (page1.body.rows as Array<{ id: string }>).map((r) => r.id);
+    const idsPage2 = (page2.body.rows as Array<{ id: string }>).map((r) => r.id);
+    expect(idsPage1.some((id) => idsPage2.includes(id))).toBe(false);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view the audit log', async () => {
+    await request(app.getHttpServer()).get('/super-admin/audit-logs').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/audit-logs').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Billing (Phase 12) — a manual invoice ledger against school subscriptions.
+  // schoolAId has had an ACTIVE Professional subscription since the Phase 5/7
+  // package tests, above; schoolBId has never had one.
+  // ---------------------------------------------------------------------------
+
+  it('Generating an invoice snapshots the current package price/currency/cycle', async () => {
+    const { data: sub } = await admin
+      .from('school_subscriptions')
+      .select('package:packages(price, currency, billing_cycle)')
+      .eq('school_id', schoolAId)
+      .eq('status', 'ACTIVE')
+      .single();
+    const pkg = sub!.package as unknown as { price: number; currency: string; billing_cycle: string };
+
+    const periodStart = new Date().toISOString().slice(0, 10);
+    const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const res = await request(app.getHttpServer())
+      .post(`/super-admin/billing/schools/${schoolAId}/invoices`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ periodStart, periodEnd, dueDate })
+      .expect(201);
+
+    createdInvoiceId = res.body.id;
+    expect(Number(res.body.amount)).toBe(Number(pkg.price));
+    expect(res.body.currency).toBe(pkg.currency);
+    expect(res.body.billing_cycle).toBe(pkg.billing_cycle);
+    expect(res.body.status).toBe('PENDING');
+  });
+
+  it('Generating an invoice for a school with no active subscription is rejected', async () => {
+    const periodStart = new Date().toISOString().slice(0, 10);
+    await request(app.getHttpServer())
+      .post(`/super-admin/billing/schools/${schoolBId}/invoices`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ periodStart, periodEnd: periodStart, dueDate: periodStart })
+      .expect(400);
+  });
+
+  it('Marking an invoice PAID sets paid_at and makes it immutable', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/super-admin/billing/invoices/${createdInvoiceId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ status: 'PAID' })
+      .expect(200);
+    expect(res.body.status).toBe('PAID');
+    expect(res.body.paid_at).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .patch(`/super-admin/billing/invoices/${createdInvoiceId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ status: 'CANCELLED' })
+      .expect(400);
+  });
+
+  it('A PENDING invoice past its due date shows as OVERDUE after the sweep', async () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { data: sub } = await admin
+      .from('school_subscriptions')
+      .select('id, package:packages(id, name, price, currency, billing_cycle)')
+      .eq('school_id', schoolAId)
+      .eq('status', 'ACTIVE')
+      .single();
+    const pkg = sub!.package as unknown as { id: string; name: string; price: number; currency: string; billing_cycle: string };
+
+    const overdueInvoiceId = randomUUID();
+    const { error } = await admin.from('platform_invoices').insert({
+      id: overdueInvoiceId,
+      school_id: schoolAId,
+      subscription_id: sub!.id,
+      package_id: pkg.id,
+      package_name: pkg.name,
+      amount: pkg.price,
+      currency: pkg.currency,
+      billing_cycle: pkg.billing_cycle,
+      period_start: past,
+      period_end: past,
+      due_date: past,
+      status: 'PENDING',
+      updated_at: new Date().toISOString(),
+    });
+    expect(error).toBeNull();
+
+    const list = await request(app.getHttpServer())
+      .get(`/super-admin/billing/schools/${schoolAId}/invoices`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const row = (list.body as Array<{ id: string; status: string }>).find((r) => r.id === overdueInvoiceId);
+    expect(row?.status).toBe('OVERDUE');
+
+    const overview = await request(app.getHttpServer())
+      .get('/super-admin/billing/overview')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((overview.body.overdueInvoices as Array<{ id: string }>).some((inv) => inv.id === overdueInvoiceId)).toBe(true);
+    expect(overview.body.outstandingByCurrency[pkg.currency]).toBeGreaterThanOrEqual(Number(pkg.price));
+
+    // Clean up so this stray OVERDUE row doesn't linger in the overview for other assertions.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/billing/invoices/${overdueInvoiceId}`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ status: 'CANCELLED' })
+      .expect(200);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot manage billing', async () => {
+    await request(app.getHttpServer()).get('/super-admin/billing/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/billing/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+    await request(app.getHttpServer())
+      .post(`/super-admin/billing/schools/${schoolAId}/invoices`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ periodStart: '2026-01-01', periodEnd: '2026-02-01', dueDate: '2026-01-15' })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // System Health (Phase 13) — a real-time operational snapshot: every number
+  // traces back to a live query or a real row, no invented uptime/verdicts.
+  // ---------------------------------------------------------------------------
+
+  it('The system health overview reports real, live-measured signals across all 5 areas', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/system-health/overview')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(res.body.api.status).toBe('OK');
+    expect(typeof res.body.api.version).toBe('string');
+
+    expect(res.body.database.status).toBe('OK');
+    expect(res.body.database.latencyMs).toBeGreaterThanOrEqual(0);
+
+    // This run alone has already generated real auth.login events (seedUser signs
+    // every fixture in via password auth), so this is a real, non-zero count.
+    expect(res.body.auth.last24h.logins).toBeGreaterThanOrEqual(1);
+    expect(res.body.auth.last24h.failures).toBeGreaterThanOrEqual(0);
+    expect(res.body.auth.last7d.logins).toBeGreaterThanOrEqual(res.body.auth.last24h.logins);
+
+    expect(res.body.notifications.pending).toBeGreaterThanOrEqual(0);
+    expect(res.body.notifications.sentLast24h).toBeGreaterThanOrEqual(0);
+    expect(res.body.notifications.failedLast24h).toBeGreaterThanOrEqual(0);
+    expect(['OK', 'STALE', 'UNKNOWN']).toContain(res.body.notifications.lastDispatchStatus);
+
+    expect(res.body.payments.paidToday).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.paidThisWeek).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.pendingCount).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.failedLast24h).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.totalCollectedThisWeek).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.webhookDeliveries.successLast24h).toBeGreaterThanOrEqual(0);
+    expect(res.body.payments.webhookDeliveries.failedLast24h).toBeGreaterThanOrEqual(0);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view system health', async () => {
+    await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Assessments/gradebook schema-drift fix — the live `assessments` table
+  // never matched what assessments.service.ts assumed (max_score/date/kind/
+  // created_by_id don't exist; real columns are max_marks/assessment_date/
+  // teacher_id NOT NULL). This is the first real end-to-end coverage this
+  // feature has ever had.
+  // ---------------------------------------------------------------------------
+
+  it('Creating an assessment threads teacher_id/description correctly, and a TEACHER only sees assessments assigned to them', async () => {
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const subjectAId = randomUUID();
+    const termAId = randomUUID();
+
+    await admin.from('subjects').insert({ id: subjectAId, school_id: schoolAId, name: `Test Subject ${suffix}`, code: 'TST', updated_at: now });
+    await admin.from('terms').insert({ id: termAId, school_id: schoolAId, name: `Test Term ${suffix}`, start_date: today, end_date: today, is_current: true });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectAId, teacher_id: teacherATeacherId });
+
+    const createRes = await request(app.getHttpServer())
+      .post('/assessments')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, subjectId: subjectAId, termId: termAId, name: 'Mid-term', maxMarks: 100, assessmentDate: today, description: 'A test description' })
+      .expect(201);
+    const assessmentId = createRes.body.id as string;
+    expect(createRes.body.max_marks).toBe(100);
+    expect(createRes.body.assessment_date).toBe(today);
+
+    // teacher_id/description aren't in the API's select-back — verify the actual row directly.
+    const { data: row } = await admin.from('assessments').select('teacher_id, description').eq('id', assessmentId).single();
+    expect(row?.teacher_id).toBe(teacherATeacherId);
+    expect(row?.description).toBe('A test description');
+
+    await request(app.getHttpServer())
+      .post(`/assessments/${assessmentId}/scores`)
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ scores: [{ studentId: studentAId, marksObtained: 85, comments: 'Great job' }] })
+      .expect(201);
+
+    const scores = await request(app.getHttpServer())
+      .get(`/assessments/${assessmentId}/scores`)
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect(scores.body.assessment.max_marks).toBe(100);
+    expect(scores.body.scores[0].marks_obtained).toBe(85);
+
+    const studentGrades = await request(app.getHttpServer())
+      .get('/assessments/grades')
+      .query({ studentId: studentAId, termId: termAId })
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect((studentGrades.body as Array<{ assessment: { id: string } }>).some((g) => g.assessment.id === assessmentId)).toBe(true);
+
+    const listRes = await request(app.getHttpServer())
+      .get('/assessments')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect((listRes.body as Array<{ id: string }>).map((a) => a.id)).toContain(assessmentId);
+
+    // A second teacher in the SAME school, not assigned to this class/subject,
+    // must not see it — this is exactly the bug that was fixed (list() used to
+    // filter by a nonexistent created_by_id column instead of teacher_id).
+    const email2 = `teacher-a2-${suffix}@test-isolation.internal`;
+    const password2 = `TestPass${suffix}!`;
+    const { data: authData2 } = await admin.auth.admin.createUser({
+      email: email2, password: password2, email_confirm: true,
+      user_metadata: { school_id: schoolAId, role: 'TEACHER' },
+    });
+    authUserIds.push(authData2!.user.id);
+    const { data: teacherUserRow2 } = await admin.from('users').select('id').eq('auth_id', authData2!.user.id).single();
+    const teacher2Id = randomUUID();
+    await admin.from('teachers').insert({ id: teacher2Id, school_id: schoolAId, user_id: teacherUserRow2!.id, staff_no: `TA2-${suffix}`, updated_at: now });
+    const anon2 = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session2 } = await anon2.auth.signInWithPassword({ email: email2, password: password2 });
+    const tokenTeacherA2 = session2!.session!.access_token;
+
+    const listResA2 = await request(app.getHttpServer())
+      .get('/assessments')
+      .set('Authorization', `Bearer ${tokenTeacherA2}`)
+      .expect(200);
+    expect((listResA2.body as Array<{ id: string }>).map((a) => a.id)).not.toContain(assessmentId);
+
+    // ADMIN sees every assessment in their school regardless of teacher_id.
+    const listResAdmin = await request(app.getHttpServer())
+      .get('/assessments')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+    expect((listResAdmin.body as Array<{ id: string }>).map((a) => a.id)).toContain(assessmentId);
+
+    // cleanup
+    await admin.from('teachers').delete().eq('id', teacher2Id);
+    await admin.from('grades').delete().eq('assessment_id', assessmentId);
+    await admin.from('assessments').delete().eq('id', assessmentId);
+    await admin.from('subject_assignments').delete().eq('subject_id', subjectAId);
+    await admin.from('terms').delete().eq('id', termAId);
+    await admin.from('subjects').delete().eq('id', subjectAId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Platform Users (deferred item) — cross-tenant user search + SUPER_ADMIN
+  // account administration. Before this, there was no way to create a
+  // SUPER_ADMIN or edit anyone's platform_permissions except raw DB access.
+  // ---------------------------------------------------------------------------
+
+  it('Cross-tenant search finds a known fixture user and a status toggle round-trips', async () => {
+    const search = await request(app.getHttpServer())
+      .get('/super-admin/platform-users')
+      .query({ q: `admin-a-${suffix}` })
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    const rows = search.body.rows as Array<{ id: string; email: string; school: { id: string } | null }>;
+    const found = rows.find((r) => r.email === `admin-a-${suffix}@test-isolation.internal`);
+    expect(found).toBeTruthy();
+    expect(found?.school?.id).toBe(schoolAId);
+
+    const toggled = await request(app.getHttpServer())
+      .patch(`/super-admin/platform-users/${found!.id}/status`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ isActive: false })
+      .expect(200);
+    expect(toggled.body.is_active).toBe(false);
+
+    // Restore, so this doesn't affect any later test relying on admin-a being active.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/platform-users/${found!.id}/status`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ isActive: true })
+      .expect(200);
+  });
+
+  it('Creating a SUPER_ADMIN grants all permissions via the trigger, and permissions can then be narrowed', async () => {
+    const email = `new-super-admin-${suffix}@test-isolation.internal`;
+    const createRes = await request(app.getHttpServer())
+      .post('/super-admin/platform-users/super-admins')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ fullName: 'New Super Admin', email })
+      .expect(201);
+    expect(createRes.body.platform_permissions.length).toBe(17);
+    const newAdminId = createRes.body.id as string;
+    const temporaryPassword = createRes.body.temporaryPassword as string;
+
+    const { data: authRow } = await admin.from('users').select('auth_id').eq('id', newAdminId).single();
+    authUserIds.push(authRow!.auth_id);
+
+    const list = await request(app.getHttpServer())
+      .get('/super-admin/platform-users/super-admins')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect((list.body as Array<{ id: string }>).map((a) => a.id)).toContain(newAdminId);
+
+    // Narrow to a single permission.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/platform-users/super-admins/${newAdminId}/permissions`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ permissions: ['VIEW_SCHOOLS'] })
+      .expect(200);
+
+    // Sign in as the new account and confirm /auth/me reflects the narrowed set.
+    const anonNew = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session } = await anonNew.auth.signInWithPassword({ email, password: temporaryPassword });
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${session!.session!.access_token}`)
+      .expect(200);
+    expect(me.body.platformPermissions).toEqual(['VIEW_SCHOOLS']);
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot manage platform users', async () => {
+    await request(app.getHttpServer()).get('/super-admin/platform-users').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/platform-users').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/platform-users/super-admins').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+    await request(app.getHttpServer())
+      .post('/super-admin/platform-users/super-admins')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .send({ fullName: 'Should fail', email: `should-fail-${suffix}@test-isolation.internal` })
+      .expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Platform Settings (deferred item) — read-only deployment config viewer.
+  // ---------------------------------------------------------------------------
+
+  it('Settings overview returns real deployment config and is permission-gated', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/settings/overview')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+    expect(typeof res.body.notificationSenderEmail).toBe('string');
+    expect(typeof res.body.appUrl).toBe('string');
+    expect(typeof res.body.webhookSecretConfigured).toBe('boolean');
+
+    await request(app.getHttpServer()).get('/super-admin/settings/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/settings/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
   });
 
   it('School A teacher can see their quiz before it is disabled', async () => {

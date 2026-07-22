@@ -23,7 +23,7 @@ export async function GET() {
   let grades: unknown[] = [], attendance: unknown[] = [], submissions: unknown[] = [];
   if (student) {
     const [g, a, s] = await Promise.all([
-      supabase.from('grades').select('score, comment, graded_at, assessment:assessments!assessment_id(name, kind, max_score)').eq('student_id', student.id),
+      supabase.from('grades').select('score, comment, created_at, assessment:assessments!assessment_id(name, max_marks)').eq('student_id', student.id),
       supabase.from('attendance_records').select('date, status').eq('student_id', student.id).order('date'),
       supabase.from('submissions').select('submitted_at, is_late, grade_score, grade_comment, assignment:assignments!assignment_id(title, due_date)').eq('student_id', student.id),
     ]);

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, API_BASE } from '@/lib/api';
 
 type SchoolEvent = {
   id: string;
@@ -133,7 +133,7 @@ export default function EventsClient({
         <p className="text-sm text-slate-500">{events.length} event{events.length !== 1 ? 's' : ''} total</p>
         <div className="flex gap-2">
           <a
-            href={`${process.env.NEXT_PUBLIC_API_URL}/events/ics`}
+            href={`${API_BASE}/events/ics`}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
             Export .ics

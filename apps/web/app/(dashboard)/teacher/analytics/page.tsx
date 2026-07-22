@@ -49,7 +49,7 @@ export default async function TeacherAnalyticsPage({
   // Assessments this term for this class
   const { data: assessments } = classId && termId
     ? await supabase.from('assessments')
-        .select('id, name, kind, max_score, subject:subjects(name)')
+        .select('id, name, max_marks, subject:subjects(name)')
         .eq('class_id', classId).eq('term_id', termId).order('name')
     : { data: [] };
 
@@ -63,7 +63,7 @@ export default async function TeacherAnalyticsPage({
   const assessmentAvgs = (assessments ?? []).map((a) => {
     const scores = (allGrades ?? []).filter((g) => g.assessment_id === a.id && g.score != null).map((g) => g.score as number);
     const avg = scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : null;
-    const pct = avg != null ? (avg / a.max_score) * 100 : null;
+    const pct = avg != null ? (avg / a.max_marks) * 100 : null;
     return { ...a, avg, pct, count: scores.length };
   });
 
@@ -110,7 +110,7 @@ export default async function TeacherAnalyticsPage({
     const myGrades = aIds.map((aId) => {
       const g = (allGrades ?? []).find((gr) => gr.assessment_id === aId && gr.student_id === s.id);
       const a = (assessments ?? []).find((x) => x.id === aId)!;
-      return g?.score != null ? (g.score / a.max_score) * 100 : null;
+      return g?.score != null ? (g.score / a.max_marks) * 100 : null;
     }).filter((v): v is number => v != null);
     const gradeAvg = myGrades.length ? myGrades.reduce((a, b) => a + b, 0) / myGrades.length : null;
 

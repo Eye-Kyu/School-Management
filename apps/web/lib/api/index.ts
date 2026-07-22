@@ -7,7 +7,27 @@
 
 import { createClient } from '@/lib/supabase/client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// A scheme-less NEXT_PUBLIC_API_URL (e.g. "api.example.com" instead of
+// "https://api.example.com") gets resolved by fetch() as a same-origin
+// relative path — every API call silently 404s against the web app itself
+// instead of erroring loudly against the wrong host. Normalize it so a
+// misconfigured env var fails visibly (cross-origin/network error naming
+// the real host) instead of silently.
+function resolveApiBase(): string {
+  const raw = process.env.NEXT_PUBLIC_API_URL;
+  if (!raw) return 'http://localhost:4000';
+  if (!/^https?:\/\//i.test(raw)) {
+    const fixed = `https://${raw}`;
+    // eslint-disable-next-line no-console
+    console.error(
+      `[api] NEXT_PUBLIC_API_URL="${raw}" is missing a scheme and would resolve as a relative path. Using "${fixed}" instead — fix the env var.`,
+    );
+    return fixed;
+  }
+  return raw;
+}
+
+export const API_BASE = resolveApiBase();
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body?: unknown) {

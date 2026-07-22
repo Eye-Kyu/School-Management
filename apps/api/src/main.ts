@@ -24,7 +24,9 @@ async function bootstrap() {
 
   // ---------- CORS ----------
   // Only the configured web origin can call the API in dev.
-  const webOrigin = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  // A trailing slash breaks the exact-match comparison against the
+  // browser's Origin header (which never has one), so strip it defensively.
+  const webOrigin = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
   app.enableCors({
     origin: webOrigin,
     credentials: true,
