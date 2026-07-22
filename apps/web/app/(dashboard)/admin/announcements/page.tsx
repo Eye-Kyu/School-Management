@@ -5,10 +5,15 @@ import AnnouncementsClient from './AnnouncementsClient';
 export default async function AdminAnnouncementsPage() {
   const supabase = createClient();
 
+  // Keep expired announcements visible here for 30 days past expiry so
+  // admins can review/clean them up, then drop them from this view too.
+  const gracePeriodStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   const [{ data: announcements }, { data: classes }, { data: notifStats }] = await Promise.all([
     supabase
       .from('announcements')
-      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, author:users!inner(full_name)')
+      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, expires_at, author:users!inner(full_name)')
+      .or(`expires_at.is.null,expires_at.gte.${gracePeriodStart}`)
       .order('published_at', { ascending: false }),
     supabase
       .from('classes')

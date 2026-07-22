@@ -229,12 +229,13 @@ export class MessagingService {
         .select('teacher:teachers!teacher_id(user_id)')
         .in('class_id', classIds);
 
+      // subject_assignments.teacher_id is many-to-one to teachers, so
+      // PostgREST returns `teacher` as a single object, not an array.
       const teacherUserIds = [
         ...new Set(
           (saRows ?? [])
-            .flatMap((a) => (a.teacher as unknown as { user_id: string }[]) ?? [])
-            .map((t) => t.user_id)
-            .filter(Boolean),
+            .map((a) => (a.teacher as unknown as { user_id: string } | null)?.user_id)
+            .filter((id): id is string => Boolean(id)),
         ),
       ];
 

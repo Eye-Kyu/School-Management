@@ -13,9 +13,11 @@ export class AnnouncementsService {
 
   async list(accessToken: string) {
     const client = this.supabase.forUser(accessToken);
+    const today = new Date().toISOString().slice(0, 10);
     const { data, error } = await client
       .from('announcements')
-      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, author:users(full_name)')
+      .select('id, title, body, audience, target_grade_level, target_class_id, published_at, expires_at, author:users(full_name)')
+      .or(`expires_at.is.null,expires_at.gte.${today}`)
       .order('published_at', { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -50,6 +52,7 @@ export class AnnouncementsService {
         audience: input.audience,
         target_grade_level: input.targetGradeLevel ?? null,
         target_class_id: input.targetClassId ?? null,
+        expires_at: input.expiresAt ?? null,
         published_at: now,
         updated_at: now,
       })
@@ -207,10 +210,11 @@ export class AnnouncementsService {
       .select('teacher:teachers!inner(user_id)')
       .in('class_id', classIds);
 
+    // subject_assignments.teacher_id is many-to-one to teachers, so
+    // PostgREST returns `teacher` as a single object, not an array.
     const teacherUserIds = (assignments ?? [])
-      .flatMap((a) => (a.teacher as unknown as { user_id: string }[]) ?? [])
-      .map((t) => t.user_id)
-      .filter(Boolean);
+      .map((a) => (a.teacher as unknown as { user_id: string } | null)?.user_id)
+      .filter((id): id is string => Boolean(id));
 
     return [...new Set([...guardianUserIds, ...teacherUserIds])].filter(
       (uid) => uid && uid !== excludeId,

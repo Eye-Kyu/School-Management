@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { todayEnum, formatTime, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
+import { todayEnum, formatTime, groupByDay, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
 import BackButton from '@/components/BackButton';
 
 export default async function StudentTimetablePage() {
@@ -25,7 +25,7 @@ export default async function StudentTimetablePage() {
         .order('start_time')
     : { data: [] };
 
-  const byDay = Object.groupBy(weekSlots ?? [], (s: any) => s.day_of_week);
+  const byDay = groupByDay(weekSlots ?? []);
 
   return (
     <div className="space-y-6">

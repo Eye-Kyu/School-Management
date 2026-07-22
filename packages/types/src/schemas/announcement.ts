@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Uuid } from './common';
+import { Uuid, IsoDate } from './common';
 
 // =============================================================================
 // Announcements - text-only in v0.1, distribution via email/SMS/WhatsApp in v0.2
@@ -16,6 +16,7 @@ export const CreateAnnouncementInput = z
     // Required only when audience matches
     targetGradeLevel: z.coerce.number().int().min(0).max(20).optional(),
     targetClassId: Uuid.optional(),
+    expiresAt: IsoDate.optional(),
   })
   .refine(
     (d) => d.audience !== 'GRADE' || d.targetGradeLevel !== undefined,

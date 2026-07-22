@@ -33,6 +33,7 @@ export default async function AdminHomePage() {
     supabase
       .from('announcements')
       .select('id, title, published_at, author:users!inner(full_name)')
+      .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
       .order('published_at', { ascending: false })
       .limit(3),
     supabase

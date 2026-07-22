@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { todayEnum, formatTime, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
+import { todayEnum, formatTime, groupByDay, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
 
 export default async function TeacherHomePage() {
@@ -34,7 +34,7 @@ export default async function TeacherHomePage() {
         .order('start_time')
     : { data: [] };
 
-  const byDay = Object.groupBy(weekSlots ?? [], (s: any) => s.day_of_week);
+  const byDay = groupByDay(weekSlots ?? []);
 
   // Distinct classes for attendance card subtitle
   const { data: assignments } = teacher
@@ -52,6 +52,7 @@ export default async function TeacherHomePage() {
   const { data: announcements } = await supabase
     .from('announcements')
     .select('id, title, body, published_at')
+    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
     .order('published_at', { ascending: false })
     .limit(3);
 

@@ -79,6 +79,7 @@ export default async function ParentHomePage() {
   const { data: announcements } = await supabase
     .from('announcements')
     .select('id, title, body, published_at')
+    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
     .order('published_at', { ascending: false })
     .limit(3);
 

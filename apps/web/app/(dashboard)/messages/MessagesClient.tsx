@@ -66,8 +66,8 @@ export default function MessagesClient({
       const data = await apiFetch<{ contacts: Contact[]; students?: StudentRef[] }>('/messaging/contacts');
       setContacts(data.contacts ?? []);
       setStudents(data.students ?? []);
-    } catch {
-      setCreateErr('Could not load teachers. Please try again.');
+    } catch (err) {
+      setCreateErr(err instanceof Error ? err.message : 'Could not load teachers. Please try again.');
     } finally {
       setContactsLoading(false);
     }

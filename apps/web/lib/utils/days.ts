@@ -15,6 +15,15 @@ export function todayEnum(): string {
   return JS_DAY_TO_ENUM[new Date().getDay()] ?? 'MONDAY';
 }
 
+// Object.groupBy is ES2024 (Node >= 21) — this repo's deployed runtime is
+// Node 20, so it must not be used in Server Components.
+export function groupByDay<T extends { day_of_week: string }>(items: T[]): Record<string, T[]> {
+  return items.reduce((acc, item) => {
+    (acc[item.day_of_week] ??= []).push(item);
+    return acc;
+  }, {} as Record<string, T[]>);
+}
+
 export function formatTime(t: string) {
   // 'HH:MM' → '8:30 AM'
   const [h, m] = t.split(':').map(Number);

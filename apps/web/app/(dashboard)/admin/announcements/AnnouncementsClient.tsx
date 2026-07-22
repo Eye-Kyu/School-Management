@@ -12,6 +12,7 @@ type Announcement = {
   target_grade_level: number | null;
   target_class_id: string | null;
   published_at: string;
+  expires_at: string | null;
   author: { full_name: string };
 };
 
@@ -42,6 +43,7 @@ export default function AnnouncementsClient({
   const [audience, setAudience] = useState<'SCHOOL_WIDE' | 'TEACHERS' | 'PARENTS' | 'GRADE' | 'CLASS'>('SCHOOL_WIDE');
   const [gradeLevel, setGradeLevel] = useState('');
   const [classId, setClassId] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -54,6 +56,7 @@ export default function AnnouncementsClient({
       const payload: Record<string, unknown> = { title, body, audience };
       if (audience === 'GRADE') payload.targetGradeLevel = Number(gradeLevel);
       if (audience === 'CLASS') payload.targetClassId = classId;
+      if (expiresAt) payload.expiresAt = expiresAt;
 
       const created = await apiFetch<Announcement>('/announcements', {
         method: 'POST',
@@ -61,7 +64,7 @@ export default function AnnouncementsClient({
       });
       setAnnouncements((prev) => [created, ...prev]);
       setShowForm(false);
-      setTitle(''); setBody(''); setAudience('SCHOOL_WIDE'); setGradeLevel(''); setClassId('');
+      setTitle(''); setBody(''); setAudience('SCHOOL_WIDE'); setGradeLevel(''); setClassId(''); setExpiresAt('');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to post announcement');
@@ -162,6 +165,16 @@ export default function AnnouncementsClient({
               </select>
             </div>
           )}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Expires on (optional)</label>
+            <input
+              type="date"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+              className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-400">Leave blank to never expire.</p>
+          </div>
           <button
             type="submit"
             disabled={saving}
@@ -178,7 +191,9 @@ export default function AnnouncementsClient({
         </div>
       ) : (
         <div className="space-y-3">
-          {announcements.map((a) => (
+          {announcements.map((a) => {
+            const isExpired = !!a.expires_at && a.expires_at < new Date().toISOString().slice(0, 10);
+            return (
             <div key={a.id} className="bg-white border border-slate-200 rounded-lg p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
@@ -187,6 +202,11 @@ export default function AnnouncementsClient({
                       {AUDIENCE_LABELS[a.audience]}
                       {a.audience === 'GRADE' && a.target_grade_level != null ? ` ${a.target_grade_level}` : ''}
                     </span>
+                    {isExpired && (
+                      <span className="text-xs bg-rose-50 text-rose-600 rounded px-2 py-0.5 font-medium">
+                        Expired
+                      </span>
+                    )}
                     <span className="text-xs text-slate-400">
                       {new Date(a.published_at).toLocaleDateString()}
                     </span>
@@ -213,7 +233,8 @@ export default function AnnouncementsClient({
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
