@@ -140,7 +140,7 @@ describe('CreateAnnouncementInput', () => {
 describe('CreateConversationInput', () => {
   it('accepts valid input with first message', () => {
     const result = CreateConversationInput.safeParse({
-      teacherUserId: UUID,
+      recipientUserId: UUID,
       firstMessage: 'Hello, I wanted to discuss my child\'s progress.',
     });
     expect(result.success).toBe(true);
@@ -148,7 +148,7 @@ describe('CreateConversationInput', () => {
 
   it('accepts with optional studentId', () => {
     const result = CreateConversationInput.safeParse({
-      teacherUserId: UUID,
+      recipientUserId: UUID,
       studentId: UUID,
       firstMessage: 'Regarding my son.',
     });
@@ -157,21 +157,21 @@ describe('CreateConversationInput', () => {
 
   it('rejects empty message', () => {
     const result = CreateConversationInput.safeParse({
-      teacherUserId: UUID, firstMessage: '',
+      recipientUserId: UUID, firstMessage: '',
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects invalid UUID', () => {
     const result = CreateConversationInput.safeParse({
-      teacherUserId: 'not-a-uuid', firstMessage: 'Hello',
+      recipientUserId: 'not-a-uuid', firstMessage: 'Hello',
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects message over 2000 chars', () => {
     const result = CreateConversationInput.safeParse({
-      teacherUserId: UUID, firstMessage: 'x'.repeat(2001),
+      recipientUserId: UUID, firstMessage: 'x'.repeat(2001),
     });
     expect(result.success).toBe(false);
   });
