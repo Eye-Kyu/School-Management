@@ -18,6 +18,14 @@ import { AssessmentsService } from './assessments.service';
 export class AssessmentsController {
   constructor(private readonly assessments: AssessmentsService) {}
 
+  @Get('class-report')
+  exportClassReport(
+    @AccessToken() token: string,
+    @Query('classId') classId: string,
+  ) {
+    return this.assessments.exportClassReport(token, classId);
+  }
+
   @Get('grades')
   getStudentGrades(
     @AccessToken() token: string,
@@ -31,8 +39,9 @@ export class AssessmentsController {
   list(
     @AccessToken() token: string,
     @CurrentUser() user: { id: string },
+    @Query('classId') classId?: string,
   ) {
-    return this.assessments.list(token, user.id);
+    return this.assessments.list(token, user.id, classId);
   }
 
   @Post()

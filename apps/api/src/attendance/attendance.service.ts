@@ -64,6 +64,21 @@ export class AttendanceService {
   async exportCsv(accessToken: string, query: { classId?: string; dateFrom?: string; dateTo?: string }) {
     const client = this.supabase.forUser(accessToken);
 
+    // A TEACHER may only export a specific class if they're its class
+    // teacher (admin is unrestricted; a teacher exporting with no classId
+    // filter is unchanged/pre-existing behavior, not newly gated here).
+    if (query.classId) {
+      const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as
+        { id: string; role: string } | null;
+      if (userRow?.role === 'TEACHER') {
+        const { data: teacherRow } = await client
+          .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
+        if (teacherRow?.is_class_teacher_of !== query.classId) {
+          throw new ForbiddenException('You are not the class teacher of this class');
+        }
+      }
+    }
+
     let q = client
       .from('attendance_records')
       .select('date, status, note, student:students!inner(admission_no, user:users!inner(full_name)), class:classes!inner(name)')

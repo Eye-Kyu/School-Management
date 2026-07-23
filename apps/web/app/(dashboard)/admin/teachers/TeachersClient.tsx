@@ -5,14 +5,22 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { CreateTeacherInput } from '@school-manager/types';
 
+type Department = { id: string; name: string };
 type TeacherRow = {
   id: string;
   staff_no: string;
-  department: string | null;
+  department_id: string | null;
+  department_row: Department | null;
   user: { id: string; full_name: string; email: string | null; phone: string | null; is_active: boolean };
 };
 
-export default function TeachersClient({ initialTeachers }: { initialTeachers: TeacherRow[] }) {
+export default function TeachersClient({
+  initialTeachers,
+  departments,
+}: {
+  initialTeachers: TeacherRow[];
+  departments: Department[];
+}) {
   const router = useRouter();
   const [teachers, setTeachers] = useState(initialTeachers);
   const [showForm, setShowForm] = useState(false);
@@ -20,10 +28,15 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [staffNo, setStaffNo] = useState('');
-  const [department, setDepartment] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
   const [tempPassword, setTempPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [filterDept, setFilterDept] = useState('');
+
+  const visibleTeachers = filterDept
+    ? teachers.filter((t) => (filterDept === '__none__' ? !t.department_id : t.department_id === filterDept))
+    : teachers;
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -33,7 +46,7 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
       email: email || undefined,
       phone: phone || undefined,
       staffNo,
-      department: department || undefined,
+      departmentId: departmentId || undefined,
     });
     if (!result.success) { setError(result.error.issues[0]?.message ?? 'Invalid'); return; }
 
@@ -44,9 +57,12 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
         body: JSON.stringify(result.data),
       });
       setTempPassword(created.temporaryPassword);
-      setTeachers((prev) => [...prev, created]);
+      setTeachers((prev) => [...prev, {
+        ...created,
+        department_row: departments.find((d) => d.id === departmentId) ?? null,
+      }]);
       setShowForm(false);
-      setFullName(''); setEmail(''); setPhone(''); setStaffNo(''); setDepartment('');
+      setFullName(''); setEmail(''); setPhone(''); setStaffNo(''); setDepartmentId('');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -62,6 +78,23 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
     } catch (err) { alert(err instanceof Error ? err.message : 'Failed'); }
   }
 
+  async function handleReassign(teacherId: string, newDepartmentId: string) {
+    const prev = teachers;
+    setTeachers((p) => p.map((t) => t.id === teacherId
+      ? { ...t, department_id: newDepartmentId || null, department_row: departments.find((d) => d.id === newDepartmentId) ?? null }
+      : t));
+    try {
+      await apiFetch(`/teachers/${teacherId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ departmentId: newDepartmentId || null }),
+      });
+      router.refresh();
+    } catch (err) {
+      setTeachers(prev); // revert on failure
+      alert(err instanceof Error ? err.message : 'Failed to reassign department');
+    }
+  }
+
   return (
     <div className="space-y-4">
       {tempPassword && (
@@ -73,10 +106,26 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
         </div>
       )}
 
-      <button onClick={() => setShowForm((v) => !v)}
-        className="bg-slate-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-700">
-        {showForm ? 'Cancel' : '+ Add teacher'}
-      </button>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={() => setShowForm((v) => !v)}
+          className="bg-slate-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-700">
+          {showForm ? 'Cancel' : '+ Add teacher'}
+        </button>
+
+        {departments.length > 0 && (
+          <label className="text-sm text-slate-600 flex items-center gap-2">
+            Filter by department
+            <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="">All</option>
+              <option value="__none__">Unassigned</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
 
       {showForm && (
         <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-lg p-5 space-y-4 max-w-md">
@@ -106,8 +155,13 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700">Department</label>
-              <input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Mathematics"
-                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                <option value="">None</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <button type="submit" disabled={loading}
@@ -117,20 +171,33 @@ export default function TeachersClient({ initialTeachers }: { initialTeachers: T
         </form>
       )}
 
-      {teachers.length === 0 ? (
+      {visibleTeachers.length === 0 ? (
         <p className="text-sm text-slate-500">No teachers yet.</p>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
-          {teachers.map((t) => (
-            <div key={t.id} className="flex items-center justify-between px-5 py-3">
-              <div>
+          {visibleTeachers.map((t) => (
+            <div key={t.id} className="flex items-center justify-between px-5 py-3 gap-3">
+              <div className="min-w-0">
                 <p className="font-medium text-sm">{t.user.full_name}</p>
                 <p className="text-xs text-slate-500">
-                  {t.staff_no}{t.department ? ` · ${t.department}` : ''} · {t.user.email ?? t.user.phone}
+                  {t.staff_no} · {t.user.email ?? t.user.phone}
                 </p>
               </div>
-              <button onClick={() => handleDeactivate(t.id)}
-                className="text-xs text-slate-400 hover:text-red-600 transition-colors">Deactivate</button>
+              <div className="flex items-center gap-3 shrink-0">
+                <select
+                  value={t.department_id ?? ''}
+                  onChange={(e) => handleReassign(t.id, e.target.value)}
+                  className="text-xs rounded-md border border-slate-300 px-2 py-1"
+                  aria-label={`Department for ${t.user.full_name}`}
+                >
+                  <option value="">No department</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+                <button onClick={() => handleDeactivate(t.id)}
+                  className="text-xs text-slate-400 hover:text-red-600 transition-colors">Deactivate</button>
+              </div>
             </div>
           ))}
         </div>

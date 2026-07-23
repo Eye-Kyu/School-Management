@@ -14,7 +14,7 @@ export default async function TakeQuizPage({ params }: { params: { id: string } 
 
   const { data: quiz } = await supabase
     .from('quizzes')
-    .select('id, title, time_limit_mins, shuffle_questions, shuffle_options, school_id')
+    .select('id, title, time_limit_mins, shuffle_questions, shuffle_options, school_id, closes_at')
     .eq('id', params.id).eq('is_published', true).maybeSingle();
 
   if (!quiz || !student) redirect('/student/quizzes');

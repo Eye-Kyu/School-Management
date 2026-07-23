@@ -30,17 +30,22 @@ export default async function TeacherAttendancePage({
         .maybeSingle()
     : { data: null };
 
-  const { data: assignments } = teacher
-    ? await supabase
-        .from('subject_assignments')
-        .select('class:classes!inner(id, name, grade_level)')
-        .eq('teacher_id', teacher.id)
-    : { data: [] };
+  const [{ data: assignments }, { data: classTeacherClass }] = teacher
+    ? await Promise.all([
+        supabase
+          .from('subject_assignments')
+          .select('class:classes!inner(id, name, grade_level)')
+          .eq('teacher_id', teacher.id),
+        teacher.is_class_teacher_of
+          ? supabase.from('classes').select('id, name, grade_level').eq('id', teacher.is_class_teacher_of).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ])
+    : [{ data: [] }, { data: null }];
 
-  // Deduplicate classes
+  // Deduplicate classes — a pure Class Teacher with no subject_assignments
+  // still needs their own class in this list, not just subject-taught ones.
   const seen = new Set<string>();
-  const classes = (assignments ?? [])
-    .map((a: any) => a.class)
+  const classes = [...(assignments ?? []).map((a: any) => a.class), classTeacherClass]
     .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id))
     .sort((a: any, b: any) => a.name.localeCompare(b.name));
 

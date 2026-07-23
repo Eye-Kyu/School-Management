@@ -93,10 +93,21 @@ export default async function ReportCardPage({
   // Report card comments
   const { data: rc } = await supabase
     .from('student_report_cards')
-    .select('id, class_teacher_comment, head_teacher_comment, is_published')
+    .select('id, class_teacher_comment, head_teacher_comment, is_published, locked_at, signer:users!signed_by_id(full_name)')
     .eq('student_id', params.studentId).eq('term_id', termId ?? '').maybeSingle();
 
   const isEditor = userRow?.role === 'ADMIN' || userRow?.role === 'TEACHER';
+
+  // Only the class teacher of this student's class (or admin) may sign off —
+  // enforced again server-side (RLS trigger) when the sign-off write happens.
+  let canSign = userRow?.role === 'ADMIN';
+  if (!canSign && userRow?.role === 'TEACHER') {
+    const { data: teacherRow } = await supabase
+      .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
+    canSign = !!teacherRow?.is_class_teacher_of && teacherRow.is_class_teacher_of === student.current_class_id;
+  }
+  const locked = !!rc?.locked_at;
+  const signerName = (rc?.signer as unknown as { full_name: string } | null)?.full_name ?? null;
   const subjectRows = Object.values(bySubject);
   const overallAvg = subjectRows.filter((s) => s.avg != null).length
     ? subjectRows.filter((s) => s.avg != null).reduce((sum, s) => sum + s.avg!, 0) / subjectRows.filter((s) => s.avg != null).length
@@ -216,6 +227,9 @@ export default async function ReportCardPage({
             studentId={params.studentId}
             termId={termId ?? ''}
             existing={rc ? { classTeacher: rc.class_teacher_comment ?? '', headTeacher: rc.head_teacher_comment ?? '', isPublished: rc.is_published } : null}
+            locked={locked}
+            canSign={canSign}
+            isAdmin={userRow?.role === 'ADMIN'}
           />
         </div>
       ) : (
@@ -227,7 +241,13 @@ export default async function ReportCardPage({
                 <div style={{ marginTop: 6, minHeight: 36, color: rc?.class_teacher_comment ? '#1a1a1a' : '#94a3b8', fontStyle: rc?.class_teacher_comment ? 'normal' : 'italic' }}>
                   {rc?.class_teacher_comment || 'No comment added yet.'}
                 </div>
-                <div style={{ marginTop: 24, borderTop: '1px solid #94a3b8', paddingTop: 4, color: '#64748b' }}>Signature &amp; Date: ___________________</div>
+                {locked && signerName ? (
+                  <div style={{ marginTop: 24, borderTop: '1px solid #94a3b8', paddingTop: 4, color: '#64748b' }}>
+                    Signed: {signerName} on {new Date(rc!.locked_at as string).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 24, borderTop: '1px solid #94a3b8', paddingTop: 4, color: '#64748b' }}>Signature &amp; Date: ___________________</div>
+                )}
               </td>
               <td style={{ padding: '8px', width: '50%', verticalAlign: 'top', borderLeft: '1px solid #e2e8f0' }}>
                 <b>Head Teacher&apos;s Comment:</b>

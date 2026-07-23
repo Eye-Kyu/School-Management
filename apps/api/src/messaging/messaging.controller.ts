@@ -3,8 +3,14 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken } from '../common/decorators/current-user.decorator';
+import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { MessagingService } from './messaging.service';
-import { CreateConversationInput, SendMessageInput } from '@school-manager/types';
+import {
+  CreateConversationInput, SendMessageInput, BroadcastToClassInput,
+  type CreateConversationInput as CreateConversationInputType,
+  type SendMessageInput as SendMessageInputType,
+  type BroadcastToClassInput as BroadcastToClassInputType,
+} from '@school-manager/types';
 
 @UseGuards(AuthGuard)
 @Controller('messaging')
@@ -17,8 +23,10 @@ export class MessagingController {
   }
 
   @Post('conversations')
-  createConversation(@AccessToken() token: string, @Body() body: unknown) {
-    const input = CreateConversationInput.parse(body);
+  createConversation(
+    @AccessToken() token: string,
+    @Body(new ZodValidationPipe(CreateConversationInput)) input: CreateConversationInputType,
+  ) {
     return this.svc.getOrCreateConversation(token, input);
   }
 
@@ -28,8 +36,11 @@ export class MessagingController {
   }
 
   @Post('conversations/:id/messages')
-  sendMessage(@AccessToken() token: string, @Param('id') id: string, @Body() body: unknown) {
-    const input = SendMessageInput.parse(body);
+  sendMessage(
+    @AccessToken() token: string,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(SendMessageInput)) input: SendMessageInputType,
+  ) {
     return this.svc.sendMessage(token, id, input);
   }
 
@@ -47,5 +58,13 @@ export class MessagingController {
   @Get('contacts')
   availableContacts(@AccessToken() token: string) {
     return this.svc.availableContacts(token);
+  }
+
+  @Post('broadcast')
+  broadcastToClass(
+    @AccessToken() token: string,
+    @Body(new ZodValidationPipe(BroadcastToClassInput)) input: BroadcastToClassInputType,
+  ) {
+    return this.svc.broadcastToClass(token, input);
   }
 }

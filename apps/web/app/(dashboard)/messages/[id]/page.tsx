@@ -22,6 +22,7 @@ export default async function ThreadPage({ params }: { params: { id: string } })
       id, is_flagged,
       parent:users!parent_user_id(id, full_name, avatar_url),
       teacher:users!teacher_user_id(id, full_name, avatar_url),
+      admin:users!admin_user_id(id, full_name, avatar_url),
       student:students(id, user:users!user_id(full_name))
     `)
     .eq('id', params.id)
@@ -36,9 +37,11 @@ export default async function ThreadPage({ params }: { params: { id: string } })
     .order('created_at', { ascending: true })
     .limit(200);
 
-  const parent = conv.parent as unknown as { id: string; full_name: string; avatar_url?: string | null };
-  const teacher = conv.teacher as unknown as { id: string; full_name: string; avatar_url?: string | null };
-  const otherParty = userRow.role === 'PARENT' ? teacher : parent;
+  type ConvUser = { id: string; full_name: string; avatar_url?: string | null };
+  const parent = conv.parent as unknown as ConvUser | null;
+  const teacher = conv.teacher as unknown as ConvUser | null;
+  const admin = conv.admin as unknown as ConvUser | null;
+  const otherParty = [parent, teacher, admin].find((u) => u && u.id !== userRow.id) ?? null;
 
   const studentName = conv.student
     ? ((conv.student as any)?.user?.full_name as string | undefined)

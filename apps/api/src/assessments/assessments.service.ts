@@ -9,7 +9,7 @@ const ASSESSMENT_COLUMNS = 'id, name, max_marks, assessment_date, created_at, te
 export class AssessmentsService {
   constructor(private readonly supabase: SupabaseService) {}
 
-  async list(accessToken: string, _authUserId: string) {
+  async list(accessToken: string, _authUserId: string, classId?: string) {
     const client = this.supabase.forUser(accessToken);
     const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as
       { id: string; role: string } | null;
@@ -25,14 +25,33 @@ export class AssessmentsService {
 
     const { data: teacher } = await client
       .from('teachers')
-      .select('id')
+      .select('id, is_class_teacher_of')
       .eq('user_id', userRow?.id ?? '')
       .maybeSingle();
 
     if (!teacher) throw new ForbiddenException('Teacher record not found');
 
-    // A teacher's own assessments are the ones assigned to them (teacher_id),
-    // not the ones they happened to click "create" on.
+    // A Class Teacher viewing their own class sees every subject's
+    // assessments for that class, not just the ones assigned to them. An
+    // explicit classId the caller isn't the class teacher of is rejected
+    // outright rather than silently falling back to their own generic
+    // list — a caller asking for a specific class should get that class or
+    // a clear denial, not an unrelated result set with a 200 status.
+    if (classId) {
+      if (teacher.is_class_teacher_of !== classId) {
+        throw new ForbiddenException('You are not the class teacher of this class');
+      }
+      const { data, error } = await client
+        .from('assessments')
+        .select(ASSESSMENT_COLUMNS)
+        .eq('class_id', classId)
+        .order('created_at', { ascending: false });
+      if (error) throw new BadRequestException(error.message);
+      return data ?? [];
+    }
+
+    // Otherwise, a teacher's own assessments are the ones assigned to them
+    // (teacher_id), not the ones they happened to click "create" on.
     const { data, error } = await client
       .from('assessments')
       .select(ASSESSMENT_COLUMNS)
@@ -155,6 +174,58 @@ export class AssessmentsService {
     const { error } = await client.from('assessments').delete().eq('id', assessmentId);
     if (error) throw new BadRequestException(error.message);
     return { deleted: true };
+  }
+
+  // Class Teacher (or admin) only — a class-wide grade summary CSV across
+  // every subject, not just the caller's own. Mirrors the guard shape and
+  // CSV convention already used by attendance.service.ts's exportCsv().
+  async exportClassReport(accessToken: string, classId: string) {
+    const client = this.supabase.forUser(accessToken);
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as
+      { id: string; role: string } | null;
+
+    if (userRow?.role === 'TEACHER') {
+      const { data: teacherRow } = await client
+        .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
+      if (teacherRow?.is_class_teacher_of !== classId) {
+        throw new ForbiddenException('You are not the class teacher of this class');
+      }
+    } else if (userRow?.role !== 'ADMIN') {
+      throw new ForbiddenException('Only a class teacher or admin can export a class report');
+    }
+
+    const { data: rows, error } = await client
+      .from('grades')
+      .select(`
+        score, comment,
+        assessment:assessments!inner(name, max_marks, assessment_date, class_id, subject:subjects(name)),
+        student:students!inner(admission_no, user:users!inner(full_name))
+      `)
+      .eq('assessment.class_id', classId)
+      .order('created_at', { ascending: false });
+    if (error) throw new BadRequestException(error.message);
+
+    type Row = {
+      score: number | null; comment: string | null;
+      assessment: { name: string; max_marks: number; assessment_date: string | null; subject: { name: string } | null };
+      student: { admission_no: string; user: { full_name: string } };
+    };
+    const csvCell = (v: string) => (v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v);
+
+    const { data: classRow } = await client.from('classes').select('name').eq('id', classId).maybeSingle();
+    const today = new Date().toISOString().slice(0, 10);
+    const header = 'AdmissionNo,Student,Subject,Assessment,Date,Score,MaxMarks,Comment';
+    const lines = ((rows ?? []) as unknown as Row[]).map((r) => [
+      r.student.admission_no, csvCell(r.student.user.full_name), csvCell(r.assessment.subject?.name ?? ''),
+      csvCell(r.assessment.name), r.assessment.assessment_date ?? '', r.score ?? '', r.assessment.max_marks,
+      csvCell(r.comment ?? ''),
+    ].join(','));
+
+    const className = classRow?.name ?? 'class';
+    return {
+      csv: [header, ...lines].join('\n'),
+      filename: `grades_${className.replace(/\s+/g, '_')}_${today}.csv`,
+    };
   }
 
   async getStudentGrades(accessToken: string, studentId: string, termId?: string) {

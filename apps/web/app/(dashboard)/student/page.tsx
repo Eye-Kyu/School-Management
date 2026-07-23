@@ -72,15 +72,28 @@ export default async function StudentHomePage() {
     .order('starts_at')
     .limit(10);
 
+  // Best Student — Term X badge, private to this student (never shown on
+  // any listing a peer or parent could see).
+  const { data: bestStudentAward } = studentId && currentTerm
+    ? await supabase.from('best_student_awards').select('id').eq('student_id', studentId).eq('term_id', currentTerm.id).maybeSingle()
+    : { data: null };
+
   const firstName = (studentUser?.full_name as string | null)?.split(' ')[0] ?? 'Student';
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold">
-          Good {greeting()}, {firstName}
-        </h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-2xl font-semibold">
+            Good {greeting()}, {firstName}
+          </h1>
+          {bestStudentAward && (
+            <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-3 py-1 text-xs font-semibold">
+              🏆 Best Student — {currentTerm?.name}
+            </span>
+          )}
+        </div>
         <p className="text-sm text-slate-500 mt-1">
           {DAY_LABELS[today]} · {(todaySlots ?? []).length} classes today
         </p>

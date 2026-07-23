@@ -27,6 +27,7 @@ export default async function AdminMessagesPage({
       id, last_message_body, last_message_at, is_flagged, created_at,
       parent:users!parent_user_id(id, full_name, avatar_url),
       teacher:users!teacher_user_id(id, full_name, avatar_url),
+      admin:users!admin_user_id(id, full_name, avatar_url),
       student:students(id, user:users!user_id(full_name))
     `)
     .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -79,8 +80,11 @@ export default async function AdminMessagesPage({
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {(conversations ?? []).map((c, i) => {
-            const parent = c.parent as unknown as { id: string; full_name: string; avatar_url?: string | null };
-            const teacher = c.teacher as unknown as { id: string; full_name: string; avatar_url?: string | null };
+            type ConvUser = { id: string; full_name: string; avatar_url?: string | null };
+            const parent = c.parent as unknown as ConvUser | null;
+            const teacher = c.teacher as unknown as ConvUser | null;
+            const admin = c.admin as unknown as ConvUser | null;
+            const [left, right] = [parent ?? admin, teacher ?? (parent ? admin : null)];
             const studentName = c.student
               ? ((c.student as any)?.user?.full_name as string | undefined)
               : null;
@@ -94,14 +98,14 @@ export default async function AdminMessagesPage({
                 }`}
               >
                 <div className="flex -space-x-2 shrink-0">
-                  <UserAvatar name={parent?.full_name ?? '?'} avatarUrl={parent?.avatar_url} size={32} />
-                  <UserAvatar name={teacher?.full_name ?? '?'} avatarUrl={teacher?.avatar_url} size={32} />
+                  <UserAvatar name={left?.full_name ?? '?'} avatarUrl={left?.avatar_url} size={32} />
+                  <UserAvatar name={right?.full_name ?? '?'} avatarUrl={right?.avatar_url} size={32} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-slate-800">{parent?.full_name ?? '—'}</span>
+                    <span className="text-sm font-medium text-slate-800">{left?.full_name ?? '—'}</span>
                     <span className="text-xs text-slate-400">→</span>
-                    <span className="text-sm font-medium text-slate-800">{teacher?.full_name ?? '—'}</span>
+                    <span className="text-sm font-medium text-slate-800">{right?.full_name ?? '—'}</span>
                     {studentName && (
                       <span className="text-xs text-slate-500">re: {studentName}</span>
                     )}

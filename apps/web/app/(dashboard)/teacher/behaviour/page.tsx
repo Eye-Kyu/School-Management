@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api';
 import BackButton from '@/components/BackButton';
 
-type Student = { id: string; full_name: string; class_name: string };
+type Student = { id: string; full_name: string; class_id: string; class_name: string };
 type Point = { id: string; category: string; points: number; reason: string; date: string; student_id: string };
+const REASON_CATEGORIES = ['academic', 'attendance', 'citizenship', 'leadership', 'other'] as const;
 
 export default function TeacherBehaviourPage() {
   const supabase = createClient();
@@ -13,29 +15,41 @@ export default function TeacherBehaviourPage() {
   const [points, setPoints] = useState<Point[]>([]);
   const [studentId, setStudentId] = useState('');
   const [category, setCategory] = useState<'POSITIVE' | 'NEGATIVE'>('POSITIVE');
+  const [reasonCategory, setReasonCategory] = useState<typeof REASON_CATEGORIES[number]>('academic');
   const [pts, setPts] = useState('1');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [teacherId, setTeacherId] = useState('');
+  const [userId, setUserId] = useState('');
 
   useEffect(() => {
     (async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const { data: userRow } = await supabase.from('users').select('id').eq('auth_id', authUser?.id ?? '').maybeSingle();
-      const { data: teacher } = await supabase.from('teachers').select('id').eq('user_id', userRow?.id ?? '').maybeSingle();
+      setUserId(userRow?.id ?? '');
+      const { data: teacher } = await supabase.from('teachers').select('id, is_class_teacher_of').eq('user_id', userRow?.id ?? '').maybeSingle();
       setTeacherId(teacher?.id ?? '');
 
+      // A Class Teacher can mark points for their whole class with no
+      // subject_assignments row at all — the RLS bp_insert policy allows
+      // either condition, so the student picker needs to reflect both too.
       const { data: assigns } = await supabase.from('subject_assignments')
         .select('class:classes(id, name)').eq('teacher_id', teacher?.id ?? '');
-      const classIds = [...new Set((assigns ?? []).map((a) => (a.class as any)?.id).filter(Boolean))];
+      const classIds = [
+        ...new Set([
+          ...(assigns ?? []).map((a) => (a.class as any)?.id).filter(Boolean),
+          ...(teacher?.is_class_teacher_of ? [teacher.is_class_teacher_of] : []),
+        ]),
+      ];
 
       const { data: stds } = classIds.length
-        ? await supabase.from('students').select('id, user:users!user_id(full_name), class:classes!current_class_id(name)')
+        ? await supabase.from('students').select('id, user:users!user_id(full_name), class:classes!current_class_id(id, name)')
             .in('current_class_id', classIds).eq('is_active', true)
         : { data: [] };
       setStudents((stds ?? []).map((s) => ({
         id: s.id,
         full_name: ((s.user as any)?.full_name ?? '—') as string,
+        class_id: ((s.class as any)?.id ?? '') as string,
         class_name: ((s.class as any)?.name ?? '—') as string,
       })));
 
@@ -52,16 +66,25 @@ export default function TeacherBehaviourPage() {
     setSaving(true);
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authUser?.id ?? '').maybeSingle();
+    const student = students.find((s) => s.id === studentId);
     const { data } = await supabase.from('behaviour_points').insert({
       school_id: userRow?.school_id,
       student_id: studentId,
       teacher_id: teacherId,
+      awarded_by_user_id: userId,
+      class_context_id: student?.class_id || null,
       category,
+      reason_category: reasonCategory,
       points: parseInt(pts) || 1,
       reason: reason.trim(),
       date: new Date().toISOString().slice(0, 10),
     }).select('id, category, points, reason, date, student_id').single();
-    if (data) setPoints((p) => [data as Point, ...p]);
+    if (data) {
+      setPoints((p) => [data as Point, ...p]);
+      // Fire-and-forget — the leaderboard's 60s cache doesn't need to wait
+      // out its full TTL for a point the same teacher just marked.
+      apiFetch('/behaviour/cache-bust', { method: 'POST' }).catch(() => {});
+    }
     setReason(''); setSaving(false);
   }
 
@@ -107,7 +130,14 @@ export default function TeacherBehaviourPage() {
             <input type="number" min="1" max="10" value={pts} onChange={(e) => setPts(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </div>
-          <div className="col-span-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+            <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value as typeof reasonCategory)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm capitalize">
+              {REASON_CATEGORIES.map((c) => <option key={c} value={c} className="capitalize">{c}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
             <label className="block text-sm font-medium text-slate-700 mb-1">Reason</label>
             <input value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={200}
               placeholder="e.g. Helped a classmate, Disrupted class"

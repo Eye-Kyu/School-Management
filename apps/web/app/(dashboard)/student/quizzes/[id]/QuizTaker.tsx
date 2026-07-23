@@ -9,7 +9,11 @@ type Question = {
   id: string; kind: 'MCQ' | 'SHORT_ANSWER'; body: string;
   options: Option[] | null; points: number;
 };
-type Quiz = { id: string; title: string; time_limit_mins: number | null; shuffle_questions: boolean; shuffle_options: boolean; school_id: string };
+type Quiz = {
+  id: string; title: string; time_limit_mins: number | null;
+  shuffle_questions: boolean; shuffle_options: boolean; school_id: string;
+  closes_at: string | null;
+};
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -55,8 +59,12 @@ export default function QuizTaker({
   const [result, setResult] = useState<{ score: number; max: number } | null>(null);
   const attemptId = useRef<string | null>(null);
 
-  // Upsert attempt on mount
+  const isPastDeadline = quiz.closes_at ? new Date() > new Date(quiz.closes_at) : false;
+
+  // Upsert attempt on mount — skipped once the deadline has passed, since
+  // qa_insert/qa_update RLS would reject it anyway (see closes_at).
   useEffect(() => {
+    if (isPastDeadline) return;
     (async () => {
       const { data } = await supabase.from('quiz_attempts').upsert({
         school_id: quiz.school_id,
@@ -152,6 +160,25 @@ export default function QuizTaker({
             {saCount > 0 && <> {saCount} short-answer question{saCount > 1 ? 's' : ''} will be reviewed by your teacher.</>}
           </p>
         </div>
+        <button onClick={() => router.push('/student/quizzes')}
+          className="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-700">
+          Back to quizzes
+        </button>
+      </div>
+    );
+  }
+
+  if (isPastDeadline) {
+    const answeredCount = Object.keys(answers).length;
+    return (
+      <div className="max-w-lg mx-auto text-center space-y-4 py-16">
+        <h1 className="text-xl font-semibold text-slate-800">{quiz.title}</h1>
+        <p className="text-rose-600 font-medium">Deadline passed. Ask your teacher for an extension.</p>
+        {answeredCount > 0 && (
+          <p className="text-sm text-slate-500">
+            You had answered {answeredCount} of {questions.length} question{questions.length !== 1 ? 's' : ''} before the deadline, but the attempt was never submitted.
+          </p>
+        )}
         <button onClick={() => router.push('/student/quizzes')}
           className="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-700">
           Back to quizzes

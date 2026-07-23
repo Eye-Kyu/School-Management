@@ -39,15 +39,22 @@ export default function StudentAssignmentsClient({
     return { label: new Date(due).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' }), color: 'text-slate-500 bg-slate-100' };
   }
 
+  function isPastDeadline(dueDate: string) {
+    return new Date() > new Date(dueDate);
+  }
+
   async function handleSubmit(e: React.FormEvent, assignment: Assignment) {
     e.preventDefault();
     if (!studentId) return;
+    if (isPastDeadline(assignment.due_date)) {
+      setErr('Deadline passed. Ask your teacher for an extension.');
+      return;
+    }
     setSubmitting(true); setErr(''); setUploadProgress('');
 
     try {
       const { data: authData } = await supabase.auth.getUser();
       const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
-      const isLate = new Date() > new Date(assignment.due_date);
 
       // Upload files to Supabase Storage
       const fileUrls: string[] = [];
@@ -73,7 +80,7 @@ export default function StudentAssignmentsClient({
         content: content.trim() || null,
         file_urls: fileUrls,
         submitted_at: new Date().toISOString(),
-        is_late: isLate,
+        is_late: false,
       }, { onConflict: 'assignment_id,student_id' })
         .select('id, submitted_at, is_late, grade_score, grade_comment, file_urls, content')
         .single();
@@ -125,6 +132,10 @@ export default function StudentAssignmentsClient({
                     ✓ Submitted{sub.is_late ? ' (late)' : ''}
                     {sub.grade_score != null ? ` · ${sub.grade_score}${a.max_score ? `/${a.max_score}` : ''}` : ''}
                   </span>
+                ) : isPastDeadline(a.due_date) ? (
+                  <span className="text-xs font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
+                    Deadline passed
+                  </span>
                 ) : (
                   <button onClick={() => { setOpen(isOpen ? null : a.id); setErr(''); setContent(''); setFiles([]); }}
                     className="text-xs font-medium text-slate-600 border border-slate-300 px-3 py-1 rounded-lg hover:bg-slate-50">
@@ -163,9 +174,14 @@ export default function StudentAssignmentsClient({
                   )}
                 </div>
                 <div className="flex justify-end">
-                  <button type="submit" disabled={submitting || (!content.trim() && files.length === 0)}
+                  <button type="submit"
+                    disabled={submitting || isPastDeadline(a.due_date) || (!content.trim() && files.length === 0)}
                     className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50">
-                    {submitting ? 'Submitting…' : new Date() > new Date(a.due_date) ? 'Submit (late)' : 'Submit assignment'}
+                    {submitting
+                      ? 'Submitting…'
+                      : isPastDeadline(a.due_date)
+                        ? 'Deadline passed. Ask your teacher for an extension.'
+                        : 'Submit assignment'}
                   </button>
                 </div>
               </form>

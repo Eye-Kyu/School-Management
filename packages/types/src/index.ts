@@ -17,6 +17,8 @@ export * from './schemas/auth';
 export * from './schemas/school';
 export * from './schemas/user';
 export * from './schemas/class';
+export * from './schemas/department';
+export * from './schemas/behaviour';
 export * from './schemas/timetable';
 export * from './schemas/attendance';
 export * from './schemas/fees';

@@ -8,8 +8,8 @@ Multi-tenant school management platform. Built for parents, students, teachers, 
 - **Backend:** NestJS + TypeScript
 - **Database:** PostgreSQL (Supabase) with Row-Level Security
 - **Auth:** Supabase Auth
-- **Storage:** Cloudflare R2
-- **Cache/Queue:** Upstash Redis
+- **Storage:** Supabase Storage (Cloudflare R2 was the original plan; Supabase Storage is what's actually wired for avatars, assignment submissions, and the document library)
+- **Cache/Queue:** none currently — Upstash Redis is provisioned in env config but not referenced anywhere in the codebase yet
 - **Monorepo:** Turborepo + pnpm
 
 ## Quick Start

@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ClassesModule } from './classes/classes.module';
 import { SubjectsModule } from './subjects/subjects.module';
+import { DepartmentsModule } from './departments/departments.module';
 import { TeachersModule } from './teachers/teachers.module';
 import { StudentsModule } from './students/students.module';
 import { TermsModule } from './terms/terms.module';
@@ -16,6 +17,7 @@ import { FeesModule } from './fees/fees.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { GuardiansModule } from './guardians/guardians.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { BehaviourModule } from './behaviour/behaviour.module';
 import { UsersModule } from './users/users.module';
 import { EventsModule } from './events/events.module';
 import { HomeworkModule } from './homework/homework.module';
@@ -40,6 +42,7 @@ import { PlatformSettingsModule } from './platform-settings/platform-settings.mo
     AttendanceModule,
     ClassesModule,
     SubjectsModule,
+    DepartmentsModule,
     TeachersModule,
     StudentsModule,
     TermsModule,
@@ -48,6 +51,7 @@ import { PlatformSettingsModule } from './platform-settings/platform-settings.mo
     AnnouncementsModule,
     GuardiansModule,
     AssessmentsModule,
+    BehaviourModule,
     UsersModule,
     EventsModule,
     HomeworkModule,

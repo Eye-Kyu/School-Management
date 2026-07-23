@@ -12,7 +12,8 @@ export class TeachersService {
     const { data, error } = await client
       .from('teachers')
       .select(`
-        id, staff_no, created_at,
+        id, staff_no, department, department_id, created_at,
+        department_row:departments(id, name),
         user:users!inner(id, full_name, email, phone, is_active)
       `)
       .order('created_at');
@@ -83,6 +84,7 @@ export class TeachersService {
         user_id: actualUserId,
         staff_no: input.staffNo,
         department: input.department ?? null,
+        department_id: input.departmentId ?? null,
         updated_at: new Date().toISOString(),
       })
       .select()
@@ -118,15 +120,18 @@ export class TeachersService {
     const { error } = await client.from('users').update(userPatch).eq('id', teacher.user_id);
     if (error) throw new Error(error.message);
 
-    if (input.department !== undefined) {
+    if (input.department !== undefined || input.departmentId !== undefined) {
+      const teacherPatch: Record<string, unknown> = { updated_at: now };
+      if (input.department !== undefined) teacherPatch.department = input.department;
+      if (input.departmentId !== undefined) teacherPatch.department_id = input.departmentId;
       const { error: teacherErr } = await client
         .from('teachers')
-        .update({ department: input.department, updated_at: now })
+        .update(teacherPatch)
         .eq('id', teacherId);
       if (teacherErr) throw new Error(teacherErr.message);
     }
 
-    await this.audit(client, accessToken, teacher.school_id, 'teacher.update', 'teacher', teacherId, { ...userPatch, department: input.department });
+    await this.audit(client, accessToken, teacher.school_id, 'teacher.update', 'teacher', teacherId, { ...userPatch, department: input.department, departmentId: input.departmentId });
     return { updated: true };
   }
 

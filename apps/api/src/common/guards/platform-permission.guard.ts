@@ -37,7 +37,9 @@ export class PlatformPermissionGuard implements CanActivate {
 
     const permissions = (userRow?.platform_permissions as string[] | null) ?? [];
     if (!permissions.includes(requiredPermission)) {
-      throw new ForbiddenException(`Missing platform permission: ${requiredPermission}`);
+      throw new ForbiddenException(
+        `This action requires the '${requiredPermission}' platform permission, which your account doesn't have. Ask another SuperAdmin to grant it.`,
+      );
     }
     return true;
   }

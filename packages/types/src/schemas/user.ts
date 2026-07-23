@@ -18,6 +18,7 @@ const BaseUser = z.object({
 export const CreateTeacherInput = BaseUser.extend({
   staffNo: z.string().min(1).max(50),
   department: z.string().max(100).optional(),
+  departmentId: Uuid.optional(),
 });
 export type CreateTeacherInput = z.infer<typeof CreateTeacherInput>;
 
@@ -69,6 +70,7 @@ export const UpdateTeacherInput = z.object({
   phone: PhoneNumber.optional(),
   isActive: z.boolean().optional(),
   department: z.string().max(100).optional(),
+  departmentId: Uuid.nullable().optional(),
 });
 export type UpdateTeacherInput = z.infer<typeof UpdateTeacherInput>;
 

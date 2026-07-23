@@ -1981,4 +1981,483 @@ describe('Cross-tenant isolation (e2e)', () => {
     // RLS silently filters the row out of the UPDATE — zero rows affected, not an error.
     expect(data ?? []).toHaveLength(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // Bug fixes and messaging improvements — Tasks 1-5
+  // ---------------------------------------------------------------------------
+
+  /** Same pattern as seedUser() inside beforeAll, exposed here for tests that
+   * run after beforeAll has finished (that function's closure isn't reachable). */
+  async function createExtraUser(schoolId: string | null, role: 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT', label: string) {
+    const email = `${label}-${suffix}@test-isolation.internal`;
+    const password = `TestPass${suffix}!`;
+    const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+      email, password, email_confirm: true,
+      user_metadata: { school_id: schoolId, role },
+    });
+    if (authErr) throw new Error(`Auth user create failed (${label}): ${authErr.message}`);
+    authUserIds.push(authData.user.id);
+    const userId = randomUUID();
+    await admin.from('users').upsert({
+      id: userId, school_id: schoolId, auth_id: authData.user.id,
+      email, full_name: `Test ${label}`, role, updated_at: new Date().toISOString(),
+    }, { onConflict: 'auth_id' });
+    const { data: row } = await admin.from('users').select('id').eq('auth_id', authData.user.id).single();
+    const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
+    if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+    return { authId: authData.user.id, userId: row?.id ?? userId, token: session.session!.access_token };
+  }
+
+  it('Task 1: the permission-denial message is action-oriented, not just a raw key', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/schools')
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+    expect(res.body.message).toMatch(/platform permission/i);
+    expect(res.body.message).toMatch(/ask another superadmin/i);
+  });
+
+  it('Task 2: a parent composing a first message to a teacher succeeds (regression for the on_conflict 500)', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task2-parent');
+    const { data: teacherRow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+
+    const res = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ recipientUserId: teacherRow!.user_id, firstMessage: 'Hello, checking in about homework.' })
+      .expect(201);
+    expect(res.body.id).toBeDefined();
+
+    // Composing again to the same teacher must find the existing thread, not error.
+    const res2 = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ recipientUserId: teacherRow!.user_id, firstMessage: 'Following up.' })
+      .expect(201);
+    expect(res2.body.id).toBe(res.body.id);
+
+    await admin.from('messages').delete().eq('conversation_id', res.body.id);
+    await admin.from('conversations').delete().eq('id', res.body.id);
+  });
+
+  it('Task 2: a malformed compose body returns 400 with a real message, not a bare 500', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task2-badbody-parent');
+    const res = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ firstMessage: '' }) // missing recipientUserId, empty message
+      .expect(400);
+    expect(res.body.message).toBeDefined();
+  });
+
+  it('Task 3: admin can message a teacher and a parent at their own school, with bypass_quiet_hours honored', async () => {
+    const { data: teacherRow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task3-parent');
+
+    const toTeacher = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientUserId: teacherRow!.user_id, recipientRole: 'TEACHER', firstMessage: 'Staff meeting Friday.', bypassQuietHours: true })
+      .expect(201);
+
+    const { data: msgRow } = await admin.from('messages').select('bypass_quiet_hours').eq('conversation_id', toTeacher.body.id).single();
+    expect(msgRow?.bypass_quiet_hours).toBe(true);
+
+    const { data: auditRow } = await admin.from('audit_logs').select('action, metadata')
+      .eq('entity_id', toTeacher.body.id).eq('action', 'message.admin_send').maybeSingle();
+    expect(auditRow?.action).toBe('message.admin_send');
+
+    const toParent = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientUserId: parent.userId, recipientRole: 'PARENT', firstMessage: 'Reminder about the trip form.' })
+      .expect(201);
+    expect(toParent.body.id).toBeDefined();
+
+    await admin.from('messages').delete().in('conversation_id', [toTeacher.body.id, toParent.body.id]);
+    await admin.from('conversations').delete().in('id', [toTeacher.body.id, toParent.body.id]);
+  });
+
+  it('Task 3: School A admin cannot message a School B teacher (cross-tenant)', async () => {
+    const { data: teacherBRow } = await admin.from('teachers').select('user_id').eq('id', teacherBTeacherId).single();
+    await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientUserId: teacherBRow!.user_id, recipientRole: 'TEACHER', firstMessage: 'Hi' })
+      .expect(400);
+  });
+
+  it('Task 3: a STUDENT can never be a conversation participant — rejected by RLS and by the unconditional trigger', async () => {
+    const { data: studentRow } = await admin.from('students').select('user_id').eq('id', studentAId).single();
+    const studentUserId = studentRow!.user_id;
+    const { data: adminARow } = await admin.from('users').select('id').eq('email', `admin-a-${suffix}@test-isolation.internal`).single();
+    const adminAUserId = adminARow!.id;
+
+    // Well-formed admin+teacher shape in every other respect (passes the
+    // CHECK constraint) — the only thing wrong is that the "teacher" slot is
+    // actually a student, which is what should trigger the rejection.
+    const rlsAttempt = await clientAs(tokenA)
+      .from('conversations')
+      .insert({ id: randomUUID(), school_id: schoolAId, admin_user_id: adminAUserId, teacher_user_id: studentUserId, parent_user_id: null })
+      .select();
+    expect(rlsAttempt.error).toBeTruthy();
+
+    // Trigger: even the service-role client (which bypasses RLS entirely) is
+    // blocked — same well-formed shape, service-role client this time.
+    const parentForShape = await createExtraUser(schoolAId, 'PARENT', 'task3-trigger-parent');
+    const triggerAttempt = await admin
+      .from('conversations')
+      .insert({ id: randomUUID(), school_id: schoolAId, teacher_user_id: studentUserId, parent_user_id: parentForShape.userId, admin_user_id: null });
+    expect(triggerAttempt.error).toBeTruthy();
+    expect(triggerAttempt.error?.message).toMatch(/student/i);
+  });
+
+  it('Task 4: a teacher can message a parent of a student they teach, grouped by student; out-of-scope is denied at both API and RLS', async () => {
+    const now = new Date().toISOString();
+    const subjectId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Task4 Subject ${suffix}`, code: 'T4', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectId, teacher_id: teacherATeacherId });
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task4-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    const contacts = await request(app.getHttpServer())
+      .get('/messaging/contacts')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect((contacts.body.contacts as Array<{ user_id: string }>).map((c) => c.user_id)).toContain(parent.userId);
+
+    const ok = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ recipientUserId: parent.userId, studentId: studentAId, firstMessage: 'How is progress going?' })
+      .expect(201);
+
+    // A parent NOT linked to any student this teacher teaches is out of scope.
+    const outOfScopeParent = await createExtraUser(schoolAId, 'PARENT', 'task4-outofscope-parent');
+    await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ recipientUserId: outOfScopeParent.userId, firstMessage: 'Hi' })
+      .expect(403);
+
+    // Defense in depth: RLS blocks it too, even bypassing the API's own check.
+    const rlsAttempt = await clientAs(tokenTeacherA)
+      .from('conversations')
+      .insert({ id: randomUUID(), school_id: schoolAId, teacher_user_id: teacherAUserId, parent_user_id: outOfScopeParent.userId, admin_user_id: null })
+      .select();
+    expect(rlsAttempt.error).toBeTruthy();
+
+    await admin.from('messages').delete().eq('conversation_id', ok.body.id);
+    await admin.from('conversations').delete().eq('id', ok.body.id);
+    await admin.from('guardians').delete().eq('id', guardianId);
+    await admin.from('subject_assignments').delete().eq('subject_id', subjectId);
+    await admin.from('subjects').delete().eq('id', subjectId);
+  });
+
+  it('Task 5: an assignment blocks submission after its deadline, but keeps past submissions visible and gradable', async () => {
+    const now = new Date().toISOString();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    const openAssignmentId = randomUUID();
+    const closedAssignmentId = randomUUID();
+    await admin.from('assignments').insert([
+      { id: openAssignmentId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Open', due_date: tomorrow, updated_at: now },
+      { id: closedAssignmentId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Closed', due_date: yesterday, updated_at: now },
+    ]);
+
+    // Before deadline: student can submit.
+    const openSub = await clientAs(tokenStudentA)
+      .from('submissions')
+      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: openAssignmentId, student_id: studentAId, content: 'my answer' })
+      .select().single();
+    expect(openSub.error).toBeNull();
+
+    // After deadline: student cannot submit for the first time. Unlike UPDATE
+    // (which silently filters rows the USING clause rejects), a failed INSERT
+    // WITH CHECK raises a real RLS error.
+    const closedSub = await clientAs(tokenStudentA)
+      .from('submissions')
+      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: closedAssignmentId, student_id: studentAId, content: 'too late' })
+      .select();
+    expect(closedSub.error).toBeTruthy();
+
+    // Seed a submission directly (as if made before the deadline), then prove
+    // the student can no longer resubmit it now that the deadline has passed —
+    // but a teacher can still grade it, and the student can still read it.
+    const pastSubId = randomUUID();
+    await admin.from('submissions').insert({ id: pastSubId, school_id: schoolAId, assignment_id: closedAssignmentId, student_id: studentAId, content: 'original' });
+
+    const resubmitAttempt = await clientAs(tokenStudentA)
+      .from('submissions')
+      .update({ content: 'trying to resubmit' })
+      .eq('id', pastSubId)
+      .select();
+    expect(resubmitAttempt.data ?? []).toHaveLength(0);
+
+    const teacherGrade = await clientAs(tokenTeacherA)
+      .from('submissions')
+      .update({ grade_score: 8, grade_comment: 'Good, though late-graded' })
+      .eq('id', pastSubId)
+      .select();
+    expect(teacherGrade.error).toBeNull();
+    expect(teacherGrade.data?.[0]?.grade_score).toBe(8);
+
+    const studentRead = await clientAs(tokenStudentA).from('submissions').select('id, content, grade_score').eq('id', pastSubId).single();
+    expect(studentRead.data?.content).toBe('original');
+    expect(studentRead.data?.grade_score).toBe(8);
+
+    await admin.from('submissions').delete().in('id', [openSub.data!.id, pastSubId]);
+    await admin.from('assignments').delete().in('id', [openAssignmentId, closedAssignmentId]);
+  });
+
+  it('Task 5: a quiz blocks new/resumed attempts after closes_at, but keeps a past attempt visible', async () => {
+    const inOneHour = new Date(Date.now() + 3_600_000).toISOString();
+    const oneHourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    const openQuizId = randomUUID();
+    const closedQuizId = randomUUID();
+    await admin.from('quizzes').insert([
+      { id: openQuizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Open Quiz', is_published: true, closes_at: inOneHour },
+      { id: closedQuizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Closed Quiz', is_published: true, closes_at: oneHourAgo },
+    ]);
+
+    // Before closes_at: starting an attempt succeeds.
+    const openAttempt = await clientAs(tokenStudentA)
+      .from('quiz_attempts')
+      .insert({ id: randomUUID(), school_id: schoolAId, quiz_id: openQuizId, student_id: studentAId })
+      .select().single();
+    expect(openAttempt.error).toBeNull();
+
+    // After closes_at: starting a new attempt is blocked (INSERT WITH CHECK
+    // failure raises a real RLS error, unlike UPDATE's silent row filtering).
+    const closedAttempt = await clientAs(tokenStudentA)
+      .from('quiz_attempts')
+      .insert({ id: randomUUID(), school_id: schoolAId, quiz_id: closedQuizId, student_id: studentAId })
+      .select();
+    expect(closedAttempt.error).toBeTruthy();
+
+    // An attempt that was already in progress can no longer be saved/submitted either.
+    const inProgressId = randomUUID();
+    await admin.from('quiz_attempts').insert({ id: inProgressId, school_id: schoolAId, quiz_id: closedQuizId, student_id: studentAId, answers: { q1: 'a' } });
+    const lateSave = await clientAs(tokenStudentA)
+      .from('quiz_attempts')
+      .update({ answers: { q1: 'b' }, submitted_at: new Date().toISOString() })
+      .eq('id', inProgressId)
+      .select();
+    expect(lateSave.data ?? []).toHaveLength(0);
+
+    // Still readable by the student, and still gradable by the teacher.
+    const studentRead = await clientAs(tokenStudentA).from('quiz_attempts').select('id, answers').eq('id', inProgressId).single();
+    expect(studentRead.data?.answers).toEqual({ q1: 'a' });
+
+    const teacherGrade = await clientAs(tokenTeacherA)
+      .from('quiz_attempts')
+      .update({ score: 5, max_score: 10, submitted_at: new Date().toISOString() })
+      .eq('id', inProgressId)
+      .select();
+    expect(teacherGrade.error).toBeNull();
+
+    await admin.from('quiz_attempts').delete().in('id', [openAttempt.data!.id, inProgressId]);
+    await admin.from('quizzes').delete().in('id', [openQuizId, closedQuizId]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Departments, Class Teacher powers, and Behavior leaderboard
+  // ---------------------------------------------------------------------------
+
+  it('Task 1: admin can CRUD departments; non-admin cannot; cross-tenant isolated; soft-delete nulls department_id', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/departments')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Mathematics' })
+      .expect(201);
+    const deptId = createRes.body.id as string;
+
+    await request(app.getHttpServer())
+      .post('/departments')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ name: 'Should fail' })
+      .expect(403);
+
+    // Cross-tenant: School B admin cannot see School A's department.
+    const listB = await request(app.getHttpServer())
+      .get('/departments')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(200);
+    expect((listB.body as Array<{ id: string }>).map((d) => d.id)).not.toContain(deptId);
+
+    // Assign a teacher, then soft-delete the department — the teacher's
+    // department_id must be nulled by the trigger, teacher otherwise intact.
+    await admin.from('teachers').update({ department_id: deptId }).eq('id', teacherATeacherId);
+    await request(app.getHttpServer())
+      .delete(`/departments/${deptId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    const { data: teacherRow } = await admin.from('teachers').select('department_id, staff_no').eq('id', teacherATeacherId).single();
+    expect(teacherRow?.department_id).toBeNull();
+    expect(teacherRow?.staff_no).toBeTruthy(); // untouched otherwise
+
+    const { data: deptRow } = await admin.from('departments').select('deleted_at').eq('id', deptId).single();
+    expect(deptRow?.deleted_at).toBeTruthy();
+  });
+
+  it('Task 2: Class Teacher powers — own class succeeds, wrong class denied (API + RLS), cross-tenant denied, uniqueness enforced', async () => {
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    // Make teacherA the class teacher of classA for the duration of this test.
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
+    try {
+      // 2.1: full-class grades view — an assessment created by a genuinely
+      // DIFFERENT teacher/subject in classA must still show up for the class
+      // teacher, who has no subject_assignments row for it.
+      const now = new Date().toISOString();
+      const today = now.slice(0, 10);
+      const otherTermId = randomUUID();
+      const { error: termErr } = await admin.from('terms').insert({ id: otherTermId, school_id: schoolAId, name: `Task2 Term ${suffix}`, start_date: today, end_date: today, is_current: false });
+      if (termErr) throw new Error(`fixture: term insert failed: ${termErr.message}`);
+
+      const otherSubjectId = randomUUID();
+      const { error: subjErr } = await admin.from('subjects').insert({ id: otherSubjectId, school_id: schoolAId, name: `Other Subject ${suffix}`, code: 'OTH', updated_at: now });
+      if (subjErr) throw new Error(`fixture: subject insert failed: ${subjErr.message}`);
+
+      const otherTeacher = await createExtraUser(schoolAId, 'TEACHER', 'task2-other-teacher');
+      const otherTeacherId = randomUUID();
+      const { error: teachErr2 } = await admin.from('teachers').insert({ id: otherTeacherId, school_id: schoolAId, user_id: otherTeacher.userId, staff_no: `OT-${suffix}`, updated_at: now });
+      if (teachErr2) throw new Error(`fixture: teacher insert failed: ${teachErr2.message}`);
+
+      const otherAssessmentId = randomUUID();
+      const { error: assessErr } = await admin.from('assessments').insert({
+        id: otherAssessmentId, school_id: schoolAId, class_id: classAId, subject_id: otherSubjectId, term_id: otherTermId,
+        teacher_id: otherTeacherId, name: 'Other Assessment', max_marks: 100,
+      });
+      if (assessErr) throw new Error(`fixture: assessment insert failed: ${assessErr.message}`);
+
+      const withClassId = await request(app.getHttpServer())
+        .get('/assessments').query({ classId: classAId })
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .expect(200);
+      expect((withClassId.body as Array<{ id: string }>).map((a) => a.id)).toContain(otherAssessmentId);
+
+      // Without the classId param, teacherA (not assigned to that subject)
+      // must NOT see it — confirms the exception is classId-scoped, not global.
+      const withoutClassId = await request(app.getHttpServer())
+        .get('/assessments')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .expect(200);
+      expect((withoutClassId.body as Array<{ id: string }>).map((a) => a.id)).not.toContain(otherAssessmentId);
+
+      // 2.2: broadcast to class parents — creates one conversation per parent, not a group.
+      const bcParent = await createExtraUser(schoolAId, 'PARENT', 'task2-broadcast-parent');
+      const guardianId = randomUUID();
+      await admin.from('guardians').insert({ id: guardianId, user_id: bcParent.userId, student_id: studentAId, relationship: 'Father' });
+
+      const broadcastRes = await request(app.getHttpServer())
+        .post('/messaging/broadcast')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, body: 'Reminder: trip forms due Friday.' })
+        .expect(201);
+      expect(broadcastRes.body.sent).toBeGreaterThanOrEqual(1);
+      expect(broadcastRes.body.conversationIds).toEqual(expect.arrayContaining([expect.any(String)]));
+
+      // 2.4: behaviour point without subject context — teacherA has no
+      // subject_assignments row for classA, only is_class_teacher_of.
+      const directBpInsert = await clientAs(tokenTeacherA)
+        .from('behaviour_points')
+        .insert({ id: randomUUID(), school_id: schoolAId, student_id: studentAId, teacher_id: teacherATeacherId, category: 'POSITIVE', points: 2, reason: 'Pastoral note' })
+        .select();
+      expect(directBpInsert.error).toBeNull();
+      expect(directBpInsert.data).toHaveLength(1);
+
+      // Wrong class: teacherA (class teacher of classA) has no standing over classB.
+      await request(app.getHttpServer())
+        .get('/assessments').query({ classId: classBId })
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .expect(403);
+
+      // A parent NOT linked to any student in classA is out of scope for a
+      // broadcast-style conversation insert, even via direct RLS.
+      const outOfScopeParent = await createExtraUser(schoolAId, 'PARENT', 'task2-outofscope-parent');
+      const rlsWrongClass = await clientAs(tokenTeacherA)
+        .from('conversations')
+        .insert({ id: randomUUID(), school_id: schoolAId, teacher_user_id: teacherAUserId, parent_user_id: outOfScopeParent.userId, admin_user_id: null })
+        .select();
+      expect(rlsWrongClass.error).toBeTruthy();
+
+      // Cross-tenant: teacherA cannot broadcast to classB (School B).
+      await request(app.getHttpServer())
+        .post('/messaging/broadcast')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classBId, body: 'Hi' })
+        .expect(403);
+
+      // Uniqueness: teacherB cannot also become class teacher of classA.
+      const uniqueAttempt = await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherBTeacherId).select();
+      expect(uniqueAttempt.error).toBeTruthy();
+
+      await admin.from('messages').delete().in('conversation_id', broadcastRes.body.conversationIds);
+      await admin.from('conversations').delete().in('id', broadcastRes.body.conversationIds);
+      await admin.from('guardians').delete().eq('id', guardianId);
+      await admin.from('behaviour_points').delete().eq('student_id', studentAId).eq('reason', 'Pastoral note');
+      await admin.from('assessments').delete().eq('id', otherAssessmentId);
+      await admin.from('teachers').delete().eq('id', otherTeacherId);
+      await admin.from('subjects').delete().eq('id', otherSubjectId);
+      await admin.from('terms').delete().eq('id', otherTermId);
+    } finally {
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+    }
+  });
+
+  it('Task 3: leaderboard visibility caps per role, and cross-tenant isolation', async () => {
+    const now = new Date().toISOString();
+    const bpIds = [randomUUID(), randomUUID()];
+    await admin.from('behaviour_points').insert([
+      { id: bpIds[0], school_id: schoolAId, student_id: studentAId, teacher_id: teacherATeacherId, category: 'POSITIVE', points: 5, reason_category: 'academic', reason: 'Great essay', date: now.slice(0, 10) },
+      { id: bpIds[1], school_id: schoolBId, student_id: studentBId, teacher_id: teacherBTeacherId, category: 'POSITIVE', points: 5, reason_category: 'academic', reason: 'Great essay', date: now.slice(0, 10) },
+    ]);
+
+    // Student/parent: school-wide only, denied for class/grade scope.
+    const studentView = await request(app.getHttpServer())
+      .get('/behaviour/leaderboard').query({ window: 'all', scope: 'school' })
+      .set('Authorization', `Bearer ${tokenStudentA}`)
+      .expect(200);
+    expect((studentView.body.rows as Array<{ studentId: string }>).map((r) => r.studentId)).toContain(studentAId);
+    expect((studentView.body.rows as Array<{ studentId: string }>).map((r) => r.studentId)).not.toContain(studentBId);
+
+    await request(app.getHttpServer())
+      .get('/behaviour/leaderboard').query({ window: 'all', scope: 'class', classId: classAId })
+      .set('Authorization', `Bearer ${tokenStudentA}`)
+      .expect(403);
+
+    // Grade-scope is not in any TEACHER's visibility at all, regardless of
+    // what they teach — denied unconditionally, before any assignment check.
+    await request(app.getHttpServer())
+      .get('/behaviour/leaderboard').query({ window: 'all', scope: 'grade', gradeLevel: 1 })
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(403);
+
+    // Admin: full ranking for a specific class (uncapped).
+    const adminClassView = await request(app.getHttpServer())
+      .get('/behaviour/leaderboard').query({ window: 'all', scope: 'class', classId: classAId })
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+    expect(adminClassView.body.capped).toBe(false);
+
+    await admin.from('behaviour_points').delete().in('id', bpIds);
+  });
 });

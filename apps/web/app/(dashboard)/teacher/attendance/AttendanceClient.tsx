@@ -62,6 +62,7 @@ export default function AttendanceClient({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportingGrades, setExportingGrades] = useState(false);
   const [prefectId, setPrefectId] = useState<string | null>(initialPrefectId);
   const [settingPrefect, setSettingPrefect] = useState(false);
 
@@ -106,6 +107,25 @@ export default function AttendanceClient({
       URL.revokeObjectURL(url);
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleExportGrades() {
+    if (!classId) return;
+    setExportingGrades(true);
+    try {
+      const { csv, filename } = await apiFetch<{ csv: string; filename: string }>(
+        `/assessments/class-report?classId=${classId}`,
+      );
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export grades');
+    } finally {
+      setExportingGrades(false);
     }
   }
 
@@ -193,6 +213,21 @@ export default function AttendanceClient({
             ))}
           </select>
           {settingPrefect && <span className="text-xs text-slate-400">Saving…</span>}
+        </div>
+      )}
+
+      {isClassTeacher && classId && (
+        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+          <label className="text-sm font-medium text-slate-700 shrink-0">Class reports</label>
+          <button
+            type="button"
+            onClick={handleExportGrades}
+            disabled={exportingGrades}
+            className="text-xs font-medium text-slate-600 border border-slate-300 px-3 py-1.5 rounded-md hover:bg-white disabled:opacity-50"
+          >
+            {exportingGrades ? 'Exporting…' : 'Export grades (all subjects)'}
+          </button>
+          <span className="text-xs text-slate-400">Use "↓ Export CSV" below for attendance.</span>
         </div>
       )}
 
