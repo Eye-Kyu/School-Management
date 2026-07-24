@@ -1,0 +1,55 @@
+{
+  "curriculum": {
+    "code": "844",
+    "name": "8-4-4 System of Education",
+    "country_code": "KE",
+    "description": "Kenya's national curriculum from 1985 until its phase-out beginning 2017, replaced by CBC. Primary (Standard 1-8) is fully phased out as of this seed date — the final KCPE sitting was in 2023 and no new Standard 1 intake has existed under this system in years, so all primary grade levels are marked inactive below. Secondary (Form 1-4) remains genuinely active for phase-out cohorts still moving through it, with the final KCSE sitting scheduled for 2027. Structural reference data only — no past-paper or assessment content included.",
+    "source_url": "https://en.wikipedia.org/wiki/8-4-4_Curriculum_in_Kenya",
+    "source_verified_on": "2026-07-24",
+    "active": true
+  },
+  "grade_levels": [
+    { "code": "std_1", "name": "Standard 1", "sequence_number": 1, "age_range_from": 6, "age_range_to": 7, "is_active": false },
+    { "code": "std_2", "name": "Standard 2", "sequence_number": 2, "age_range_from": 7, "age_range_to": 8, "is_active": false },
+    { "code": "std_3", "name": "Standard 3", "sequence_number": 3, "age_range_from": 8, "age_range_to": 9, "is_active": false },
+    { "code": "std_4", "name": "Standard 4", "sequence_number": 4, "age_range_from": 9, "age_range_to": 10, "is_active": false },
+    { "code": "std_5", "name": "Standard 5", "sequence_number": 5, "age_range_from": 10, "age_range_to": 11, "is_active": false },
+    { "code": "std_6", "name": "Standard 6", "sequence_number": 6, "age_range_from": 11, "age_range_to": 12, "is_active": false },
+    { "code": "std_7", "name": "Standard 7", "sequence_number": 7, "age_range_from": 12, "age_range_to": 13, "is_active": false },
+    { "code": "std_8", "name": "Standard 8", "sequence_number": 8, "age_range_from": 13, "age_range_to": 14, "is_active": false },
+    { "code": "form_1", "name": "Form 1", "sequence_number": 9, "age_range_from": 14, "age_range_to": 15, "is_active": true },
+    { "code": "form_2", "name": "Form 2", "sequence_number": 10, "age_range_from": 15, "age_range_to": 16, "is_active": true },
+    { "code": "form_3", "name": "Form 3", "sequence_number": 11, "age_range_from": 16, "age_range_to": 17, "is_active": true },
+    { "code": "form_4", "name": "Form 4", "sequence_number": 12, "age_range_from": 17, "age_range_to": 18, "is_active": true }
+  ],
+  "subjects": [
+    { "code": "pri_english", "name": "English", "is_core": true, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "One of 5 KCPE-examinable primary subjects." },
+    { "code": "pri_kiswahili", "name": "Kiswahili", "is_core": true, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "One of 5 KCPE-examinable primary subjects." },
+    { "code": "pri_mathematics", "name": "Mathematics", "is_core": true, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "One of 5 KCPE-examinable primary subjects." },
+    { "code": "pri_science", "name": "Science", "is_core": true, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "One of 5 KCPE-examinable primary subjects." },
+    { "code": "pri_social_studies", "name": "Social Studies", "is_core": true, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "KCPE examined this jointly with Religious Education as a combined paper per some sources — modeled here as a separate subject; flagged for review." },
+    { "code": "pri_religious_education", "name": "Religious Education (CRE/IRE/HRE)", "is_core": false, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": "Modeled as one subject with a Christian/Islamic/Hindu variant note per the task's own suggested approach, rather than three separate subject rows." },
+    { "code": "pri_creative_arts", "name": "Creative Arts", "is_core": false, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "pri_physical_education", "name": "Physical Education", "is_core": false, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "pri_life_skills", "name": "Life Skills Education", "is_core": false, "pathway": null, "taught_at_grade_levels": ["std_1","std_2","std_3","std_4","std_5","std_6","std_7","std_8"], "strands_per_grade": {}, "verified": false, "verification_note": "Mentioned in secondary sources as part of the primary curriculum but not consistently listed alongside the other 8-4-4 primary subjects across sources — included with lower confidence." },
+
+    { "code": "sec_english", "name": "English", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_kiswahili", "name": "Kiswahili", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_mathematics", "name": "Mathematics", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_biology", "name": "Biology", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_chemistry", "name": "Chemistry", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_physics", "name": "Physics", "is_core": true, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_history_government", "name": "History and Government", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_geography", "name": "Geography", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_religious_education", "name": "Religious Education (CRE/IRE/HRE)", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_business_studies", "name": "Business Studies", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_agriculture", "name": "Agriculture", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_computer_studies", "name": "Computer Studies", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_home_science", "name": "Home Science", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_french", "name": "French", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_german", "name": "German", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_arabic", "name": "Arabic", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_music", "name": "Music", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null },
+    { "code": "sec_art_design", "name": "Art and Design", "is_core": false, "pathway": null, "taught_at_grade_levels": ["form_1","form_2","form_3","form_4"], "strands_per_grade": {}, "verified": true, "verification_note": null }
+  ]
+}

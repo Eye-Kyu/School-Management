@@ -1117,8 +1117,8 @@ describe('Cross-tenant isolation (e2e)', () => {
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .expect(200);
     expect((get.body.subjects as Array<{ grade_level: number; name: string }>)).toEqual(expect.arrayContaining([
-      { grade_level: 4, name: 'Mathematics', id: expect.any(String), code: null, display_order: 0 },
-      { grade_level: 4, name: 'English', id: expect.any(String), code: null, display_order: 0 },
+      expect.objectContaining({ grade_level: 4, name: 'Mathematics', id: expect.any(String), code: null, display_order: 0 }),
+      expect.objectContaining({ grade_level: 4, name: 'English', id: expect.any(String), code: null, display_order: 0 }),
     ]));
 
     const list = await request(app.getHttpServer())

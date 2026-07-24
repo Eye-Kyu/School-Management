@@ -13,6 +13,10 @@ export const CreateCurriculumInput = z.object({
   name: z.string().min(1).max(150),
   description: z.string().max(1000).optional(),
   displayOrder: z.number().int().default(0),
+  code: z.string().min(1).max(50).optional(),
+  countryCode: z.string().length(2).optional(),
+  sourceUrl: z.string().url().optional(),
+  sourceVerifiedOn: z.string().optional(),
 });
 export type CreateCurriculumInput = z.infer<typeof CreateCurriculumInput>;
 

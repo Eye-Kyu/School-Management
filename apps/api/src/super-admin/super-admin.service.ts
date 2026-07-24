@@ -837,7 +837,7 @@ export class SuperAdminService {
   async listCurricula() {
     const { data: curricula, error } = await this.supabase.admin
       .from('curricula')
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, code, country_code, source_url, source_verified_on')
       .order('display_order');
     if (error) throw new BadRequestException(error.message);
 
@@ -859,7 +859,7 @@ export class SuperAdminService {
   async getCurriculum(curriculumId: string) {
     const { data: curriculum, error } = await this.supabase.admin
       .from('curricula')
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, code, country_code, source_url, source_verified_on')
       .eq('id', curriculumId)
       .maybeSingle();
     if (error) throw new BadRequestException(error.message);
@@ -867,12 +867,32 @@ export class SuperAdminService {
 
     const { data: subjects } = await this.supabase.admin
       .from('curriculum_subjects')
-      .select('id, grade_level, name, code, display_order')
+      .select(
+        'id, grade_level, name, code, display_order, is_core, verified, verification_note, pathway, grade_level_id, grade_level_info:curriculum_grade_levels(code, name, sequence_number, age_range_from, age_range_to)',
+      )
       .eq('curriculum_id', curriculumId)
       .order('grade_level')
       .order('display_order');
 
-    return { ...curriculum, subjects: subjects ?? [] };
+    const subjectList = subjects ?? [];
+    const { data: strands } = subjectList.length
+      ? await this.supabase.admin
+          .from('curriculum_subject_strands')
+          .select('curriculum_subject_id, name, display_order')
+          .in('curriculum_subject_id', subjectList.map((s) => s.id))
+          .order('display_order')
+      : { data: [] };
+    const strandsBySubject = new Map<string, string[]>();
+    for (const s of strands ?? []) {
+      const list = strandsBySubject.get(s.curriculum_subject_id) ?? [];
+      list.push(s.name);
+      strandsBySubject.set(s.curriculum_subject_id, list);
+    }
+
+    return {
+      ...curriculum,
+      subjects: subjectList.map((s) => ({ ...s, strands: strandsBySubject.get(s.id) ?? [] })),
+    };
   }
 
   async createCurriculum(input: CreateCurriculumInput) {
@@ -884,9 +904,13 @@ export class SuperAdminService {
         name: input.name,
         description: input.description ?? '',
         display_order: input.displayOrder ?? 0,
+        code: input.code ?? null,
+        country_code: input.countryCode ?? 'KE',
+        source_url: input.sourceUrl ?? null,
+        source_verified_on: input.sourceVerifiedOn ?? null,
         updated_at: now,
       })
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, code, country_code, source_url, source_verified_on')
       .single();
     if (error) throw new BadRequestException(error.message);
     return data;
@@ -901,12 +925,16 @@ export class SuperAdminService {
     if (input.description !== undefined) patch.description = input.description;
     if (input.displayOrder !== undefined) patch.display_order = input.displayOrder;
     if (input.isActive !== undefined) patch.is_active = input.isActive;
+    if (input.code !== undefined) patch.code = input.code;
+    if (input.countryCode !== undefined) patch.country_code = input.countryCode;
+    if (input.sourceUrl !== undefined) patch.source_url = input.sourceUrl;
+    if (input.sourceVerifiedOn !== undefined) patch.source_verified_on = input.sourceVerifiedOn;
 
     const { data, error } = await this.supabase.admin
       .from('curricula')
       .update(patch)
       .eq('id', curriculumId)
-      .select('id, name, description, is_active, display_order, created_at')
+      .select('id, name, description, is_active, display_order, created_at, code, country_code, source_url, source_verified_on')
       .single();
     if (error) throw new BadRequestException(error.message);
     return data;

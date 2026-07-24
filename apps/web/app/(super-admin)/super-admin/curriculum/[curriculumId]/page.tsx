@@ -5,13 +5,29 @@ import { useParams } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import { apiFetch } from '@/lib/api';
 
-type Subject = { id: string; grade_level: number; name: string; code: string | null };
+type GradeLevelInfo = { code: string; name: string; sequence_number: number; age_range_from: number | null; age_range_to: number | null } | null;
+
+type Subject = {
+  id: string;
+  grade_level: number;
+  name: string;
+  code: string | null;
+  is_core?: boolean;
+  verified?: boolean;
+  verification_note?: string | null;
+  pathway?: string | null;
+  grade_level_info?: GradeLevelInfo;
+  strands?: string[];
+};
 
 type CurriculumDetail = {
   id: string;
   name: string;
   description: string;
   is_active: boolean;
+  code?: string | null;
+  source_url?: string | null;
+  source_verified_on?: string | null;
   subjects: Subject[];
 };
 
@@ -33,6 +49,15 @@ export default function CurriculumDetailPage() {
   const [newGrade, setNewGrade] = useState('1');
   const [newName, setNewName] = useState('');
   const [savingSubjects, setSavingSubjects] = useState(false);
+  const [expandedStrands, setExpandedStrands] = useState<Set<string>>(new Set());
+
+  function toggleStrands(key: string) {
+    setExpandedStrands((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
 
   function load() {
     setLoading(true);
@@ -106,6 +131,19 @@ export default function CurriculumDetailPage() {
     );
   }
 
+  // Raw, unedited subject rows (with id/strands/verified/pathway/grade level
+  // name) from the last fetch — used only to enrich the editable list above
+  // with read-only display info, keyed by grade+name since the editable
+  // `subjects` state intentionally strips everything down to gradeLevel/name/code.
+  const gradeLevelNameByNumber: Record<number, string> = {};
+  const rawSubjectByGradeAndName = new Map<string, Subject>();
+  for (const s of curriculum.subjects) {
+    if (s.grade_level_info?.name && !gradeLevelNameByNumber[s.grade_level]) {
+      gradeLevelNameByNumber[s.grade_level] = s.grade_level_info.name;
+    }
+    rawSubjectByGradeAndName.set(`${s.grade_level}:${s.name}`, s);
+  }
+
   return (
     <div className="space-y-6">
       <BackButton href="/super-admin/curriculum" />
@@ -149,7 +187,20 @@ export default function CurriculumDetailPage() {
             </button>
           </form>
         ) : (
-          <p className="text-sm text-slate-600">{curriculum.description || '—'}</p>
+          <>
+            <p className="text-sm text-slate-600">{curriculum.description || '—'}</p>
+            {(curriculum.source_url || curriculum.source_verified_on) && (
+              <p className="text-xs text-slate-400">
+                Source:{' '}
+                {curriculum.source_url ? (
+                  <a href={curriculum.source_url} target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">
+                    {curriculum.source_url}
+                  </a>
+                ) : '—'}
+                {curriculum.source_verified_on && <> · verified {curriculum.source_verified_on}</>}
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -192,16 +243,44 @@ export default function CurriculumDetailPage() {
             .sort(([a], [b]) => Number(a) - Number(b))
             .map(([grade, subs]) => (
               <div key={grade} className="mb-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Grade {grade}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                  {gradeLevelNameByNumber[Number(grade)] ?? `Grade ${grade}`}
+                </p>
                 <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
                   {subs.map((s) => {
                     const idx = subjects.indexOf(s);
+                    const raw = rawSubjectByGradeAndName.get(`${s.gradeLevel}:${s.name}`);
+                    const strandKey = raw?.id ?? `${s.gradeLevel}:${s.name}`;
+                    const hasStrands = (raw?.strands?.length ?? 0) > 0;
+                    const expanded = expandedStrands.has(strandKey);
                     return (
-                      <div key={idx} className="flex items-center justify-between px-4 py-2 text-sm">
-                        <span className="text-slate-700">{s.name}</span>
-                        <button onClick={() => removeSubject(idx)} className="text-xs text-slate-300 hover:text-rose-500 transition-colors">
-                          ✕
-                        </button>
+                      <div key={idx} className="px-4 py-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-slate-700 truncate">{s.name}</span>
+                            {raw?.pathway && (
+                              <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-50 text-violet-600">{raw.pathway}</span>
+                            )}
+                            {raw?.verified === false && (
+                              <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-600" title={raw.verification_note ?? 'Not independently verified against a public source'}>
+                                needs review
+                              </span>
+                            )}
+                            {hasStrands && (
+                              <button onClick={() => toggleStrands(strandKey)} className="shrink-0 text-xs text-slate-400 hover:text-slate-600">
+                                {expanded ? '▾' : '▸'} {raw!.strands!.length} strand{raw!.strands!.length !== 1 ? 's' : ''}
+                              </button>
+                            )}
+                          </div>
+                          <button onClick={() => removeSubject(idx)} className="text-xs text-slate-300 hover:text-rose-500 transition-colors shrink-0">
+                            ✕
+                          </button>
+                        </div>
+                        {hasStrands && expanded && (
+                          <ul className="mt-1.5 ml-1 text-xs text-slate-500 list-disc list-inside space-y-0.5">
+                            {raw!.strands!.map((strand) => <li key={strand}>{strand}</li>)}
+                          </ul>
+                        )}
                       </div>
                     );
                   })}
