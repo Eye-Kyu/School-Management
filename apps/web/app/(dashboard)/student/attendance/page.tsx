@@ -25,7 +25,11 @@ export default async function StudentAttendancePage() {
     .eq('is_current', true)
     .maybeSingle();
 
-  // Fetch records: scoped to current term if one exists, otherwise all records
+  // Fetch records: scoped to current term if one exists AND it actually covers
+  // today, otherwise all records — a term whose date range has already ended
+  // (or hasn't started) must never filter out newly-marked attendance.
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
   const recordsQuery = student
     ? supabase
         .from('attendance_records')
@@ -35,8 +39,8 @@ export default async function StudentAttendancePage() {
     : null;
 
   const { data: records } = recordsQuery
-    ? currentTerm
-      ? await recordsQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+    ? termCoversToday
+      ? await recordsQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
       : await recordsQuery
     : { data: [] };
 

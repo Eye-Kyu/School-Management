@@ -33,3 +33,5 @@ export * from './schemas/privileged-access';
 export * from './schemas/audit-log';
 export * from './schemas/billing';
 export * from './schemas/platform-users';
+export * from './schemas/platform-message';
+export * from './schemas/assist-mode';

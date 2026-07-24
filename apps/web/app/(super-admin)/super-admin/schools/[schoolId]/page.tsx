@@ -693,6 +693,7 @@ function PrivilegedAccessSection({ school }: { school: School }) {
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [entering, setEntering] = useState(false);
 
   useEffect(() => {
     apiFetch<PrivilegedAccessGrant | null>('/super-admin/privileged-access/grants/active')
@@ -700,6 +701,27 @@ function PrivilegedAccessSection({ school }: { school: School }) {
       .catch(() => setActiveGrant(null))
       .finally(() => setLoading(false));
   }, []);
+
+  async function enterAssistMode(grantId: string) {
+    setEntering(true);
+    setErr('');
+    try {
+      const result = await apiFetch<{ token: string; expiresAt: string }>(
+        `/super-admin/privileged-access/grants/${grantId}/enter-assist`,
+        { method: 'POST' },
+      );
+      const res = await fetch('/api/assist-mode/enter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: result.token, expiresAt: result.expiresAt }),
+      });
+      if (!res.ok) throw new Error('Failed to start assist mode session');
+      window.location.href = '/admin';
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to enter assist mode');
+      setEntering(false);
+    }
+  }
 
   function toggleScope(scope: PrivilegedAccessScope) {
     setScopes((prev) => {
@@ -752,12 +774,21 @@ function PrivilegedAccessSection({ school }: { school: School }) {
               <p className="text-sm text-slate-700">Active session — expires in {formatRemaining(activeGrant.expiresAt)}</p>
               <p className="text-xs text-slate-400 mt-0.5">{activeGrant.reason}</p>
             </div>
-            <Link
-              href={`/super-admin/privileged-access/${activeGrant.id}`}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50 shrink-0"
-            >
-              View session
-            </Link>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => enterAssistMode(activeGrant.id)}
+                disabled={entering}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 text-amber-950 hover:bg-amber-400 disabled:opacity-50"
+              >
+                {entering ? 'Entering…' : 'Enter assist mode →'}
+              </button>
+              <Link
+                href={`/super-admin/privileged-access/${activeGrant.id}`}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50"
+              >
+                View session
+              </Link>
+            </div>
           </div>
         ) : !showForm ? (
           <div className="flex items-center justify-between gap-4">

@@ -44,12 +44,17 @@ export default async function ParentHomePage() {
     .eq('is_current', true)
     .maybeSingle();
 
+  const todayDate = new Date().toISOString().slice(0, 10);
+  // A term whose date range doesn't cover today (ended, or the next one
+  // hasn't been marked current yet) must never filter out today's record.
+  const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
+
   const parentAttQuery = firstStudent
     ? supabase.from('attendance_records').select('status').eq('student_id', firstStudent.id)
     : null;
   const { data: attendanceRecords } = parentAttQuery
-    ? currentTerm
-      ? await parentAttQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+    ? termCoversToday
+      ? await parentAttQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
       : await parentAttQuery
     : { data: [] };
 
@@ -61,6 +66,18 @@ export default async function ParentHomePage() {
 
   // Fee balances for all linked students
   const studentIds = students.map((s: any) => s.id);
+
+  // Today's status per child — always queried by exact date, never
+  // term-range filtered, so it can never be silently excluded by
+  // term-boundary staleness. Used for the per-child attendance cards below.
+  const { data: todayAttendanceRows } = studentIds.length > 0
+    ? await supabase
+        .from('attendance_records')
+        .select('student_id, status, updated_at')
+        .in('student_id', studentIds)
+        .eq('date', todayDate)
+    : { data: [] };
+  const todayByStudent = new Map((todayAttendanceRows ?? []).map((r: any) => [r.student_id, r]));
   const { data: feeBalances } = studentIds.length > 0
     ? await supabase
         .from('fee_balances')
@@ -116,15 +133,39 @@ export default async function ParentHomePage() {
         </div>
       ) : (
         <>
-          {/* Multiple children pills */}
+          {/* Multiple children: compact per-child attendance cards, side by side */}
           {students.length > 1 && (
-            <div className="flex gap-2 flex-wrap">
-              {students.map((s: any) => (
-                <span key={s.id}
-                  className="text-sm bg-violet-100 text-violet-700 rounded-full px-3 py-1 font-medium">
-                  {(s.user as any)?.full_name}
-                </span>
-              ))}
+            <div>
+              <h2 className="text-base font-medium mb-3">Attendance</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {students.map((s: any) => {
+                  const todayRow = todayByStudent.get(s.id) as { status: string; updated_at: string } | undefined;
+                  return (
+                    <Link key={s.id} href="/parent/attendance" className="block group">
+                      <div className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm hover:shadow-md transition-shadow">
+                        <p className="font-medium text-sm text-slate-700 truncate">{(s.user as any)?.full_name}</p>
+                        {todayRow ? (
+                          <p className="text-sm mt-1.5">
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                              todayRow.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
+                              : todayRow.status === 'LATE' ? 'bg-amber-100 text-amber-700'
+                              : todayRow.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
+                              : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
+                            </span>
+                            <span className="text-slate-400 text-xs ml-2">
+                              updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </p>
+                        ) : (
+                          <p className="text-sm text-slate-400 mt-1.5">Not yet marked for today.</p>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -159,37 +200,60 @@ export default async function ParentHomePage() {
               </div>
             </Link>
 
-            {/* Attendance card */}
-            <Link href="/parent/attendance" className="block group">
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
-                  attRate === null ? 'from-slate-400 to-slate-500'
-                  : attRate >= 80 ? 'from-emerald-500 to-teal-600'
-                  : attRate >= 60 ? 'from-amber-500 to-orange-600'
-                  : 'from-rose-500 to-red-600'
-                }`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
-                    <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-                  </div>
-                  <p className="text-3xl sm:text-4xl font-bold text-white">
-                    {attRate !== null ? `${attRate}%` : '—'}
-                  </p>
-                  <p className="text-white/80 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
-                  {attTotal === 0 ? (
-                    <p className="text-sm text-slate-400">No attendance recorded yet.</p>
-                  ) : (
-                    <div className="flex gap-4 text-sm">
-                      <span className="text-emerald-600 font-medium">{attPresent} present</span>
-                      <span className="text-amber-600 font-medium">{attLate} late</span>
-                      <span className="text-rose-600 font-medium">{attAbsent} absent</span>
+            {/* Attendance card — only for a single linked child; multiple
+                children get the compact per-child cards above instead. */}
+            {students.length === 1 && (
+              <Link href="/parent/attendance" className="block group">
+                <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                  <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
+                    attRate === null ? 'from-slate-400 to-slate-500'
+                    : attRate >= 80 ? 'from-emerald-500 to-teal-600'
+                    : attRate >= 60 ? 'from-amber-500 to-orange-600'
+                    : 'from-rose-500 to-red-600'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
+                      <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
                     </div>
-                  )}
+                    <p className="text-3xl sm:text-4xl font-bold text-white">
+                      {attRate !== null ? `${attRate}%` : '—'}
+                    </p>
+                    <p className="text-white/80 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
+                  </div>
+                  <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
+                    {(() => {
+                      const todayRow = todayByStudent.get(firstStudent.id) as { status: string; updated_at: string } | undefined;
+                      return todayRow ? (
+                        <p className="text-sm">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                            todayRow.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
+                            : todayRow.status === 'LATE' ? 'bg-amber-100 text-amber-700'
+                            : todayRow.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
+                            : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
+                          </span>
+                          <span className="text-slate-400 text-xs ml-2">
+                            updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+                      );
+                    })()}
+                    {attTotal === 0 ? (
+                      <p className="text-sm text-slate-400">No attendance recorded yet.</p>
+                    ) : (
+                      <div className="flex gap-4 text-sm">
+                        <span className="text-emerald-600 font-medium">{attPresent} present</span>
+                        <span className="text-amber-600 font-medium">{attLate} late</span>
+                        <span className="text-rose-600 font-medium">{attAbsent} absent</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </Link>
+              </Link>
+            )}
 
             {/* Grades card */}
             <Link href="/parent/grades" className="block group">

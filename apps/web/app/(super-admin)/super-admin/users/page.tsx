@@ -13,6 +13,7 @@ const ALL_PERMISSIONS: PlatformPermission[] = [
   'VIEW_BILLING', 'MANAGE_BILLING',
   'VIEW_PLATFORM_ANALYTICS', 'VIEW_AUDIT_LOGS',
   'GRANT_PRIVILEGED_ACCESS', 'VIEW_SYSTEM_HEALTH', 'MANAGE_PLATFORM_SETTINGS',
+  'SEND_PLATFORM_MESSAGES',
 ];
 
 const PERMISSION_LABELS: Record<PlatformPermission, string> = {
@@ -25,6 +26,7 @@ const PERMISSION_LABELS: Record<PlatformPermission, string> = {
   VIEW_PLATFORM_ANALYTICS: 'View analytics', VIEW_AUDIT_LOGS: 'View audit logs',
   GRANT_PRIVILEGED_ACCESS: 'Grant privileged access', VIEW_SYSTEM_HEALTH: 'View system health',
   MANAGE_PLATFORM_SETTINGS: 'Manage platform settings',
+  SEND_PLATFORM_MESSAGES: 'Send platform messages',
 };
 
 type TenantUser = {

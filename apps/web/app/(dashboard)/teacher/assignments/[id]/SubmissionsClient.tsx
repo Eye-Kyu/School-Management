@@ -27,6 +27,54 @@ export default function SubmissionsClient({
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [plagiarismResults, setPlagiarismResults] = useState<Record<string, { ai_probability: number; plagiarism_risk: string; recommendation: string; flags: string[] }>>({});
   const [checkingPlagiarism, setCheckingPlagiarism] = useState<Record<string, boolean>>({});
+  const [resetOpen, setResetOpen] = useState<string | null>(null);
+  const [resetReason, setResetReason] = useState<Record<string, string>>({});
+  const [resetting, setResetting] = useState<Record<string, boolean>>({});
+  const [resetError, setResetError] = useState<Record<string, string>>({});
+
+  async function resetAttempt(studentId: string) {
+    const reason = (resetReason[studentId] ?? '').trim();
+    if (reason.length < 10) {
+      setResetError((p) => ({ ...p, [studentId]: 'Reason must be at least 10 characters.' }));
+      return;
+    }
+    setResetting((p) => ({ ...p, [studentId]: true }));
+    setResetError((p) => ({ ...p, [studentId]: '' }));
+
+    const userRow = await getCurrentUserRow('id, school_id');
+    const { data: deleted, error } = await supabase.from('submissions').delete()
+      .eq('assignment_id', assignmentId).eq('student_id', studentId).select('id');
+
+    if (error) {
+      setResetError((p) => ({ ...p, [studentId]: error.message }));
+      setResetting((p) => ({ ...p, [studentId]: false }));
+      return;
+    }
+    if (!deleted || deleted.length === 0) {
+      setResetError((p) => ({ ...p, [studentId]: "You don't have permission to reset this submission." }));
+      setResetting((p) => ({ ...p, [studentId]: false }));
+      return;
+    }
+
+    await supabase.from('audit_logs').insert({
+      id: crypto.randomUUID(),
+      school_id: userRow?.school_id,
+      user_id: userRow?.id,
+      action: 'assignment.reset',
+      entity_type: 'submission',
+      entity_id: deleted[0]!.id,
+      metadata: { student_id: studentId, reason, teacher_id: userRow?.id },
+    });
+
+    setSubmissions((p) => {
+      const next = { ...p };
+      delete next[studentId];
+      return next;
+    });
+    setResetOpen(null);
+    setResetReason((p) => ({ ...p, [studentId]: '' }));
+    setResetting((p) => ({ ...p, [studentId]: false }));
+  }
 
   async function checkPlagiarism(studentId: string, text: string | null) {
     if (!text?.trim()) return;
@@ -168,7 +216,7 @@ export default function SubmissionsClient({
                 )}
 
                 {/* Grade section */}
-                <div className="border-t border-slate-100 pt-3">
+                <div className="border-t border-slate-100 pt-3 flex items-start justify-between gap-3 flex-wrap">
                   {g ? (
                     <div className="flex items-end gap-2 flex-wrap">
                       <div>
@@ -194,7 +242,35 @@ export default function SubmissionsClient({
                       {sub.grade_score != null ? 'Edit grade' : 'Add grade'}
                     </button>
                   )}
+
+                  <button onClick={() => setResetOpen(resetOpen === s.id ? null : s.id)}
+                    className="text-xs text-rose-500 hover:text-rose-700 underline">
+                    Reset attempt
+                  </button>
                 </div>
+
+                {resetOpen === s.id && (
+                  <div className="border-t border-slate-100 pt-3 space-y-2">
+                    <p className="text-xs text-slate-500">
+                      This permanently deletes {(s.user as any)?.full_name}'s submission so they can resubmit before the deadline. This cannot be undone.
+                    </p>
+                    <textarea rows={2} placeholder="Reason for reset (required, min 10 characters)…"
+                      value={resetReason[s.id] ?? ''}
+                      onChange={(e) => setResetReason((p) => ({ ...p, [s.id]: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
+                    {resetError[s.id] && <p className="text-xs text-rose-600">{resetError[s.id]}</p>}
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setResetOpen(null)}
+                        className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:bg-slate-50">
+                        Cancel
+                      </button>
+                      <button onClick={() => resetAttempt(s.id)} disabled={resetting[s.id]}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-500 disabled:opacity-50">
+                        {resetting[s.id] ? 'Resetting…' : 'Confirm reset'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

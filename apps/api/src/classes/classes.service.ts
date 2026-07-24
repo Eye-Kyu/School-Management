@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { CreateClassInput, UpdateClassInput } from '@school-manager/types';
+import type { AssistModeClaims } from '../common/assist-mode';
 
 @Injectable()
 export class ClassesService {
@@ -108,6 +109,81 @@ export class ClassesService {
     if (error) throw new Error(error.message);
 
     await this.audit(client, accessToken, teacherRecord.school_id, 'class.set_prefect', 'class', classId, { studentId });
+    return { updated: true };
+  }
+
+  async setClassTeacher(accessToken: string, classId: string, teacherId: string | null, assistContext?: AssistModeClaims) {
+    // ASSIST MODE: RLS bypassed intentionally, school_id filter enforced at
+    // app layer. AssistScopeGuard already re-verified the grant is ACTIVE and
+    // includes ACADEMIC_DATA before this method runs — a real ADMIN role
+    // check would otherwise reject the SuperAdmin's own SUPER_ADMIN role.
+    const client = assistContext ? this.supabase.admin : this.supabase.forUser(accessToken);
+    if (!assistContext) await this.requireAdmin(accessToken);
+
+    const { data: classRow } = await client
+      .from('classes')
+      .select('id, school_id')
+      .eq('id', classId)
+      .maybeSingle();
+    if (!classRow) throw new NotFoundException('Class not found');
+    // A cross-school class id smuggled into the URL while in assist mode
+    // must 404 exactly like RLS would for a normal caller, never resolve.
+    if (assistContext && classRow.school_id !== assistContext.targetSchoolId) {
+      throw new NotFoundException('Class not found');
+    }
+
+    if (teacherId) {
+      // RLS (teachers_select_same_school) already hides a cross-school
+      // teacher row for a normal caller, so a bad/foreign id naturally 404s.
+      // In assist mode (service-role client, RLS bypassed) the same check is
+      // done explicitly below.
+      const { data: targetTeacher } = await client
+        .from('teachers')
+        .select('id, school_id')
+        .eq('id', teacherId)
+        .maybeSingle();
+      if (!targetTeacher) throw new NotFoundException('Teacher not found');
+      if (assistContext && targetTeacher.school_id !== assistContext.targetSchoolId) {
+        throw new NotFoundException('Teacher not found');
+      }
+    }
+
+    const { data: currentClassTeacher } = await client
+      .from('teachers')
+      .select('id')
+      .eq('is_class_teacher_of', classId)
+      .maybeSingle();
+    const previousTeacherId: string | null = currentClassTeacher?.id ?? null;
+
+    const now = new Date().toISOString();
+
+    // Null the previous class teacher FIRST — teachers_class_teacher_unique
+    // (one class teacher per class) would otherwise reject setting the new
+    // teacher while the old one still points at this class.
+    if (previousTeacherId && previousTeacherId !== teacherId) {
+      await client.from('teachers').update({ is_class_teacher_of: null, updated_at: now }).eq('id', previousTeacherId);
+    }
+
+    if (teacherId) {
+      // Overwriting is_class_teacher_of also displaces this teacher from
+      // whatever OTHER class they were previously class teacher of, if any —
+      // it's a single column, so there's nothing extra to null out for that.
+      const { error } = await client
+        .from('teachers')
+        .update({ is_class_teacher_of: classId, updated_at: now })
+        .eq('id', teacherId);
+      if (error) throw new Error(error.message);
+    }
+
+    await this.audit(client, accessToken, classRow.school_id, 'class.set_class_teacher', 'class', classId, {
+      class_id: classId,
+      previous_teacher_id: previousTeacherId,
+      new_teacher_id: teacherId,
+    });
+    // The generic assist.* audit row (super_admin_user_id/target_school_id/
+    // access_grant_id) is written by AssistAuditInterceptor for every
+    // mutating request made under an active assist context — no per-service
+    // duplication needed.
     return { updated: true };
   }
 

@@ -47,6 +47,20 @@ export class PlatformPrivilegedAccessController {
     return this.svc.endGrant(grantId, user.id);
   }
 
+  @ApiOperation({ summary: 'Mint an assist-mode token — lets the caller browse the target school\'s real /admin/* app as itself, scoped to the grant' })
+  @RequirePlatformPermission('GRANT_PRIVILEGED_ACCESS')
+  @Post('grants/:id/enter-assist')
+  enterAssist(@CurrentUser() user: { id: string }, @Param('id') grantId: string) {
+    return this.svc.enterAssist(grantId, user.id);
+  }
+
+  @ApiOperation({ summary: 'Log an assist-mode exit — the frontend clears its own cookie separately' })
+  @RequirePlatformPermission('GRANT_PRIVILEGED_ACCESS')
+  @Post('exit-assist')
+  exitAssist(@CurrentUser() user: { id: string }, @Body() body: { accessGrantId?: string; targetSchoolId?: string }) {
+    return this.svc.exitAssist(user.id, body);
+  }
+
   @ApiOperation({ summary: 'Scoped read: school aggregates, gated by an active SCHOOL_AGGREGATES grant' })
   @RequirePlatformPermission('GRANT_PRIVILEGED_ACCESS')
   @Get('schools/:id/aggregates')

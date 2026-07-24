@@ -6,6 +6,13 @@
 // =============================================================================
 
 import { createClient } from '@/lib/supabase/client';
+import { ASSIST_MODE_COOKIE } from '@school-manager/types';
+
+function getAssistToken(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${ASSIST_MODE_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]!) : undefined;
+}
 
 // A scheme-less NEXT_PUBLIC_API_URL (e.g. "api.example.com" instead of
 // "https://api.example.com") gets resolved by fetch() as a same-origin
@@ -43,12 +50,14 @@ export async function apiFetch<T>(
   const supabase = createClient();
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
+  const assistToken = getAssistToken();
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(assistToken ? { 'X-Assist-Token': assistToken } : {}),
       ...init.headers,
     },
   });

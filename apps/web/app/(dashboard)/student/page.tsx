@@ -38,13 +38,20 @@ export default async function StudentHomePage() {
     .eq('is_current', true)
     .maybeSingle();
 
-  // Attendance summary — show regardless of whether a current term is set
+  const todayDate = new Date().toISOString().slice(0, 10);
+
+  // Attendance summary — show regardless of whether a current term is set.
+  // Only apply the term date range when it actually covers today; otherwise
+  // (term ended, gap before the next one is marked current, stale seed data)
+  // the filter would silently exclude attendance marked today, making a
+  // freshly-marked record look like it never reflected on the dashboard.
+  const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
   const attQuery = studentId
     ? supabase.from('attendance_records').select('status').eq('student_id', studentId)
     : null;
   const { data: attendanceRecords } = attQuery
-    ? currentTerm
-      ? await attQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+    ? termCoversToday
+      ? await attQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
       : await attQuery
     : { data: [] };
 
@@ -53,6 +60,17 @@ export default async function StudentHomePage() {
   const attLate = (attendanceRecords ?? []).filter((r) => r.status === 'LATE').length;
   const attAbsent = (attendanceRecords ?? []).filter((r) => r.status === 'ABSENT').length;
   const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+
+  // Today's status — always queried by exact date, never term-range filtered,
+  // so it can never be silently excluded by term-boundary staleness.
+  const { data: todayAttendance } = studentId
+    ? await supabase
+        .from('attendance_records')
+        .select('status, updated_at')
+        .eq('student_id', studentId)
+        .eq('date', todayDate)
+        .maybeSingle()
+    : { data: null };
 
   // Announcements
   const { data: announcements } = await supabase
@@ -168,7 +186,24 @@ export default async function StudentHomePage() {
                 {currentTerm?.name ?? 'current term'}
               </p>
             </div>
-            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
+            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
+              {todayAttendance ? (
+                <p className="text-sm">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                    todayAttendance.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
+                    : todayAttendance.status === 'LATE' ? 'bg-amber-100 text-amber-700'
+                    : todayAttendance.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
+                    : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {todayAttendance.status.charAt(0) + todayAttendance.status.slice(1).toLowerCase()} today
+                  </span>
+                  <span className="text-slate-400 text-xs ml-2">
+                    updated {new Date(todayAttendance.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+              )}
               {attTotal === 0 ? (
                 <p className="text-sm text-slate-400">No attendance recorded yet.</p>
               ) : (

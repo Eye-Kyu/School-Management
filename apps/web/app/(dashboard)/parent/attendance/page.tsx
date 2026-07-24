@@ -35,13 +35,17 @@ export default async function ParentAttendancePage() {
     .eq('is_current', true)
     .maybeSingle();
 
+  // A term whose date range doesn't cover today (ended, or the next one
+  // hasn't been marked current yet) must never filter out today's record.
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
   const attQuery = firstStudent
     ? supabase.from('attendance_records').select('id, date, status, note')
         .eq('student_id', firstStudent.id).order('date', { ascending: false })
     : null;
   const { data: records } = attQuery
-    ? currentTerm
-      ? await attQuery.gte('date', currentTerm.start_date).lte('date', currentTerm.end_date)
+    ? termCoversToday
+      ? await attQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
       : await attQuery
     : { data: [] };
 

@@ -6,10 +6,19 @@ import { apiFetch } from '@/lib/api';
 import { CreateClassInput } from '@school-manager/types';
 
 type ClassRow = { id: string; name: string; grade_level: number; stream: string | null };
+type TeacherOption = { id: string; full_name: string; is_class_teacher_of: string | null };
 
-export default function ClassesClient({ initialClasses }: { initialClasses: ClassRow[] }) {
+export default function ClassesClient({
+  initialClasses, teachers, unsignedReportCardTeacherIds,
+}: {
+  initialClasses: ClassRow[];
+  teachers: TeacherOption[];
+  unsignedReportCardTeacherIds: string[];
+}) {
   const router = useRouter();
   const [classes, setClasses] = useState(initialClasses);
+  const [classTeachers, setClassTeachers] = useState(teachers);
+  const unsignedSet = new Set(unsignedReportCardTeacherIds);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [gradeLevel, setGradeLevel] = useState('');
@@ -42,6 +51,41 @@ export default function ClassesClient({ initialClasses }: { initialClasses: Clas
       setError(err instanceof Error ? err.message : 'Failed to create class');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSetClassTeacher(classId: string, className: string, newTeacherId: string) {
+    const outgoing = classTeachers.find((t) => t.is_class_teacher_of === classId);
+    const incoming = newTeacherId ? classTeachers.find((t) => t.id === newTeacherId) : null;
+
+    const warnings: string[] = [];
+    if (incoming?.is_class_teacher_of && incoming.is_class_teacher_of !== classId) {
+      const displacedFrom = classes.find((c) => c.id === incoming.is_class_teacher_of);
+      warnings.push(`${incoming.full_name} is already Class Teacher of ${displacedFrom?.name ?? 'another class'} — they will be removed from it.`);
+    }
+    if (outgoing && outgoing.id !== newTeacherId && unsignedSet.has(outgoing.id)) {
+      warnings.push(`${outgoing.full_name} has not yet signed off this term's report cards for ${className}.`);
+    }
+    if (warnings.length > 0) {
+      if (!confirm(`${warnings.join('\n')}\n\nContinue anyway?`)) return;
+    }
+
+    const prevClassTeachers = classTeachers;
+    setClassTeachers((prev) => prev.map((t) => {
+      if (t.id === newTeacherId) return { ...t, is_class_teacher_of: classId };
+      if (t.is_class_teacher_of === classId) return { ...t, is_class_teacher_of: null };
+      return t;
+    }));
+
+    try {
+      await apiFetch(`/classes/${classId}/class-teacher`, {
+        method: 'PATCH',
+        body: JSON.stringify({ teacherId: newTeacherId || null }),
+      });
+      router.refresh();
+    } catch (err) {
+      setClassTeachers(prevClassTeachers);
+      alert(err instanceof Error ? err.message : 'Failed to set class teacher');
     }
   }
 
@@ -96,18 +140,36 @@ export default function ClassesClient({ initialClasses }: { initialClasses: Clas
         <p className="text-sm text-slate-500">No classes yet. Add your first class above.</p>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
-          {classes.map((c) => (
-            <div key={c.id} className="flex items-center justify-between px-5 py-3">
-              <div>
-                <p className="font-medium text-sm">{c.name}</p>
-                <p className="text-xs text-slate-500">Grade {c.grade_level}{c.stream ? ` · ${c.stream}` : ''}</p>
+          {classes.map((c) => {
+            const currentClassTeacher = classTeachers.find((t) => t.is_class_teacher_of === c.id);
+            return (
+              <div key={c.id} className="flex items-center justify-between gap-4 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">{c.name}</p>
+                  <p className="text-xs text-slate-500">Grade {c.grade_level}{c.stream ? ` · ${c.stream}` : ''}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-0.5">Class Teacher</label>
+                    <select
+                      value={currentClassTeacher?.id ?? ''}
+                      onChange={(e) => handleSetClassTeacher(c.id, c.name, e.target.value)}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs min-w-[160px]"
+                    >
+                      <option value="">None assigned</option>
+                      {teachers.map((t) => (
+                        <option key={t.id} value={t.id}>{t.full_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={() => handleDelete(c.id)}
+                    className="text-xs text-slate-400 hover:text-red-600 transition-colors">
+                    Archive
+                  </button>
+                </div>
               </div>
-              <button onClick={() => handleDelete(c.id)}
-                className="text-xs text-slate-400 hover:text-red-600 transition-colors">
-                Archive
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

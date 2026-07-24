@@ -1,9 +1,15 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createRealClient } from '@/lib/supabase/server';
+import { ASSIST_MODE_COOKIE, verifyAssistTokenSync } from '@/lib/assistMode';
 import DashboardShell from './DashboardShell';
+import AssistModeBanner from './AssistModeBanner';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
+  // Always the real caller's own session — identity/chrome must reflect the
+  // real SuperAdmin, not the target school, even while assist mode swaps
+  // page-content reads (see lib/supabase/server.ts's createClient()).
+  const supabase = createRealClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect('/login');
@@ -17,8 +23,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const displayName = userRow?.full_name ?? user.email ?? 'User';
   const role = userRow?.role as string | undefined;
 
+  const assistToken = cookies().get(ASSIST_MODE_COOKIE)?.value;
+  const assistClaims = role === 'SUPER_ADMIN' ? verifyAssistTokenSync(assistToken) : null;
+  let assistSchoolName: string | null = null;
+  if (assistClaims) {
+    const { data: schoolRow } = await supabase.from('schools').select('name').eq('id', assistClaims.targetSchoolId).maybeSingle();
+    assistSchoolName = schoolRow?.name ?? null;
+  }
+
   return (
     <DashboardShell role={role ?? ''} displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
+      {assistClaims && (
+        <AssistModeBanner
+          schoolName={assistSchoolName ?? 'this school'}
+          superAdminName={displayName}
+          schoolId={assistClaims.targetSchoolId}
+          accessGrantId={assistClaims.accessGrantId}
+        />
+      )}
       {children}
     </DashboardShell>
   );

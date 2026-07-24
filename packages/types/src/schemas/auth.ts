@@ -72,6 +72,7 @@ export const PlatformPermission = z.enum([
   'GRANT_PRIVILEGED_ACCESS',
   'VIEW_SYSTEM_HEALTH',
   'MANAGE_PLATFORM_SETTINGS',
+  'SEND_PLATFORM_MESSAGES',
 ]);
 export type PlatformPermission = z.infer<typeof PlatformPermission>;
 

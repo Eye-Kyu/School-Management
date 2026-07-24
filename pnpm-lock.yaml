@@ -159,6 +159,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.50.0
         version: 5.100.11(react@18.3.1)
+      jose:
+        specifier: ^6.2.4
+        version: 6.2.4
       next:
         specifier: ^14.2.0
         version: 14.2.35(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -3833,6 +3836,9 @@ packages:
   jiti@1.21.7:
     resolution: {integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==}
     hasBin: true
+
+  jose@6.2.4:
+    resolution: {integrity: sha512-N8acGzVsQy6M/fjFcxtysNc4Q379TcM5dM/qKkNtsHFji88yANnXTr7BLeP75iPnFwBfQzM/jg2BZ9+HZrHCZA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -9624,6 +9630,8 @@ snapshots:
       - ts-node
 
   jiti@1.21.7: {}
+
+  jose@6.2.4: {}
 
   js-tokens@4.0.0: {}
 

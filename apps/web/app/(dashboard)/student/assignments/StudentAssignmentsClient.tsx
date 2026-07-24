@@ -24,6 +24,7 @@ export default function StudentAssignmentsClient({
   const supabase = createClient();
   const [subMap, setSubMap] = useState(initialMap);
   const [open, setOpen] = useState<string | null>(null);
+  const [viewOpen, setViewOpen] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -128,10 +129,19 @@ export default function StudentAssignmentsClient({
                   {status.label}
                 </span>
                 {sub ? (
-                  <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                    ✓ Submitted{sub.is_late ? ' (late)' : ''}
-                    {sub.grade_score != null ? ` · ${sub.grade_score}${a.max_score ? `/${a.max_score}` : ''}` : ''}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                      ✓ Submitted{sub.is_late ? ' (late)' : ''}
+                      {sub.grade_score != null ? ` · ${sub.grade_score}${a.max_score ? `/${a.max_score}` : ''}` : ''}
+                    </span>
+                    <p className="text-xs text-slate-400">
+                      Submitted on {new Date(sub.submitted_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                    <button onClick={() => setViewOpen(viewOpen === a.id ? null : a.id)}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-700 underline">
+                      {viewOpen === a.id ? 'Hide submission' : 'View your submission →'}
+                    </button>
+                  </div>
                 ) : isPastDeadline(a.due_date) ? (
                   <span className="text-xs font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
                     Deadline passed
@@ -149,6 +159,36 @@ export default function StudentAssignmentsClient({
             {sub?.grade_comment && (
               <div className="mx-5 mb-4 bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 text-sm text-emerald-800">
                 <span className="font-medium">Teacher feedback:</span> {sub.grade_comment}
+              </div>
+            )}
+
+            {/* Read-only view of your own submission — cannot edit/resubmit */}
+            {sub && viewOpen === a.id && (
+              <div className="border-t border-slate-100 px-5 py-4 bg-slate-50 space-y-3">
+                {sub.content && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1">Your answer</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{sub.content}</p>
+                  </div>
+                )}
+                {sub.file_urls.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1">Attached files</p>
+                    <ul className="space-y-1">
+                      {sub.file_urls.map((url, i) => (
+                        <li key={i}>
+                          <a href={url} target="_blank" rel="noopener noreferrer"
+                            className="text-sm text-blue-600 hover:underline">
+                            {url.split('/').pop()}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!sub.content && sub.file_urls.length === 0 && (
+                  <p className="text-sm text-slate-400">No content recorded for this submission.</p>
+                )}
               </div>
             )}
 

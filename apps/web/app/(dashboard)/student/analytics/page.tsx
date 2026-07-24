@@ -38,14 +38,15 @@ export default async function StudentAnalyticsPage({ searchParams }: { searchPar
     : { data: [] };
   const gradeMap = Object.fromEntries((grades ?? []).map((g) => [g.assessment_id, g.score]));
 
-  // Class averages for comparison
-  const { data: classGrades } = assessmentIds.length
-    ? await supabase.from('grades').select('assessment_id, score').in('assessment_id', assessmentIds)
+  // Class averages for comparison — via a safe aggregate RPC (RLS blocks
+  // students from reading classmates' raw grade rows; this returns only the
+  // averaged score per assessment, never per-student data).
+  const { data: classAverages } = assessmentIds.length
+    ? await supabase.rpc('class_average_scores', { p_assessment_ids: assessmentIds })
     : { data: [] };
   const classAvgMap: Record<string, number> = {};
-  for (const id of assessmentIds) {
-    const scores = (classGrades ?? []).filter((g) => g.assessment_id === id && g.score != null).map((g) => g.score as number);
-    if (scores.length) classAvgMap[id] = scores.reduce((a, b) => a + b, 0) / scores.length;
+  for (const row of classAverages ?? []) {
+    if (row.avg_score != null) classAvgMap[row.assessment_id] = Number(row.avg_score);
   }
 
   // Subject summaries

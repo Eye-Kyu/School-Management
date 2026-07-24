@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/super-admin/curriculum', label: 'Curriculum', permissionKey: 'VIEW_CURRICULUM' },
       { href: '/super-admin/users', label: 'Users', permissionKey: 'VIEW_PLATFORM_USERS' },
       { href: '/super-admin/billing', label: 'Billing', permissionKey: 'VIEW_BILLING' },
+      { href: '/super-admin/messages', label: 'Messages', permissionKey: 'SEND_PLATFORM_MESSAGES' },
     ],
   },
   {

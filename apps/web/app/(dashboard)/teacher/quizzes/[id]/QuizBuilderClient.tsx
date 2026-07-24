@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 import AiQuizGenerator from './AiQuizGenerator';
 
 type Option = { id: string; text: string };
@@ -111,6 +112,51 @@ export default function QuizBuilderClient({
   const supabase = createClient();
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [attempts, setAttempts] = useState<Attempt[]>(initialAttempts);
+  const [resetOpen, setResetOpen] = useState<string | null>(null);
+  const [resetReason, setResetReason] = useState<Record<string, string>>({});
+  const [resetting, setResetting] = useState<Record<string, boolean>>({});
+  const [resetError, setResetError] = useState<Record<string, string>>({});
+
+  async function resetAttempt(attempt: Attempt) {
+    const reason = (resetReason[attempt.id] ?? '').trim();
+    if (reason.length < 10) {
+      setResetError((p) => ({ ...p, [attempt.id]: 'Reason must be at least 10 characters.' }));
+      return;
+    }
+    setResetting((p) => ({ ...p, [attempt.id]: true }));
+    setResetError((p) => ({ ...p, [attempt.id]: '' }));
+
+    const userRow = await getCurrentUserRow('id, school_id');
+    const { data: deleted, error } = await supabase.from('quiz_attempts').delete()
+      .eq('id', attempt.id).select('id');
+
+    if (error) {
+      setResetError((p) => ({ ...p, [attempt.id]: error.message }));
+      setResetting((p) => ({ ...p, [attempt.id]: false }));
+      return;
+    }
+    if (!deleted || deleted.length === 0) {
+      setResetError((p) => ({ ...p, [attempt.id]: "You don't have permission to reset this attempt." }));
+      setResetting((p) => ({ ...p, [attempt.id]: false }));
+      return;
+    }
+
+    await supabase.from('audit_logs').insert({
+      id: crypto.randomUUID(),
+      school_id: userRow?.school_id,
+      user_id: userRow?.id,
+      action: 'quiz.reset',
+      entity_type: 'quiz_attempt',
+      entity_id: attempt.id,
+      metadata: { student_id: attempt.student_id, reason, teacher_id: userRow?.id },
+    });
+
+    setAttempts((prev) => prev.filter((a) => a.id !== attempt.id));
+    setResetOpen(null);
+    setResetReason((p) => ({ ...p, [attempt.id]: '' }));
+    setResetting((p) => ({ ...p, [attempt.id]: false }));
+  }
+
   const [adding, setAdding] = useState<'MCQ' | 'SHORT_ANSWER' | null>(null);
   const [body, setBody] = useState('');
   const [points, setPoints] = useState('1');
@@ -297,25 +343,58 @@ export default function QuizBuilderClient({
                   <th className="px-4 py-2 text-center font-medium">%</th>
                   <th className="px-4 py-2 text-center font-medium">Tab switches</th>
                   <th className="px-4 py-2 text-right font-medium">Submitted</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {attempts.map((a) => {
                   const pct = a.score != null && a.max_score ? ((a.score / a.max_score) * 100).toFixed(1) : null;
                   return (
-                    <tr key={a.id} className="border-t border-slate-100">
-                      <td className="px-4 py-2.5">{(a.student as any)?.user?.full_name ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-center">{a.score ?? '—'} / {a.max_score ?? '—'}</td>
-                      <td className={`px-4 py-2.5 text-center font-medium ${pct ? parseFloat(pct) >= 70 ? 'text-emerald-600' : parseFloat(pct) >= 50 ? 'text-amber-600' : 'text-rose-600' : ''}`}>
-                        {pct ? `${pct}%` : '—'}
-                      </td>
-                      <td className={`px-4 py-2.5 text-center ${a.tab_blur_count > 2 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                        {a.tab_blur_count}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-slate-400 text-xs">
-                        {new Date(a.submitted_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
-                      </td>
-                    </tr>
+                    <Fragment key={a.id}>
+                      <tr className="border-t border-slate-100">
+                        <td className="px-4 py-2.5">{(a.student as any)?.user?.full_name ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-center">{a.score ?? '—'} / {a.max_score ?? '—'}</td>
+                        <td className={`px-4 py-2.5 text-center font-medium ${pct ? parseFloat(pct) >= 70 ? 'text-emerald-600' : parseFloat(pct) >= 50 ? 'text-amber-600' : 'text-rose-600' : ''}`}>
+                          {pct ? `${pct}%` : '—'}
+                        </td>
+                        <td className={`px-4 py-2.5 text-center ${a.tab_blur_count > 2 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                          {a.tab_blur_count}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-slate-400 text-xs">
+                          {new Date(a.submitted_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button onClick={() => setResetOpen(resetOpen === a.id ? null : a.id)}
+                            className="text-xs text-rose-500 hover:text-rose-700 underline">
+                            Reset
+                          </button>
+                        </td>
+                      </tr>
+                      {resetOpen === a.id && (
+                        <tr className="border-t border-slate-100 bg-rose-50/40">
+                          <td colSpan={6} className="px-4 py-3 space-y-2">
+                            <p className="text-xs text-slate-500">
+                              This permanently deletes {(a.student as any)?.user?.full_name ?? 'this student'}'s attempt so they can retake the quiz before the deadline. This cannot be undone.
+                            </p>
+                            <textarea rows={2} placeholder="Reason for reset (required, min 10 characters)…"
+                              value={resetReason[a.id] ?? ''}
+                              onChange={(e) => setResetReason((p) => ({ ...p, [a.id]: e.target.value }))}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
+                            {resetError[a.id] && <p className="text-xs text-rose-600">{resetError[a.id]}</p>}
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => setResetOpen(null)}
+                                className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:bg-slate-100">
+                                Cancel
+                              </button>
+                              <button onClick={() => resetAttempt(a)} disabled={resetting[a.id]}
+                                className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-500 disabled:opacity-50">
+                                {resetting[a.id] ? 'Resetting…' : 'Confirm reset'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

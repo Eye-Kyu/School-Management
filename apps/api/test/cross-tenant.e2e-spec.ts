@@ -1842,7 +1842,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .send({ fullName: 'New Super Admin', email })
       .expect(201);
-    expect(createRes.body.platform_permissions.length).toBe(17);
+    expect(createRes.body.platform_permissions.length).toBe(18);
     const newAdminId = createRes.body.id as string;
     const temporaryPassword = createRes.body.temporaryPassword as string;
 
@@ -2169,6 +2169,11 @@ describe('Cross-tenant isolation (e2e)', () => {
     const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
     const teacherAUserId = teacherARow!.user_id;
 
+    // teacherA needs a real relationship to classAId now that sub_select is
+    // class-scoped (20260724000054) — grading via sub_update's RETURNING is
+    // also gated by sub_select, not just the UPDATE policy itself.
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
     const openAssignmentId = randomUUID();
     const closedAssignmentId = randomUUID();
     await admin.from('assignments').insert([
@@ -2219,6 +2224,7 @@ describe('Cross-tenant isolation (e2e)', () => {
 
     await admin.from('submissions').delete().in('id', [openSub.data!.id, pastSubId]);
     await admin.from('assignments').delete().in('id', [openAssignmentId, closedAssignmentId]);
+    await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
   });
 
   it('Task 5: a quiz blocks new/resumed attempts after closes_at, but keeps a past attempt visible', async () => {
@@ -2459,5 +2465,849 @@ describe('Cross-tenant isolation (e2e)', () => {
     expect(adminClassView.body.capped).toBe(false);
 
     await admin.from('behaviour_points').delete().in('id', bpIds);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 1: profile self-update (users_update_self RLS policy)
+  // ---------------------------------------------------------------------------
+
+  it('Task 1: non-admin can update own profile (previously PGRST116)', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ fullName: `Teacher A Renamed ${suffix}`, phone: '+254700000001' })
+      .expect(200);
+
+    expect(res.body.full_name).toBe(`Teacher A Renamed ${suffix}`);
+    expect(res.body.phone).toBe('+254700000001');
+
+    // Audit log records field NAMES only, never the values (PII avoidance).
+    const { data: auditRow } = await admin
+      .from('audit_logs')
+      .select('action, metadata')
+      .eq('entity_id', res.body.id)
+      .eq('action', 'user.profile_update')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    expect(auditRow?.action).toBe('user.profile_update');
+    const changedFields = (auditRow?.metadata as { changedFields?: string[] } | null)?.changedFields ?? [];
+    expect(changedFields).toEqual(expect.arrayContaining(['full_name', 'phone']));
+    expect(JSON.stringify(auditRow?.metadata)).not.toContain('Teacher A Renamed');
+    expect(JSON.stringify(auditRow?.metadata)).not.toContain('+254700000001');
+  });
+
+  it('Task 1: non-admin cannot edit another user\'s profile via the admin teacher-edit route', async () => {
+    await request(app.getHttpServer())
+      .patch(`/teachers/${teacherATeacherId}`)
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ fullName: 'Should Not Apply' })
+      .expect(403);
+  });
+
+  it('Task 1: School A admin cannot edit a School B teacher (cross-tenant, RLS-blocked at DB)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/teachers/${teacherBTeacherId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ fullName: 'Should Not Apply' })
+      .expect(404);
+
+    const { data: teacherBRow } = await admin.from('teachers').select('user_id').eq('id', teacherBTeacherId).single();
+    const { data: userBRow } = await admin.from('users').select('full_name').eq('id', teacherBRow!.user_id).single();
+    expect(userBRow?.full_name).not.toBe('Should Not Apply');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 4: attendance visibility on student/parent dashboards
+  // ---------------------------------------------------------------------------
+  // attendanceAId/attendanceBId (seeded in beforeAll) are dated `today`, which
+  // is exactly the scenario that reproduced the bug: a currentTerm whose date
+  // range doesn't cover today must not hide it.
+
+  it('Task 4: student sees their own attendance marked today', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/attendance')
+      .set('Authorization', `Bearer ${tokenStudentA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).toContain(attendanceAId);
+  });
+
+  it('Task 4: student querying another student\'s id gets only their own rows (RLS ignores the param)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/attendance').query({ studentId: studentBId })
+      .set('Authorization', `Bearer ${tokenStudentA}`)
+      .expect(200);
+
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).not.toContain(attendanceBId);
+  });
+
+  it('Task 4: parent sees their linked child\'s attendance marked today', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task4-attendance-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    const res = await request(app.getHttpServer())
+      .get('/attendance')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .expect(200);
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).toContain(attendanceAId);
+
+    await admin.from('guardians').delete().eq('id', guardianId);
+  });
+
+  it('Task 4: a parent with no linked child in School B gets an empty result for School B attendance', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task4-unlinked-parent');
+    // No guardians row at all — this parent has no children linked anywhere.
+    const res = await request(app.getHttpServer())
+      .get('/attendance').query({ studentId: studentBId })
+      .set('Authorization', `Bearer ${parent.token}`)
+      .expect(200);
+    expect(res.body).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 5: quiz and assignment single-attempt lock
+  // ---------------------------------------------------------------------------
+
+  it('Task 5: a student cannot resubmit an assignment once submitted, but a teacher reset allows a fresh submission', async () => {
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    // teacherA needs a real relationship to classAId now that sub_select is
+    // class-scoped (20260724000054) — the reset DELETE's RETURNING is also
+    // gated by sub_select, not just sub_delete's creator check.
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
+    const assignmentId = randomUUID();
+    await admin.from('assignments').insert({
+      id: assignmentId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId,
+      title: 'Single-attempt test', due_date: tomorrow,
+    });
+
+    // First submission succeeds.
+    const first = await clientAs(tokenStudentA)
+      .from('submissions')
+      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: assignmentId, student_id: studentAId, content: 'first attempt' })
+      .select().single();
+    expect(first.error).toBeNull();
+
+    // Second attempt via UPDATE (resubmit) is silently RLS-filtered — the
+    // STUDENT branch of sub_update no longer exists at all.
+    const resubmit = await clientAs(tokenStudentA)
+      .from('submissions')
+      .update({ content: 'trying again' })
+      .eq('id', first.data!.id)
+      .select();
+    expect(resubmit.data ?? []).toHaveLength(0);
+
+    // Only the creator/class-teacher/admin may reset — an unrelated teacher
+    // in the SAME school cannot.
+    const otherTeacher = await createExtraUser(schoolAId, 'TEACHER', 'task5-other-teacher');
+    const unauthorizedDelete = await clientAs(otherTeacher.token)
+      .from('submissions').delete().eq('id', first.data!.id).select();
+    expect(unauthorizedDelete.data ?? []).toHaveLength(0);
+
+    // Cross-tenant: School B's teacher cannot reset School A's submission either.
+    const crossTenantDelete = await clientAs(tokenTeacherB)
+      .from('submissions').delete().eq('id', first.data!.id).select();
+    expect(crossTenantDelete.data ?? []).toHaveLength(0);
+
+    // Creator teacher resets it (delete), writing the audit trail the UI writes client-side.
+    const reset = await clientAs(tokenTeacherA)
+      .from('submissions').delete().eq('id', first.data!.id).select();
+    expect(reset.error).toBeNull();
+    expect(reset.data).toHaveLength(1);
+    await clientAs(tokenTeacherA).from('audit_logs').insert({
+      id: randomUUID(), school_id: schoolAId, user_id: teacherAUserId,
+      action: 'assignment.reset', entity_type: 'submission', entity_id: first.data!.id,
+      metadata: { student_id: studentAId, reason: 'Accidentally submitted blank answer', teacher_id: teacherAUserId },
+    });
+
+    // Student can submit again — deadline hasn't passed, and the row is gone.
+    const second = await clientAs(tokenStudentA)
+      .from('submissions')
+      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: assignmentId, student_id: studentAId, content: 'second attempt' })
+      .select().single();
+    expect(second.error).toBeNull();
+
+    // Audit trail intact: reset entry + the fresh submission are both correctly attributed.
+    const { data: auditRow } = await admin.from('audit_logs')
+      .select('action, metadata').eq('entity_id', first.data!.id).eq('action', 'assignment.reset').maybeSingle();
+    expect(auditRow?.action).toBe('assignment.reset');
+    expect((auditRow?.metadata as any)?.student_id).toBe(studentAId);
+    const { data: secondRow } = await admin.from('submissions').select('content').eq('id', second.data!.id).single();
+    expect(secondRow?.content).toBe('second attempt');
+
+    await admin.from('audit_logs').delete().eq('entity_id', first.data!.id);
+    await admin.from('submissions').delete().eq('id', second.data!.id);
+    await admin.from('assignments').delete().eq('id', assignmentId);
+    await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+  });
+
+  it('Task 5: a quiz attempt cannot be re-finalized once submitted, but a teacher reset allows a fresh attempt', async () => {
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    const quizId = randomUUID();
+    await admin.from('quizzes').insert({
+      id: quizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId,
+      title: 'Single-attempt quiz', is_published: true,
+    });
+
+    const attemptId = randomUUID();
+    await admin.from('quiz_attempts').insert({
+      id: attemptId, school_id: schoolAId, quiz_id: quizId, student_id: studentAId,
+      submitted_at: new Date().toISOString(), score: 3, max_score: 5, answers: { q1: 'a' },
+    });
+
+    // Once submitted_at is set, the STUDENT branch of qa_update no longer matches.
+    const reFinalize = await clientAs(tokenStudentA)
+      .from('quiz_attempts')
+      .update({ answers: { q1: 'b' } })
+      .eq('id', attemptId)
+      .select();
+    expect(reFinalize.data ?? []).toHaveLength(0);
+
+    // Unrelated teacher (same school) cannot reset.
+    const otherTeacher = await createExtraUser(schoolAId, 'TEACHER', 'task5-quiz-other-teacher');
+    const unauthorizedDelete = await clientAs(otherTeacher.token)
+      .from('quiz_attempts').delete().eq('id', attemptId).select();
+    expect(unauthorizedDelete.data ?? []).toHaveLength(0);
+
+    // Creator teacher resets it.
+    const reset = await clientAs(tokenTeacherA).from('quiz_attempts').delete().eq('id', attemptId).select();
+    expect(reset.error).toBeNull();
+    expect(reset.data).toHaveLength(1);
+    await clientAs(tokenTeacherA).from('audit_logs').insert({
+      id: randomUUID(), school_id: schoolAId, user_id: teacherAUserId,
+      action: 'quiz.reset', entity_type: 'quiz_attempt', entity_id: attemptId,
+      metadata: { student_id: studentAId, reason: 'Technical issue during the attempt', teacher_id: teacherAUserId },
+    });
+
+    // Student can start a fresh attempt now that the row is gone.
+    const fresh = await clientAs(tokenStudentA)
+      .from('quiz_attempts')
+      .insert({ id: randomUUID(), school_id: schoolAId, quiz_id: quizId, student_id: studentAId })
+      .select().single();
+    expect(fresh.error).toBeNull();
+
+    await admin.from('audit_logs').delete().eq('entity_id', attemptId);
+    await admin.from('quiz_attempts').delete().eq('id', fresh.data!.id);
+    await admin.from('quizzes').delete().eq('id', quizId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 6: admin sets/changes the Class Teacher for a class
+  // ---------------------------------------------------------------------------
+
+  it('Task 6: admin can assign, swap, unassign, and displace a Class Teacher', async () => {
+    const now = new Date().toISOString();
+    const extraClassId = randomUUID();
+    const secondClassId = randomUUID();
+    await admin.from('classes').insert([
+      { id: extraClassId, school_id: schoolAId, name: 'Task6 Class X', grade_level: 2, updated_at: now },
+      { id: secondClassId, school_id: schoolAId, name: 'Task6 Class Y', grade_level: 2, updated_at: now },
+    ]);
+
+    const teacherX1 = await createExtraUser(schoolAId, 'TEACHER', 'task6-teacher-x1');
+    const teacherX2 = await createExtraUser(schoolAId, 'TEACHER', 'task6-teacher-x2');
+    const teacherX1Id = randomUUID();
+    const teacherX2Id = randomUUID();
+    await admin.from('teachers').insert([
+      { id: teacherX1Id, school_id: schoolAId, user_id: teacherX1.userId, staff_no: `T6X1-${suffix}`, updated_at: now },
+      { id: teacherX2Id, school_id: schoolAId, user_id: teacherX2.userId, staff_no: `T6X2-${suffix}`, updated_at: now },
+    ]);
+
+    try {
+      // Non-admin is rejected outright.
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ teacherId: teacherX1Id })
+        .expect(403);
+
+      // Assign to an unassigned class.
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherX1Id })
+        .expect(200);
+      const { data: afterFirst } = await admin.from('teachers').select('id, is_class_teacher_of').eq('id', teacherX1Id).single();
+      expect(afterFirst?.is_class_teacher_of).toBe(extraClassId);
+
+      // Swap: teacherX1 -> teacherX2, atomically (X1 nulled, X2 set).
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherX2Id })
+        .expect(200);
+      const { data: x1AfterSwap } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherX1Id).single();
+      const { data: x2AfterSwap } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherX2Id).single();
+      expect(x1AfterSwap?.is_class_teacher_of).toBeNull();
+      expect(x2AfterSwap?.is_class_teacher_of).toBe(extraClassId);
+
+      // Unassign -> None.
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: null })
+        .expect(200);
+      const { data: afterUnassign } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherX2Id).single();
+      expect(afterUnassign?.is_class_teacher_of).toBeNull();
+
+      // Displacement: assign teacherX1 to extraClassId, then to secondClassId —
+      // they should end up class teacher of secondClassId only.
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherX1Id })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/classes/${secondClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherX1Id })
+        .expect(200);
+      const { data: displaced } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherX1Id).single();
+      expect(displaced?.is_class_teacher_of).toBe(secondClassId);
+      const { data: extraClassAfterDisplace } = await admin.from('teachers').select('id').eq('is_class_teacher_of', extraClassId).maybeSingle();
+      expect(extraClassAfterDisplace).toBeNull();
+
+      // Cross-tenant: School A admin cannot assign a School A teacher to a School B class...
+      await request(app.getHttpServer())
+        .patch(`/classes/${classBId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherX1Id })
+        .expect(404);
+      // ...nor assign a School B teacher to a School A class.
+      await request(app.getHttpServer())
+        .patch(`/classes/${extraClassId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherId: teacherBTeacherId })
+        .expect(404);
+
+      // Audit trail: both previous and new teacher ids are logged, even when null.
+      const { data: auditRows } = await admin.from('audit_logs')
+        .select('metadata').eq('entity_id', secondClassId).eq('action', 'class.set_class_teacher')
+        .order('created_at', { ascending: false }).limit(1);
+      const meta = auditRows?.[0]?.metadata as any;
+      expect(meta?.class_id).toBe(secondClassId);
+      expect(meta?.new_teacher_id).toBe(teacherX1Id);
+    } finally {
+      await admin.from('audit_logs').delete().in('entity_id', [extraClassId, secondClassId]);
+      await admin.from('teachers').delete().in('id', [teacherX1Id, teacherX2Id]);
+      await admin.from('classes').delete().in('id', [extraClassId, secondClassId]);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 3: SuperAdmin broadcast messaging to SchoolAdmins
+  // ---------------------------------------------------------------------------
+
+  it('Task 3: send-to-all reaches every school\'s admin with the correct recipient count', async () => {
+    const { count: totalAdmins } = await admin.from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'ADMIN').eq('is_active', true).is('deleted_at', null);
+
+    const res = await request(app.getHttpServer())
+      .post('/super-admin/platform-messages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ subject: 'Platform-wide notice', body: 'Please review the new policy.', audience: { type: 'ALL' } })
+      .expect(201);
+    expect(res.body.recipientCount).toBe(totalAdmins);
+
+    const { data: recipients } = await admin.from('platform_message_recipients')
+      .select('recipient_school_id').eq('platform_message_id', res.body.id);
+    const recipientSchoolIds = (recipients ?? []).map((r) => r.recipient_school_id);
+    expect(recipientSchoolIds).toContain(schoolAId);
+    expect(recipientSchoolIds).toContain(schoolBId);
+
+    const { data: auditRow } = await admin.from('audit_logs')
+      .select('metadata').eq('entity_id', res.body.id).eq('action', 'platform_message.send').maybeSingle();
+    expect((auditRow?.metadata as any)?.recipient_count).toBe(totalAdmins);
+
+    await admin.from('audit_logs').delete().eq('entity_id', res.body.id);
+    await admin.from('platform_message_recipients').delete().eq('platform_message_id', res.body.id);
+    await admin.from('platform_messages').delete().eq('id', res.body.id);
+  });
+
+  it('Task 3: send-to-package only reaches that package\'s schools; a non-SUPER_ADMIN cannot send', async () => {
+    // Non-SUPER_ADMIN is rejected outright.
+    await request(app.getHttpServer())
+      .post('/super-admin/platform-messages')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ subject: 'x', body: 'y', audience: { type: 'ALL' } })
+      .expect(403);
+
+    const packageId = randomUUID();
+    await admin.from('packages').insert({ id: packageId, name: `Task3 Package ${suffix}` });
+    const subId = randomUUID();
+    await admin.from('school_subscriptions').insert({ id: subId, school_id: schoolAId, package_id: packageId, status: 'ACTIVE' });
+
+    const res = await request(app.getHttpServer())
+      .post('/super-admin/platform-messages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ subject: 'Package notice', body: 'Only for schools on this package.', audience: { type: 'PACKAGE', packageId } })
+      .expect(201);
+
+    const { data: recipients } = await admin.from('platform_message_recipients')
+      .select('recipient_school_id').eq('platform_message_id', res.body.id);
+    const recipientSchoolIds = (recipients ?? []).map((r) => r.recipient_school_id);
+    expect(recipientSchoolIds).toContain(schoolAId);
+    expect(recipientSchoolIds).not.toContain(schoolBId);
+
+    await admin.from('platform_message_recipients').delete().eq('platform_message_id', res.body.id);
+    await admin.from('platform_messages').delete().eq('id', res.body.id);
+    await admin.from('audit_logs').delete().eq('entity_id', res.body.id);
+    await admin.from('school_subscriptions').delete().eq('id', subId);
+    await admin.from('packages').delete().eq('id', packageId);
+  });
+
+  it('Task 3: a School Admin sees only their own recipient rows, cannot INSERT messages, and cannot mark another admin\'s row read', async () => {
+    const messageId = randomUUID();
+    await admin.from('platform_messages').insert({ id: messageId, sender_user_id: superAdminUserId, subject: 'Manual test message', body: 'Body' });
+
+    const { data: adminARow } = await admin.from('users').select('id').eq('school_id', schoolAId).eq('role', 'ADMIN').single();
+    const { data: adminBRow } = await admin.from('users').select('id').eq('school_id', schoolBId).eq('role', 'ADMIN').single();
+    const recipientAId = randomUUID();
+    const recipientBId = randomUUID();
+    await admin.from('platform_message_recipients').insert([
+      { id: recipientAId, platform_message_id: messageId, recipient_school_id: schoolAId, recipient_user_id: adminARow!.id },
+      { id: recipientBId, platform_message_id: messageId, recipient_school_id: schoolBId, recipient_user_id: adminBRow!.id },
+    ]);
+
+    // School A admin sees only their own recipient row, never School B's.
+    const { data: aVisible } = await clientAs(tokenA).from('platform_message_recipients').select('id').eq('platform_message_id', messageId);
+    const aIds = (aVisible ?? []).map((r) => r.id);
+    expect(aIds).toContain(recipientAId);
+    expect(aIds).not.toContain(recipientBId);
+
+    // School Admin cannot INSERT into platform_messages directly (RLS block).
+    const insertAttempt = await clientAs(tokenA).from('platform_messages')
+      .insert({ id: randomUUID(), sender_user_id: adminARow!.id, subject: 'Should fail', body: 'x' }).select();
+    expect(insertAttempt.error).toBeTruthy();
+
+    // School Admin cannot mark another admin's row read (RLS: recipient_user_id = current_user_id() only).
+    const crossUpdate = await clientAs(tokenA).from('platform_message_recipients')
+      .update({ read_at: new Date().toISOString() }).eq('id', recipientBId).select();
+    expect(crossUpdate.data ?? []).toHaveLength(0);
+
+    // But can mark their own row read.
+    const ownUpdate = await clientAs(tokenA).from('platform_message_recipients')
+      .update({ read_at: new Date().toISOString() }).eq('id', recipientAId).select();
+    expect(ownUpdate.error).toBeNull();
+    expect(ownUpdate.data?.[0]?.read_at).toBeTruthy();
+
+    const { data: bRowAfter } = await admin.from('platform_message_recipients').select('read_at').eq('id', recipientBId).single();
+    expect(bRowAfter?.read_at).toBeNull();
+
+    await admin.from('platform_message_recipients').delete().in('id', [recipientAId, recipientBId]);
+    await admin.from('platform_messages').delete().eq('id', messageId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 7: notifications bubble count aggregates Alerts + Conversations + Reminders
+  // ---------------------------------------------------------------------------
+
+  it('Task 7: unread-count includes unread conversations, and drops after marking read', async () => {
+    const baseline = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+
+    await admin.from('conversations').update({ teacher_unread_count: 2 }).eq('id', conversationAId);
+    const withUnread = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect(withUnread.body.count).toBe(baseline.body.count + 1);
+
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationAId}/read`)
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    const afterRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect(afterRead.body.count).toBe(baseline.body.count);
+  });
+
+  it('Task 7: unread-count includes platform messages for ADMIN only, isolated per school', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task7-parent');
+    const nonAdminBaseline = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
+
+    const adminABaseline = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+    const adminBBaseline = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
+
+    const sendRes = await request(app.getHttpServer())
+      .post('/super-admin/platform-messages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ subject: 'Bubble count check', body: 'Testing.', audience: { type: 'MANUAL', schoolIds: [schoolAId] } })
+      .expect(201);
+
+    const adminAAfter = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+    expect(adminAAfter.body.count).toBe(adminABaseline.body.count + 1);
+
+    // School B's admin is unaffected (cross-tenant isolation).
+    const adminBAfter = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
+    expect(adminBAfter.body.count).toBe(adminBBaseline.body.count);
+
+    // A non-admin in the same school never sees platform messages counted.
+    const nonAdminAfter = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
+    expect(nonAdminAfter.body.count).toBe(nonAdminBaseline.body.count);
+
+    await admin.from('platform_message_recipients').delete().eq('platform_message_id', sendRes.body.id);
+    await admin.from('platform_messages').delete().eq('id', sendRes.body.id);
+    await admin.from('audit_logs').delete().eq('entity_id', sendRes.body.id);
+  });
+
+  it('Task 7: unread-count includes a student\'s unsubmitted assignment due soon, and drops after submitting', async () => {
+    const baseline = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
+
+    const inThreeDays = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const assignmentId = randomUUID();
+    await admin.from('assignments').insert({
+      id: assignmentId, school_id: schoolAId, class_id: classAId, created_by_id: teacherARow!.user_id,
+      title: 'Task7 reminder assignment', due_date: inThreeDays,
+    });
+
+    const withReminder = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
+    expect(withReminder.body.count).toBe(baseline.body.count + 1);
+
+    const sub = await clientAs(tokenStudentA).from('submissions')
+      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: assignmentId, student_id: studentAId, content: 'done' })
+      .select().single();
+    expect(sub.error).toBeNull();
+
+    const afterSubmit = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
+    expect(afterSubmit.body.count).toBe(baseline.body.count);
+
+    await admin.from('submissions').delete().eq('id', sub.data!.id);
+    await admin.from('assignments').delete().eq('id', assignmentId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 2: SuperAdmin assist mode
+  // ---------------------------------------------------------------------------
+
+  async function createGrant(scopes: string[]) {
+    const res = await request(app.getHttpServer())
+      .post('/super-admin/privileged-access/grants')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ schoolId: schoolAId, reason: 'Task 2 assist-mode test', scopes, durationMinutes: 60 })
+      .expect(201);
+    return res.body.id as string;
+  }
+
+  it('Task 2: a SuperAdmin with no grant cannot enter assist mode', async () => {
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${randomUUID()}/enter-assist`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(404);
+
+    // Nor can a SUPER_ADMIN without the GRANT_PRIVILEGED_ACCESS permission at all.
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${randomUUID()}/enter-assist`)
+      .set('Authorization', `Bearer ${tokenReducedSuperAdmin}`)
+      .expect(403);
+  });
+
+  it('Task 2: an expired grant cannot be entered', async () => {
+    const grantId = randomUUID();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    await admin.from('privileged_access_grants').insert({
+      id: grantId, super_admin_user_id: superAdminUserId, target_school_id: schoolAId,
+      reason: 'Expired', access_level: 'READ_ONLY', scopes: ['ACADEMIC_DATA'],
+      status: 'ACTIVE', expires_at: past, updated_at: past,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/enter-assist`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(403);
+  });
+
+  it('Task 2: assist mode lets a granted SuperAdmin perform an in-scope write, audited under their real identity', async () => {
+    const grantId = await createGrant(['ACADEMIC_DATA']);
+    try {
+      const enterRes = await request(app.getHttpServer())
+        .post(`/super-admin/privileged-access/grants/${grantId}/enter-assist`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .expect(201);
+      const assistToken = enterRes.body.token as string;
+      expect(enterRes.body.schoolId).toBe(schoolAId);
+
+      // The literal spec example: assist mode enables an in-scope ADMIN-style write.
+      await request(app.getHttpServer())
+        .patch(`/classes/${classAId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .set('X-Assist-Token', assistToken)
+        .send({ teacherId: teacherATeacherId })
+        .expect(200);
+
+      const { data: teacherRow } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherATeacherId).single();
+      expect(teacherRow?.is_class_teacher_of).toBe(classAId);
+
+      // Audit trail: assist.enter, the underlying class.set_class_teacher (real
+      // identity), and the generic assist.<method> <route> row all present.
+      const { data: logs } = await admin.from('audit_logs').select('action, user_id, school_id').eq('user_id', superAdminUserId).order('created_at', { ascending: false }).limit(10);
+      const actions = (logs ?? []).map((l) => l.action);
+      expect(actions).toContain('assist.enter');
+      expect(actions.some((a) => a.startsWith('assist.PATCH'))).toBe(true);
+
+      const { data: classTeacherAudit } = await admin.from('audit_logs')
+        .select('user_id, school_id').eq('action', 'class.set_class_teacher').eq('entity_id', classAId)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      expect(classTeacherAudit?.user_id).toBe(superAdminUserId);
+      expect(classTeacherAudit?.school_id).toBe(schoolAId);
+    } finally {
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+      await admin.from('audit_logs').delete().eq('user_id', superAdminUserId);
+      await admin.from('privileged_access_grants').delete().eq('id', grantId);
+    }
+  });
+
+  it('Task 2: an out-of-scope grant blocks the write even though it is active', async () => {
+    const grantId = await createGrant(['STUDENT_RECORDS']); // deliberately missing ACADEMIC_DATA
+    try {
+      const enterRes = await request(app.getHttpServer())
+        .post(`/super-admin/privileged-access/grants/${grantId}/enter-assist`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .expect(201);
+      const assistToken = enterRes.body.token as string;
+
+      await request(app.getHttpServer())
+        .patch(`/classes/${classAId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .set('X-Assist-Token', assistToken)
+        .send({ teacherId: teacherATeacherId })
+        .expect(403);
+
+      const { data: teacherRow } = await admin.from('teachers').select('is_class_teacher_of').eq('id', teacherATeacherId).single();
+      expect(teacherRow?.is_class_teacher_of).toBeNull();
+    } finally {
+      await admin.from('audit_logs').delete().eq('user_id', superAdminUserId);
+      await admin.from('privileged_access_grants').delete().eq('id', grantId);
+    }
+  });
+
+  it('Task 2: a School B class id injected while assisting School A is rejected, not silently redirected', async () => {
+    const grantId = await createGrant(['ACADEMIC_DATA']);
+    try {
+      const enterRes = await request(app.getHttpServer())
+        .post(`/super-admin/privileged-access/grants/${grantId}/enter-assist`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .expect(201);
+      const assistToken = enterRes.body.token as string;
+
+      await request(app.getHttpServer())
+        .patch(`/classes/${classBId}/class-teacher`)
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .set('X-Assist-Token', assistToken)
+        .send({ teacherId: teacherATeacherId })
+        .expect(404);
+    } finally {
+      await admin.from('audit_logs').delete().eq('user_id', superAdminUserId);
+      await admin.from('privileged_access_grants').delete().eq('id', grantId);
+    }
+  });
+
+  it('Task 2: mid-session revocation blocks further assist-mode writes even though the token has not expired', async () => {
+    const grantId = await createGrant(['ACADEMIC_DATA']);
+    const enterRes = await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/enter-assist`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(201);
+    const assistToken = enterRes.body.token as string;
+
+    await request(app.getHttpServer())
+      .post(`/super-admin/privileged-access/grants/${grantId}/end`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/classes/${classAId}/class-teacher`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .set('X-Assist-Token', assistToken)
+      .send({ teacherId: teacherATeacherId })
+      .expect(403);
+
+    await admin.from('audit_logs').delete().eq('user_id', superAdminUserId);
+  });
+
+  it('Task 2: exit-assist logs an audit entry naming the SuperAdmin, target school, and grant', async () => {
+    const grantId = await createGrant(['ACADEMIC_DATA']);
+    try {
+      await request(app.getHttpServer())
+        .post('/super-admin/privileged-access/exit-assist')
+        .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+        .send({ accessGrantId: grantId, targetSchoolId: schoolAId })
+        .expect(201);
+
+      const { data: exitLog } = await admin.from('audit_logs')
+        .select('action, metadata').eq('action', 'assist.exit').eq('entity_id', grantId).maybeSingle();
+      expect(exitLog?.action).toBe('assist.exit');
+      expect((exitLog?.metadata as any)?.super_admin_user_id).toBe(superAdminUserId);
+      expect((exitLog?.metadata as any)?.target_school_id).toBe(schoolAId);
+    } finally {
+      await admin.from('audit_logs').delete().eq('user_id', superAdminUserId);
+      await admin.from('privileged_access_grants').delete().eq('id', grantId);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Analytics security patch — assess_select/assign_select/grade_select/
+  // sub_select previously only checked school_id, letting any authenticated
+  // STUDENT/PARENT/TEACHER read any other student's grades/submissions in the
+  // school directly via the browser Supabase client. Tightened in
+  // 20260724000054_tighten_gradebook_rls.sql to class/own-row scoping.
+  // ---------------------------------------------------------------------------
+
+  it('Security patch: a student cannot read another student\'s grades/assessments/assignments/submissions via direct RLS, even in the same school', async () => {
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const subjectId = randomUUID();
+    const termId = randomUUID();
+    const otherClassId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Sec Subject ${suffix}`, code: 'SEC', updated_at: now });
+    await admin.from('terms').insert({ id: termId, school_id: schoolAId, name: `Sec Term ${suffix}`, start_date: today, end_date: today, is_current: false });
+    await admin.from('classes').insert({ id: otherClassId, school_id: schoolAId, name: 'Other Class', grade_level: 2, updated_at: now });
+
+    // A second student, in a DIFFERENT class in the SAME school as studentA —
+    // not linked to studentA's teacher or guardians at all.
+    const otherStudent = await createExtraUser(schoolAId, 'STUDENT', 'sec-other-student');
+    const otherStudentId = randomUUID();
+    await admin.from('students').insert({ id: otherStudentId, school_id: schoolAId, user_id: otherStudent.userId, current_class_id: otherClassId, admission_no: `SEC-${suffix}`, updated_at: now });
+
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+
+    const assessmentId = randomUUID();
+    await admin.from('assessments').insert({ id: assessmentId, school_id: schoolAId, class_id: otherClassId, subject_id: subjectId, term_id: termId, teacher_id: teacherATeacherId, name: 'Other Assessment', max_marks: 100 });
+    await admin.from('grades').insert({ id: randomUUID(), school_id: schoolAId, assessment_id: assessmentId, student_id: otherStudentId, score: 90 });
+
+    const assignmentId = randomUUID();
+    await admin.from('assignments').insert({ id: assignmentId, school_id: schoolAId, class_id: otherClassId, created_by_id: teacherAUserId, title: 'Other Assignment', due_date: today, updated_at: now });
+    const submissionId = randomUUID();
+    await admin.from('submissions').insert({ id: submissionId, school_id: schoolAId, assignment_id: assignmentId, student_id: otherStudentId, content: 'secret work' });
+
+    try {
+      // studentA — not the owner, not their teacher, not their class — sees nothing.
+      const asStudentA = clientAs(tokenStudentA);
+      expect((await asStudentA.from('assessments').select('id').eq('id', assessmentId)).data).toEqual([]);
+      expect((await asStudentA.from('grades').select('id').eq('assessment_id', assessmentId)).data).toEqual([]);
+      expect((await asStudentA.from('assignments').select('id').eq('id', assignmentId)).data).toEqual([]);
+      expect((await asStudentA.from('submissions').select('id, content').eq('id', submissionId)).data).toEqual([]);
+
+      // teacherA has neither a subject_assignments row nor is_class_teacher_of
+      // for otherClassId — also sees nothing (proves the TEACHER branch is
+      // genuinely class-scoped, not accidentally school-wide).
+      const asTeacherA = clientAs(tokenTeacherA);
+      expect((await asTeacherA.from('grades').select('id').eq('assessment_id', assessmentId)).data).toEqual([]);
+
+      // School B's admin — cross-tenant, regression check on the pre-existing school_id guard.
+      const asAdminB = clientAs(tokenB);
+      expect((await asAdminB.from('grades').select('id').eq('assessment_id', assessmentId)).data).toEqual([]);
+
+      // The owner sees their own row.
+      const asOtherStudent = clientAs(otherStudent.token);
+      expect((await asOtherStudent.from('grades').select('id, score').eq('assessment_id', assessmentId)).data).toHaveLength(1);
+      expect((await asOtherStudent.from('submissions').select('id, content').eq('id', submissionId)).data).toHaveLength(1);
+
+      // School A's admin retains full school-wide visibility.
+      const asAdminA = clientAs(tokenA);
+      expect((await asAdminA.from('grades').select('id').eq('assessment_id', assessmentId)).data).toHaveLength(1);
+    } finally {
+      await admin.from('submissions').delete().eq('id', submissionId);
+      await admin.from('assignments').delete().eq('id', assignmentId);
+      await admin.from('grades').delete().eq('assessment_id', assessmentId);
+      await admin.from('assessments').delete().eq('id', assessmentId);
+      await admin.from('students').delete().eq('id', otherStudentId);
+      await admin.from('classes').delete().eq('id', otherClassId);
+      await admin.from('terms').delete().eq('id', termId);
+      await admin.from('subjects').delete().eq('id', subjectId);
+    }
+  });
+
+  it('Security patch: class_average_scores() returns only the aggregate (never raw student rows), stays within the caller\'s own school, and a parent cannot reach another family\'s child\'s grades via a tampered studentId', async () => {
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const subjectId = randomUUID();
+    const termId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Avg Subject ${suffix}`, code: 'AVG', updated_at: now });
+    await admin.from('terms').insert({ id: termId, school_id: schoolAId, name: `Avg Term ${suffix}`, start_date: today, end_date: today, is_current: false });
+
+    // A classmate of studentA (same class), so a class average is meaningful.
+    const classmate = await createExtraUser(schoolAId, 'STUDENT', 'sec-classmate');
+    const classmateId = randomUUID();
+    await admin.from('students').insert({ id: classmateId, school_id: schoolAId, user_id: classmate.userId, current_class_id: classAId, admission_no: `AVG-${suffix}`, updated_at: now });
+
+    const assessmentId = randomUUID();
+    await admin.from('assessments').insert({ id: assessmentId, school_id: schoolAId, class_id: classAId, subject_id: subjectId, term_id: termId, teacher_id: teacherATeacherId, name: 'Avg Assessment', max_marks: 100 });
+    await admin.from('grades').insert([
+      { id: randomUUID(), school_id: schoolAId, assessment_id: assessmentId, student_id: studentAId, score: 80 },
+      { id: randomUUID(), school_id: schoolAId, assessment_id: assessmentId, student_id: classmateId, score: 60 },
+    ]);
+
+    // A real School B assessment + grade — must never contribute to a School A caller's average.
+    const subjectBId = randomUUID();
+    const termBId = randomUUID();
+    const otherSchoolAssessmentId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectBId, school_id: schoolBId, name: `Avg Subject B ${suffix}`, code: 'AVGB', updated_at: now });
+    await admin.from('terms').insert({ id: termBId, school_id: schoolBId, name: `Avg Term B ${suffix}`, start_date: today, end_date: today, is_current: false });
+    await admin.from('assessments').insert({ id: otherSchoolAssessmentId, school_id: schoolBId, class_id: classBId, subject_id: subjectBId, term_id: termBId, teacher_id: teacherBTeacherId, name: 'B Assessment', max_marks: 100 });
+    await admin.from('grades').insert({ id: randomUUID(), school_id: schoolBId, assessment_id: otherSchoolAssessmentId, student_id: studentBId, score: 100 });
+
+    // A second parent, linked only to studentA (not the classmate).
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'sec-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    try {
+      const asStudentA = clientAs(tokenStudentA);
+      const avgRes = await asStudentA.rpc('class_average_scores', { p_assessment_ids: [assessmentId, otherSchoolAssessmentId] });
+      expect(avgRes.error).toBeNull();
+      expect(avgRes.data).toHaveLength(1); // the School B id contributes nothing
+      const row = avgRes.data![0] as { assessment_id: string; avg_score: number; student_count: number };
+      expect(row.assessment_id).toBe(assessmentId);
+      expect(Number(row.avg_score)).toBe(70);
+      expect(row.student_count).toBe(2);
+      // Only the aggregate shape — no student_id/score keys leak through.
+      expect(Object.keys(row).sort()).toEqual(['assessment_id', 'avg_score', 'student_count']);
+
+      // The parent's own linked child (studentA) — fine.
+      const asParent = clientAs(parent.token);
+      expect((await asParent.from('grades').select('id').eq('student_id', studentAId)).data).toHaveLength(1);
+      // The classmate is NOT this parent's child — direct RLS blocks it, the
+      // same protection the parent/grades page's studentId param now also
+      // validates against before ever issuing this query.
+      expect((await asParent.from('grades').select('id').eq('student_id', classmateId)).data).toEqual([]);
+    } finally {
+      await admin.from('guardians').delete().eq('id', guardianId);
+      await admin.from('grades').delete().eq('assessment_id', assessmentId);
+      await admin.from('assessments').delete().eq('id', assessmentId);
+      await admin.from('students').delete().eq('id', classmateId);
+      await admin.from('terms').delete().eq('id', termId);
+      await admin.from('subjects').delete().eq('id', subjectId);
+      await admin.from('grades').delete().eq('assessment_id', otherSchoolAssessmentId);
+      await admin.from('assessments').delete().eq('id', otherSchoolAssessmentId);
+      await admin.from('terms').delete().eq('id', termBId);
+      await admin.from('subjects').delete().eq('id', subjectBId);
+    }
   });
 });

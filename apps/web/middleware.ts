@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { ASSIST_MODE_COOKIE, verifyAssistTokenEdge } from '@/lib/assistMode';
 
 const ROLE_HOME: Record<string, string> = {
   ADMIN: '/admin',
@@ -72,6 +73,16 @@ export async function middleware(request: NextRequest) {
     const expectedPath = role ? ROLE_HOME[role]?.slice(1) : null;
 
     if (role && expectedPath && roleFromPath !== expectedPath) {
+      // Exception: a SUPER_ADMIN with a valid, unexpired assist-mode token
+      // is deliberately let through to /admin/* instead of bounced back to
+      // /super-admin — that's the entire point of assist mode. An expired
+      // or missing token falls through to the normal redirect, which is
+      // exactly "expired grant blocks the frontend and forces exit."
+      if (role === 'SUPER_ADMIN' && roleFromPath === 'admin') {
+        const assistToken = request.cookies.get(ASSIST_MODE_COOKIE)?.value;
+        const claims = await verifyAssistTokenEdge(assistToken);
+        if (claims) return response;
+      }
       return NextResponse.redirect(new URL(ROLE_HOME[role]!, request.url));
     }
   }

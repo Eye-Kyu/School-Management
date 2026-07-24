@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { SuperAdminService } from '../super-admin/super-admin.service';
 import type { CreatePrivilegedAccessGrantInput, PrivilegedAccessScope } from '@school-manager/types';
+import type { AssistModeClaims } from '../common/assist-mode';
 
 const GRANT_COLUMNS =
   'id, super_admin_user_id, target_school_id, reason, reference, access_level, scopes, status, expires_at, ended_at, created_at, school:schools(id, name)';
@@ -27,6 +29,7 @@ export class PlatformPrivilegedAccessService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly superAdmin: SuperAdminService,
+    private readonly jwt: JwtService,
   ) {}
 
   private async resolveCaller(callerAuthId: string) {
@@ -173,6 +176,78 @@ export class PlatformPrivilegedAccessService {
         metadata: {},
       });
     }
+
+    return { ok: true };
+  }
+
+  /**
+   * Mints the assist-mode JWT — the ONLY way a SUPER_ADMIN gets to actually
+   * browse a school's real /admin/* pages (as opposed to the read-only scoped
+   * viewer above). Never extends the underlying grant's expiry; the token's
+   * own exp is capped to whatever time is actually left on the grant.
+   */
+  async enterAssist(grantId: string, callerAuthId: string) {
+    const caller = await this.resolveCaller(callerAuthId);
+    if (!caller) throw new ForbiddenException('Caller not found');
+
+    const { data: grant } = await this.supabase.admin
+      .from('privileged_access_grants')
+      .select('id, super_admin_user_id, target_school_id, scopes, status, expires_at, school:schools(name)')
+      .eq('id', grantId)
+      .maybeSingle();
+    if (!grant) throw new NotFoundException('Grant not found');
+    if (grant.super_admin_user_id !== caller.id) throw new ForbiddenException('Only the grant owner can enter assist mode with it');
+    if (grant.status !== 'ACTIVE') throw new ForbiddenException('Grant is not active');
+
+    const remainingMs = new Date(grant.expires_at).getTime() - Date.now();
+    if (remainingMs <= 0) {
+      await this.supabase.admin.from('privileged_access_grants')
+        .update({ status: 'EXPIRED', updated_at: new Date().toISOString() }).eq('id', grantId).eq('status', 'ACTIVE');
+      throw new ForbiddenException('Grant has expired');
+    }
+
+    const claims: AssistModeClaims = {
+      superAdminUserId: caller.id,
+      targetSchoolId: grant.target_school_id,
+      accessGrantId: grant.id,
+      grantedScopes: grant.scopes,
+    };
+    const token = await this.jwt.signAsync(claims, { expiresIn: Math.floor(remainingMs / 1000) });
+
+    await this.supabase.admin.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: grant.target_school_id,
+      user_id: caller.id,
+      action: 'assist.enter',
+      entity_type: 'privileged_access_grants',
+      entity_id: grant.id,
+      metadata: { super_admin_user_id: caller.id, target_school_id: grant.target_school_id, access_grant_id: grant.id },
+    });
+
+    const school = Array.isArray(grant.school) ? grant.school[0] : grant.school;
+    return {
+      token,
+      schoolId: grant.target_school_id,
+      schoolName: school?.name ?? null,
+      scopes: grant.scopes,
+      expiresAt: grant.expires_at,
+      superAdminName: caller.full_name,
+    };
+  }
+
+  async exitAssist(callerAuthId: string, body: { accessGrantId?: string; targetSchoolId?: string }) {
+    const caller = await this.resolveCaller(callerAuthId);
+    if (!caller) throw new ForbiddenException('Caller not found');
+
+    await this.supabase.admin.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: body.targetSchoolId ?? null,
+      user_id: caller.id,
+      action: 'assist.exit',
+      entity_type: 'privileged_access_grants',
+      entity_id: body.accessGrantId ?? null,
+      metadata: { super_admin_user_id: caller.id, target_school_id: body.targetSchoolId ?? null, access_grant_id: body.accessGrantId ?? null },
+    });
 
     return { ok: true };
   }

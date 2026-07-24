@@ -61,12 +61,15 @@ export default async function StudentQuizzesPage() {
                   </p>
                 </div>
                 {done ? (
-                  <div className="text-right">
+                  <Link href={`/student/quizzes/${q.id}`} className="text-right group">
+                    <p className="text-xs text-slate-400">
+                      Attempt completed on {new Date(attempt.submitted_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}
+                    </p>
                     <span className={`text-sm font-semibold ${pct && parseFloat(pct) >= 70 ? 'text-emerald-600' : pct && parseFloat(pct) >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>
-                      {attempt.score} / {attempt.max_score}
+                      Score: {attempt.score} / {attempt.max_score}
                     </span>
-                    {pct && <p className="text-xs text-slate-400">{pct}%</p>}
-                  </div>
+                    <p className="text-xs text-slate-500 group-hover:underline">Review answers →</p>
+                  </Link>
                 ) : (
                   <Link href={`/student/quizzes/${q.id}`}
                     className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition-colors">

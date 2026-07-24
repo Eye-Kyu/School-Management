@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import QuizTaker from './QuizTaker';
+import QuizReview from './QuizReview';
 
 export default async function TakeQuizPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
@@ -22,10 +23,27 @@ export default async function TakeQuizPage({ params }: { params: { id: string } 
   // Check if already submitted
   const { data: existing } = await supabase
     .from('quiz_attempts')
-    .select('submitted_at, score, max_score')
+    .select('submitted_at, score, max_score, answers')
     .eq('quiz_id', params.id).eq('student_id', student.id).maybeSingle();
 
-  if (existing?.submitted_at) redirect('/student/quizzes');
+  // Once submitted, the attempt is locked — show a read-only review (with
+  // correctness for MCQ, a genuine learning benefit) instead of re-entering
+  // the taker or redirecting away and hiding the student's own answers.
+  if (existing?.submitted_at) {
+    const { data: reviewQuestions } = await supabase
+      .from('quiz_questions')
+      .select('id, position, kind, body, options, points, correct_option_id')
+      .eq('quiz_id', params.id)
+      .order('position');
+
+    return (
+      <QuizReview
+        quizTitle={quiz.title}
+        questions={(reviewQuestions ?? []) as any[]}
+        attempt={existing as any}
+      />
+    );
+  }
 
   const { data: questions } = await supabase
     .from('quiz_questions')

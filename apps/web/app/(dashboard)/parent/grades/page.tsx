@@ -38,7 +38,9 @@ export default async function ParentGradesPage({
     .order('start_date', { ascending: false });
 
   const termId = searchParams.termId ?? currentTerm?.id ?? null;
-  const activeStudentId = searchParams.studentId ?? students[0]?.id ?? null;
+  const requestedStudentId = searchParams.studentId ?? null;
+  const isOwnChild = requestedStudentId != null && students.some((s: any) => s.id === requestedStudentId);
+  const activeStudentId = isOwnChild ? requestedStudentId : students[0]?.id ?? null;
   const activeStudent = students.find((s: any) => s.id === activeStudentId) ?? students[0];
 
   let scores: any[] = [];
