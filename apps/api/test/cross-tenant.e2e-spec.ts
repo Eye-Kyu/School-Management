@@ -2843,10 +2843,23 @@ describe('Cross-tenant isolation (e2e)', () => {
       .send({ subject: 'x', body: 'y', audience: { type: 'ALL' } })
       .expect(403);
 
+    // A dedicated, fully isolated third school+admin — school_subscriptions_
+    // one_active_uidx allows only one ACTIVE row per school, and schoolAId
+    // already carries one from the earlier subscription-switching test (by
+    // design, that test leaves it there deliberately, and a later billing
+    // test relies on it still being present). Using a fresh school sidesteps
+    // that shared, order-dependent state entirely instead of fighting it.
+    const now = new Date().toISOString();
+    const pkgSchoolId = randomUUID();
+    const { error: schoolErr } = await admin.from('schools').insert({ id: pkgSchoolId, name: `Task3 Pkg School ${suffix}`, slug: `task3-pkg-${suffix}`, updated_at: now });
+    if (schoolErr) throw new Error(`fixture: school insert failed: ${schoolErr.message}`);
+    const pkgAdmin = await createExtraUser(pkgSchoolId, 'ADMIN', 'task3-pkg-admin');
+
     const packageId = randomUUID();
     await admin.from('packages').insert({ id: packageId, name: `Task3 Package ${suffix}` });
     const subId = randomUUID();
-    await admin.from('school_subscriptions').insert({ id: subId, school_id: schoolAId, package_id: packageId, status: 'ACTIVE' });
+    const { error: subErr } = await admin.from('school_subscriptions').insert({ id: subId, school_id: pkgSchoolId, package_id: packageId, status: 'ACTIVE' });
+    if (subErr) throw new Error(`fixture: school_subscriptions insert failed: ${subErr.message}`);
 
     const res = await request(app.getHttpServer())
       .post('/super-admin/platform-messages')
@@ -2857,7 +2870,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     const { data: recipients } = await admin.from('platform_message_recipients')
       .select('recipient_school_id').eq('platform_message_id', res.body.id);
     const recipientSchoolIds = (recipients ?? []).map((r) => r.recipient_school_id);
-    expect(recipientSchoolIds).toContain(schoolAId);
+    expect(recipientSchoolIds).toContain(pkgSchoolId);
+    expect(recipientSchoolIds).not.toContain(schoolAId);
     expect(recipientSchoolIds).not.toContain(schoolBId);
 
     await admin.from('platform_message_recipients').delete().eq('platform_message_id', res.body.id);
@@ -2865,6 +2879,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     await admin.from('audit_logs').delete().eq('entity_id', res.body.id);
     await admin.from('school_subscriptions').delete().eq('id', subId);
     await admin.from('packages').delete().eq('id', packageId);
+    await admin.from('users').delete().eq('id', pkgAdmin.userId);
+    await admin.from('schools').delete().eq('id', pkgSchoolId);
   });
 
   it('Task 3: a School Admin sees only their own recipient rows, cannot INSERT messages, and cannot mark another admin\'s row read', async () => {
