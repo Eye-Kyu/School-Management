@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
 
 type RosterStudent = {
@@ -9,6 +11,7 @@ type RosterStudent = {
   admissionNo: string;
   fullName: string;
   attendance: { status: string; note: string | null } | null;
+  excusedByAbsenceRequest: boolean;
 };
 
 type ClassOption = { id: string; name: string; grade_level: number };
@@ -30,22 +33,25 @@ const STATUS_STYLE: Record<Status, string> = {
   EXCUSED: 'bg-slate-50 border-slate-300 text-slate-600',
 };
 
+type CurrentPrefect = { id: string; studentId: string; fullName: string } | null;
+
 export default function AttendanceClient({
   classes,
   selectedClassId,
   date: initialDate,
   roster: initialRoster,
   isClassTeacher,
-  currentPrefectId: initialPrefectId,
+  currentPrefect: initialPrefect,
 }: {
   classes: ClassOption[];
   selectedClassId: string;
   date: string;
   roster: RosterStudent[];
   isClassTeacher: boolean;
-  currentPrefectId: string | null;
+  currentPrefect: CurrentPrefect;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [isPending, startTransition] = useTransition();
 
   const [classId, setClassId] = useState(selectedClassId);
@@ -63,8 +69,12 @@ export default function AttendanceClient({
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportingGrades, setExportingGrades] = useState(false);
-  const [prefectId, setPrefectId] = useState<string | null>(initialPrefectId);
+  const [currentPrefect, setCurrentPrefect] = useState<CurrentPrefect>(initialPrefect);
+  const [showPrefectPicker, setShowPrefectPicker] = useState(false);
+  const [prefectStudentId, setPrefectStudentId] = useState('');
   const [settingPrefect, setSettingPrefect] = useState(false);
+  const [showRemarkReason, setShowRemarkReason] = useState(false);
+  const [remarkReason, setRemarkReason] = useState('');
 
   const roster = initialRoster;
 
@@ -129,15 +139,29 @@ export default function AttendanceClient({
     }
   }
 
-  async function handleSetPrefect(studentId: string | null) {
-    if (!classId) return;
+  async function handleAssignPrefect() {
+    if (!classId || !prefectStudentId) return;
     setSettingPrefect(true);
+    setError('');
     try {
-      await apiFetch(`/classes/${classId}/prefect`, {
-        method: 'PATCH',
-        body: JSON.stringify({ studentId }),
-      });
-      setPrefectId(studentId);
+      if (currentPrefect) {
+        const reason = prompt('Reason for changing the Class Prefect?');
+        if (reason === null) { setSettingPrefect(false); return; }
+        await apiFetch('/prefects/class/change', {
+          method: 'POST',
+          body: JSON.stringify({ classId, studentId: prefectStudentId, termId: null, reason }),
+        });
+      } else {
+        await apiFetch('/prefects/class', {
+          method: 'POST',
+          body: JSON.stringify({ classId, studentId: prefectStudentId, termId: null }),
+        });
+      }
+      const student = roster.find((s) => s.id === prefectStudentId);
+      setCurrentPrefect({ id: '', studentId: prefectStudentId, fullName: student?.fullName ?? '' });
+      setShowPrefectPicker(false);
+      setPrefectStudentId('');
+      startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set prefect');
     } finally {
@@ -145,15 +169,30 @@ export default function AttendanceClient({
     }
   }
 
+  // Approved-absence-covered students are non-editable here (see the amber
+  // banner + disabled row below) — they're excluded from "already
+  // submitted" detection, from the changed-students diff, and from every
+  // payload sent to the API, so they never appear as an "override attempt."
+  const editableRoster = roster.filter((s) => !s.excusedByAbsenceRequest);
+  const hasExisting = editableRoster.some((s) => s.attendance !== null);
+  const changedStudents = editableRoster.filter((s) => (statuses[s.id] ?? 'PRESENT') !== (s.attendance?.status ?? 'PRESENT'));
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!classId || roster.length === 0) return;
+    if (editableRoster.length === 0) { setError('Every student in this class has an approved absence for this day — nothing to mark.'); return; }
+
+    if (hasExisting) {
+      if (changedStudents.length === 0) { setError('No changes selected — pick a different status for at least one student.'); return; }
+      setShowRemarkReason(true);
+      return;
+    }
+
     setSaving(true);
     setError('');
     setSaved(false);
-
     try {
-      const records = roster.map((s) => ({
+      const records = editableRoster.map((s) => ({
         studentId: s.id,
         status: statuses[s.id] ?? 'PRESENT',
       }));
@@ -162,9 +201,36 @@ export default function AttendanceClient({
         body: JSON.stringify({ classId, date, records }),
       });
       setSaved(true);
+      // The teacher dashboard's "Today's Checklist" auto-checks attendance
+      // via a live TanStack Query — invalidate it so it flips immediately
+      // when the teacher navigates back, without a manual page reload.
+      queryClient.invalidateQueries({ queryKey: ['todays-checklist'] });
       startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save attendance');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitRemarkRequest() {
+    if (!classId || remarkReason.trim().length < 20) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch('/attendance/remark-requests', {
+        method: 'POST',
+        body: JSON.stringify({
+          classId, date, reason: remarkReason.trim(),
+          items: changedStudents.map((s) => ({ studentId: s.id, proposedStatus: statuses[s.id] ?? 'PRESENT' })),
+        }),
+      });
+      setSaved(true);
+      setShowRemarkReason(false);
+      setRemarkReason('');
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit re-marking request');
     } finally {
       setSaving(false);
     }
@@ -199,20 +265,44 @@ export default function AttendanceClient({
       </div>
 
       {isClassTeacher && classId && initialRoster.length > 0 && (
-        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex-wrap">
           <label className="text-sm font-medium text-slate-700 shrink-0">Class Prefect</label>
-          <select
-            value={prefectId ?? ''}
-            onChange={(e) => handleSetPrefect(e.target.value || null)}
-            disabled={settingPrefect}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
-          >
-            <option value="">— none —</option>
-            {initialRoster.map((s) => (
-              <option key={s.id} value={s.id}>{s.fullName} ({s.admissionNo})</option>
-            ))}
-          </select>
-          {settingPrefect && <span className="text-xs text-slate-400">Saving…</span>}
+          {!showPrefectPicker ? (
+            currentPrefect ? (
+              <>
+                <span className="text-sm text-slate-800">{currentPrefect.fullName}</span>
+                <button type="button" onClick={() => setShowPrefectPicker(true)}
+                  className="text-xs font-medium text-slate-600 border border-slate-300 px-3 py-1 rounded-md hover:bg-white">
+                  Change Prefect
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => setShowPrefectPicker(true)}
+                className="text-xs font-medium text-white bg-slate-900 px-3 py-1.5 rounded-md hover:bg-slate-700">
+                Assign Class Prefect
+              </button>
+            )
+          ) : (
+            <>
+              <select
+                value={prefectStudentId}
+                onChange={(e) => setPrefectStudentId(e.target.value)}
+                disabled={settingPrefect}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                <option value="">— choose a student —</option>
+                {initialRoster.map((s) => (
+                  <option key={s.id} value={s.id}>{s.fullName} ({s.admissionNo})</option>
+                ))}
+              </select>
+              <button type="button" onClick={handleAssignPrefect} disabled={settingPrefect || !prefectStudentId}
+                className="text-xs font-medium text-white bg-slate-900 px-3 py-1.5 rounded-md hover:bg-slate-700 disabled:opacity-50">
+                {settingPrefect ? 'Saving…' : 'Confirm'}
+              </button>
+              <button type="button" onClick={() => { setShowPrefectPicker(false); setPrefectStudentId(''); }}
+                className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+            </>
+          )}
         </div>
       )}
 
@@ -248,8 +338,31 @@ export default function AttendanceClient({
           )}
           {saved && (
             <p className="text-sm text-green-700 bg-green-50 rounded px-3 py-2">
-              Attendance saved for {roster.length} student{roster.length !== 1 ? 's' : ''}.
+              {hasExisting
+                ? 'Re-marking request submitted. You can apply the change once your Department Head approves it — see "My Requests".'
+                : `Attendance saved for ${editableRoster.length} student${editableRoster.length !== 1 ? 's' : ''}.`}
             </p>
+          )}
+          {hasExisting && !saved && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              Attendance for this day is already submitted. Changing a status below and saving will submit a re-marking request for Department Head approval — it won&apos;t change anything immediately.
+            </p>
+          )}
+          {showRemarkReason && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs text-slate-600">
+                Requesting to change {changedStudents.length} student{changedStudents.length !== 1 ? 's' : ''}. Reason (at least 20 characters):
+              </p>
+              <textarea value={remarkReason} onChange={(e) => setRemarkReason(e.target.value)} rows={2} minLength={20}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none" />
+              <div className="flex gap-2">
+                <button type="button" onClick={submitRemarkRequest} disabled={saving || remarkReason.trim().length < 20}
+                  className="text-xs font-medium bg-slate-900 text-white px-3 py-1.5 rounded-md disabled:opacity-50">
+                  {saving ? 'Submitting…' : 'Submit request'}
+                </button>
+                <button type="button" onClick={() => setShowRemarkReason(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+              </div>
+            </div>
           )}
 
           {/* Roster table */}
@@ -269,12 +382,16 @@ export default function AttendanceClient({
               <tbody className="divide-y divide-slate-100">
                 {roster.map((student) => {
                   const current = statuses[student.id] ?? 'PRESENT';
+                  const locked = student.excusedByAbsenceRequest;
                   return (
-                    <tr key={student.id} className="hover:bg-slate-50">
+                    <tr key={student.id} className={locked ? 'bg-slate-50 text-slate-400' : 'hover:bg-slate-50'}>
                       <td className="px-4 py-2.5 font-medium">
                         {student.fullName}
-                        {prefectId === student.id && (
-                          <span className="ml-2 text-xs bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">Prefect</span>
+                        {currentPrefect?.studentId === student.id && (
+                          <Badge variant="classPrefect" className="ml-2">Prefect</Badge>
+                        )}
+                        {locked && (
+                          <Badge variant="secondary" className="ml-2">Approved absence</Badge>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-slate-500 text-xs">{student.admissionNo}</td>
@@ -285,8 +402,9 @@ export default function AttendanceClient({
                             name={`status-${student.id}`}
                             value={s}
                             checked={current === s}
+                            disabled={locked}
                             onChange={() => setStatus(student.id, s)}
-                            className="accent-slate-700"
+                            className="accent-slate-700 disabled:opacity-40"
                           />
                         </td>
                       ))}
@@ -304,7 +422,7 @@ export default function AttendanceClient({
               <button
                 key={s}
                 type="button"
-                onClick={() => setStatuses(Object.fromEntries(roster.map((st) => [st.id, s])))}
+                onClick={() => setStatuses((prev) => ({ ...prev, ...Object.fromEntries(editableRoster.map((st) => [st.id, s])) }))}
                 className={`px-2 py-0.5 rounded border text-xs ${STATUS_STYLE[s]}`}
               >
                 {STATUS_LABEL[s]}
@@ -315,11 +433,11 @@ export default function AttendanceClient({
           <div className="flex items-center gap-3 flex-wrap">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || (hasExisting && changedStudents.length === 0)}
               className="bg-slate-900 text-white px-5 py-2 rounded-md text-sm font-medium
                          hover:bg-slate-700 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save attendance'}
+              {saving ? 'Saving…' : hasExisting ? 'Request Re-marking' : 'Save attendance'}
             </button>
             <button
               type="button"

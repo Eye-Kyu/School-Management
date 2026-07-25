@@ -2,6 +2,7 @@ import './globals.css';
 import * as Sentry from '@sentry/nextjs';
 import type { Metadata, Viewport } from 'next';
 import { PostHogProvider } from '@/components/PostHogProvider';
+import { QueryProvider } from '@/components/QueryProvider';
 
 export function generateMetadata(): Metadata {
   return {
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <PostHogProvider>{children}</PostHogProvider>
+        <PostHogProvider>
+          <QueryProvider>{children}</QueryProvider>
+        </PostHogProvider>
       </body>
     </html>
   );

@@ -132,6 +132,29 @@ describe('Cross-tenant isolation (e2e)', () => {
     ]);
     if (schoolErr) throw new Error(`School insert failed: ${schoolErr.message}`);
 
+    // Real schools only ever get here via SuperAdminService.createSchool()/
+    // onboardSchool() (which seed this) or pre-date the prefect_powers table
+    // entirely (backfilled once by 20260725000061_prefect_powers.sql's own
+    // migration-time INSERT) — this fixture bypasses both, via a raw insert
+    // above, so it must seed the same 8 defaults itself or every
+    // prefect-power-gated action would 403 against an empty table.
+    const defaultPrefectPowers: Array<{ power_code: string; applies_to: 'CLASS' | 'SCHOOL' }> = [
+      { power_code: 'view_class_behavior_leaderboard', applies_to: 'CLASS' },
+      { power_code: 'compose_message_to_class_teacher', applies_to: 'CLASS' },
+      { power_code: 'report_behavior_incident', applies_to: 'CLASS' },
+      { power_code: 'view_class_attendance_summary', applies_to: 'CLASS' },
+      { power_code: 'view_class_timetable_detailed', applies_to: 'CLASS' },
+      { power_code: 'view_school_behavior_leaderboard_full', applies_to: 'SCHOOL' },
+      { power_code: 'compose_message_to_admin', applies_to: 'SCHOOL' },
+      { power_code: 'report_behavior_incident_school_wide', applies_to: 'SCHOOL' },
+    ];
+    const { error: powersErr } = await admin.from('prefect_powers').insert(
+      [schoolAId, schoolBId].flatMap((schoolId) =>
+        defaultPrefectPowers.map((p) => ({ id: randomUUID(), school_id: schoolId, power_code: p.power_code, applies_to: p.applies_to, enabled: true })),
+      ),
+    );
+    if (powersErr) throw new Error(`Prefect powers seed failed: ${powersErr.message}`);
+
     // 4. Helper: create an auth user + public users row, return { authId, userId, token }
     async function seedUser(schoolId: string | null, role: 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'SUPER_ADMIN', label: string) {
       const email = `${label}-${suffix}@test-isolation.internal`;
@@ -3324,6 +3347,1060 @@ describe('Cross-tenant isolation (e2e)', () => {
       await admin.from('assessments').delete().eq('id', otherSchoolAssessmentId);
       await admin.from('terms').delete().eq('id', termBId);
       await admin.from('subjects').delete().eq('id', subjectBId);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 1: Prefects
+  // ---------------------------------------------------------------------------
+
+  it('Task 1: a Class Teacher can assign a Class Prefect for their own class, but not for another class', async () => {
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+    try {
+      const res = await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, studentId: studentAId, termId: null })
+        .expect(201);
+      expect(res.body.student_id).toBe(studentAId);
+
+      await admin.from('class_prefects').delete().eq('id', res.body.id);
+
+      // Not the class teacher of classB.
+      await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classBId, studentId: studentBId, termId: null })
+        .expect(403);
+    } finally {
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+    }
+  });
+
+  it('Task 1: a class cannot have two active prefects at once (uniqueness enforced)', async () => {
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+    const otherStudent = await createExtraUser(schoolAId, 'STUDENT', 'task1-uniq-student');
+    const otherStudentId = randomUUID();
+    const now = new Date().toISOString();
+    await admin.from('students').insert({ id: otherStudentId, school_id: schoolAId, user_id: otherStudent.userId, current_class_id: classAId, admission_no: `UNIQ-${suffix}`, updated_at: now });
+
+    let firstId: string | undefined;
+    try {
+      const first = await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, studentId: studentAId, termId: null })
+        .expect(201);
+      firstId = first.body.id;
+
+      await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, studentId: otherStudentId, termId: null })
+        .expect(400);
+    } finally {
+      if (firstId) await admin.from('class_prefects').delete().eq('id', firstId);
+      await admin.from('students').delete().eq('id', otherStudentId);
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+    }
+  });
+
+  it('Task 1: an Admin cannot assign a Class Prefect directly, but can assign a School Prefect (non-admin cannot)', async () => {
+    await request(app.getHttpServer())
+      .post('/prefects/class')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ classId: classAId, studentId: studentAId, termId: null })
+      .expect(403);
+
+    const res = await request(app.getHttpServer())
+      .post('/prefects/school')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ studentId: studentAId, roleTitle: 'Head Boy', termId: null })
+      .expect(201);
+
+    try {
+      await request(app.getHttpServer())
+        .post('/prefects/school')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ studentId: studentAId, roleTitle: 'Head Boy', termId: null })
+        .expect(403);
+    } finally {
+      await admin.from('school_prefects').delete().eq('id', res.body.id);
+    }
+  });
+
+  it('Task 1: a disabled power blocks the action even with an active prefect record; revoking blocks it too', async () => {
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+    const assign = await request(app.getHttpServer())
+      .post('/prefects/class')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, studentId: studentAId, termId: null })
+      .expect(201);
+    const prefectId = assign.body.id;
+
+    try {
+      // Power enabled (seeded default) — report succeeds.
+      const ok = await request(app.getHttpServer())
+        .post('/prefects/behavior-incidents')
+        .set('Authorization', `Bearer ${tokenStudentA}`)
+        .send({ studentId: studentAId, category: 'other', description: 'A perfectly ordinary twenty-plus character report.' })
+        .expect(201);
+      await admin.from('behavior_incident_reports').delete().eq('id', ok.body.id);
+
+      // Disable the power — same active prefect, now blocked.
+      await admin.from('prefect_powers').update({ enabled: false }).eq('school_id', schoolAId).eq('power_code', 'report_behavior_incident');
+      await request(app.getHttpServer())
+        .post('/prefects/behavior-incidents')
+        .set('Authorization', `Bearer ${tokenStudentA}`)
+        .send({ studentId: studentAId, category: 'other', description: 'This one should be blocked by the disabled power.' })
+        .expect(403);
+      await admin.from('prefect_powers').update({ enabled: true }).eq('school_id', schoolAId).eq('power_code', 'report_behavior_incident');
+
+      // Revoke the prefect record — now blocked regardless of the power being re-enabled.
+      await request(app.getHttpServer())
+        .post(`/prefects/class/${prefectId}/revoke`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ reason: 'e2e test revoke' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/prefects/behavior-incidents')
+        .set('Authorization', `Bearer ${tokenStudentA}`)
+        .send({ studentId: studentAId, category: 'other', description: 'This one should be blocked since the prefect was revoked.' })
+        .expect(403);
+    } finally {
+      await admin.from('prefect_powers').update({ enabled: true }).eq('school_id', schoolAId).eq('power_code', 'report_behavior_incident');
+      await admin.from('class_prefects').delete().eq('id', prefectId);
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+    }
+  });
+
+  it('Task 1: cross-tenant — a School B teacher cannot assign a School A student as their class prefect, and prefect lists never leak across schools', async () => {
+    await admin.from('teachers').update({ is_class_teacher_of: classBId }).eq('id', teacherBTeacherId);
+    try {
+      // classBId is really teacherB's class, but studentAId belongs to School
+      // A — teacherB's own RLS-scoped read of `students` can't see a
+      // cross-tenant row at all, so the service's own student lookup comes
+      // back empty and this 404s ("Student not found"), not 400 — the same
+      // "the cross-school lookup naturally fails via RLS" shape as Task 2's
+      // cross-tenant department-head test, just surfacing a 404 here since
+      // it's a students-table lookup rather than a teachers-table one.
+      await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherB}`)
+        .send({ classId: classBId, studentId: studentAId, termId: null })
+        .expect(404);
+
+      // A real School A prefect record must never appear in a School B list.
+      await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+      const assign = await request(app.getHttpServer())
+        .post('/prefects/class')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, studentId: studentAId, termId: null })
+        .expect(201);
+      try {
+        const listB = await clientAs(tokenB).from('class_prefects').select('id').eq('id', assign.body.id);
+        expect(listB.data).toEqual([]);
+      } finally {
+        await admin.from('class_prefects').delete().eq('id', assign.body.id);
+        await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+      }
+    } finally {
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherBTeacherId);
+    }
+  });
+
+  it('Task 1: term rollover auto-revokes term-bound prefects and leaves "until revoked" ones alone', async () => {
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const endingTermId = randomUUID();
+    const nextTermId = randomUUID();
+    await admin.from('terms').insert([
+      { id: endingTermId, school_id: schoolAId, name: `Ending Term ${suffix}`, start_date: today, end_date: today, is_current: true },
+      { id: nextTermId, school_id: schoolAId, name: `Next Term ${suffix}`, start_date: today, end_date: today, is_current: false },
+    ]);
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
+    const termBound = await request(app.getHttpServer())
+      .post('/prefects/class')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, studentId: studentAId, termId: endingTermId })
+      .expect(201);
+
+    const permanent = await request(app.getHttpServer())
+      .post('/prefects/school')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ studentId: studentAId, roleTitle: 'Permanent Role', termId: null })
+      .expect(201);
+
+    try {
+      await request(app.getHttpServer())
+        .patch(`/terms/${nextTermId}/set-current`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const { data: termBoundRow } = await admin.from('class_prefects').select('revoked_at, revocation_reason').eq('id', termBound.body.id).single();
+      expect(termBoundRow?.revoked_at).toBeTruthy();
+      expect(termBoundRow?.revocation_reason).toBe('Term ended');
+
+      const { data: permanentRow } = await admin.from('school_prefects').select('revoked_at').eq('id', permanent.body.id).single();
+      expect(permanentRow?.revoked_at).toBeNull();
+
+      const { data: auditRow } = await admin.from('audit_logs').select('action, metadata').eq('action', 'prefect.term_auto_revoke').eq('school_id', schoolAId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      expect(auditRow?.action).toBe('prefect.term_auto_revoke');
+      expect((auditRow?.metadata as any)?.count).toBeGreaterThanOrEqual(1);
+    } finally {
+      await admin.from('class_prefects').delete().eq('id', termBound.body.id);
+      await admin.from('school_prefects').delete().eq('id', permanent.body.id);
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+      await admin.from('terms').delete().in('id', [endingTermId, nextTermId]);
+      await admin.from('audit_logs').delete().eq('action', 'prefect.term_auto_revoke').eq('school_id', schoolAId);
+    }
+  });
+
+  it('Task 1: a behavior incident report is visible only to the reported student\'s Class Teacher and School Admins', async () => {
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+    const assign = await request(app.getHttpServer())
+      .post('/prefects/class')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, studentId: studentAId, termId: null })
+      .expect(201);
+
+    const otherTeacher = await createExtraUser(schoolAId, 'TEACHER', 'task1-bir-other-teacher');
+    const otherTeacherId = randomUUID();
+    await admin.from('teachers').insert({ id: otherTeacherId, school_id: schoolAId, user_id: otherTeacher.userId, staff_no: `BIR-${suffix}`, updated_at: new Date().toISOString() });
+
+    let reportId: string | undefined;
+    try {
+      const submitted = await request(app.getHttpServer())
+        .post('/prefects/behavior-incidents')
+        .set('Authorization', `Bearer ${tokenStudentA}`)
+        .send({ studentId: studentAId, category: 'citizenship', description: 'Reported for cross-tenant visibility testing purposes.' })
+        .expect(201);
+      reportId = submitted.body.id;
+
+      // The reported student's own Class Teacher sees it.
+      const asClassTeacher = await clientAs(tokenTeacherA).from('behavior_incident_reports').select('id').eq('id', reportId);
+      expect(asClassTeacher.data).toHaveLength(1);
+
+      // An unrelated teacher in the same school does not.
+      const asOtherTeacher = await clientAs(otherTeacher.token).from('behavior_incident_reports').select('id').eq('id', reportId);
+      expect(asOtherTeacher.data).toEqual([]);
+
+      // School Admin sees it.
+      const asAdmin = await clientAs(tokenA).from('behavior_incident_reports').select('id').eq('id', reportId);
+      expect(asAdmin.data).toHaveLength(1);
+
+      // School B admin never sees it (cross-tenant).
+      const asAdminB = await clientAs(tokenB).from('behavior_incident_reports').select('id').eq('id', reportId);
+      expect(asAdminB.data).toEqual([]);
+    } finally {
+      if (reportId) await admin.from('behavior_incident_reports').delete().eq('id', reportId);
+      await admin.from('teachers').delete().eq('id', otherTeacherId);
+      await admin.from('class_prefects').delete().eq('id', assign.body.id);
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 2: Department Heads
+  // ---------------------------------------------------------------------------
+
+  it('Task 2: Admin can set a Teacher belonging to the department as its head; rejects a teacher who does not belong, and rejects heading two departments', async () => {
+    const now = new Date().toISOString();
+    const deptId = randomUUID();
+    const otherDeptId = randomUUID();
+    await admin.from('departments').insert([
+      { id: deptId, school_id: schoolAId, name: `Sciences ${suffix}`, updated_at: now },
+      { id: otherDeptId, school_id: schoolAId, name: `Arts ${suffix}`, updated_at: now },
+    ]);
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const teacherAUserId = teacherARow!.user_id;
+    await admin.from('teachers').update({ department_id: deptId }).eq('id', teacherATeacherId);
+
+    const outsider = await createExtraUser(schoolAId, 'TEACHER', 'task2-outsider');
+    const outsiderTeacherId = randomUUID();
+    await admin.from('teachers').insert({ id: outsiderTeacherId, school_id: schoolAId, user_id: outsider.userId, staff_no: `OUT-${suffix}`, updated_at: now });
+
+    try {
+      const res = await request(app.getHttpServer())
+        .patch(`/departments/${deptId}/head`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherUserId: teacherAUserId })
+        .expect(200);
+      expect(res.body.department_head_user_id).toBe(teacherAUserId);
+
+      // Outsider doesn't belong to deptId.
+      await request(app.getHttpServer())
+        .patch(`/departments/${deptId}/head`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherUserId: outsider.userId })
+        .expect(400);
+
+      // teacherA already heads deptId — cannot also head otherDeptId, even
+      // though they do belong to it (isolating "already a head elsewhere"
+      // from the "must belong to this department" rule tested above).
+      await admin.from('teachers').update({ department_id: otherDeptId }).eq('id', teacherATeacherId);
+      await request(app.getHttpServer())
+        .patch(`/departments/${otherDeptId}/head`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherUserId: teacherAUserId })
+        .expect(400);
+
+      // Non-admin cannot call this endpoint at all.
+      await request(app.getHttpServer())
+        .patch(`/departments/${deptId}/head`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ teacherUserId: teacherAUserId })
+        .expect(403);
+
+      const { data: auditRow } = await admin.from('audit_logs').select('metadata').eq('action', 'department.set_head').eq('entity_id', deptId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      expect((auditRow?.metadata as any)?.new_head_user_id).toBe(teacherAUserId);
+    } finally {
+      await admin.from('audit_logs').delete().eq('action', 'department.set_head').in('entity_id', [deptId, otherDeptId]);
+      await admin.from('teachers').update({ department_id: null }).eq('id', teacherATeacherId);
+      await admin.from('teachers').delete().eq('id', outsiderTeacherId);
+      await admin.from('departments').delete().in('id', [deptId, otherDeptId]);
+    }
+  });
+
+  it('Task 2: cross-tenant — a School A admin cannot set a School B teacher as any department head', async () => {
+    const now = new Date().toISOString();
+    const deptId = randomUUID();
+    await admin.from('departments').insert({ id: deptId, school_id: schoolAId, name: `CrossDept ${suffix}`, updated_at: now });
+    const { data: teacherBRow } = await admin.from('teachers').select('user_id').eq('id', teacherBTeacherId).single();
+
+    try {
+      await request(app.getHttpServer())
+        .patch(`/departments/${deptId}/head`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ teacherUserId: teacherBRow!.user_id })
+        .expect(400);
+    } finally {
+      await admin.from('departments').delete().eq('id', deptId);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 3: Attendance re-marking approval workflow
+  // ---------------------------------------------------------------------------
+
+  it('Task 3: same-day re-marking without an approved request is rejected; the full request -> approve -> apply flow succeeds', async () => {
+    const now = new Date().toISOString();
+    // Not the real "today" — beforeAll seeds a permanent attendanceAId
+    // fixture for (classAId, studentAId, today), which would make the
+    // "first submission" below hit the update/re-marking path instead of a
+    // clean insert. A distinct future date sidesteps that collision.
+    const today = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+    const subjectId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Remark Subject ${suffix}`, code: 'RMK', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectId, teacher_id: teacherATeacherId });
+
+    const deptId = randomUUID();
+    await admin.from('departments').insert({ id: deptId, school_id: schoolAId, name: `Remark Dept ${suffix}`, updated_at: now });
+    const head = await createExtraUser(schoolAId, 'TEACHER', 'task3-head');
+    const headTeacherId = randomUUID();
+    await admin.from('teachers').insert({ id: headTeacherId, school_id: schoolAId, user_id: head.userId, department_id: deptId, staff_no: `HEAD-${suffix}`, updated_at: now });
+    await admin.from('departments').update({ department_head_user_id: head.userId }).eq('id', deptId);
+    await admin.from('teachers').update({ department_id: deptId }).eq('id', teacherATeacherId);
+
+    try {
+      // First submission — no existing record yet, goes straight through.
+      await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'PRESENT' }] })
+        .expect(201);
+
+      // Re-marking without an approved request: rejected with a clear message.
+      const blocked = await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'ABSENT' }] })
+        .expect(403);
+      expect(blocked.body.message).toMatch(/already been submitted/i);
+
+      // Submit a re-marking request.
+      const reqRes = await request(app.getHttpServer())
+        .post('/attendance/remark-requests')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, reason: 'Marked present by mistake, student was actually absent all day.', items: [{ studentId: studentAId, proposedStatus: 'ABSENT' }] })
+        .expect(201);
+      const requestId = reqRes.body.id;
+
+      // The requester cannot approve their own request, even if they somehow had access.
+      // (Not directly testable via the head's token here since teacherA isn't the head —
+      // covered by the dedicated "Class Teacher's own re-marking" test below.)
+
+      // The Department Head approves it.
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${requestId}`)
+        .set('Authorization', `Bearer ${head.token}`)
+        .send({ action: 'APPROVE' })
+        .expect(200);
+
+      // Applying a DIFFERENT change than requested is rejected.
+      await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'LATE' }] })
+        .expect(403);
+
+      // Applying exactly the approved change succeeds.
+      await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'ABSENT' }] })
+        .expect(201);
+
+      const { data: finalRecord } = await admin.from('attendance_records').select('status').eq('class_id', classAId).eq('student_id', studentAId).eq('date', today).single();
+      expect(finalRecord?.status).toBe('ABSENT');
+
+      // Single-use: the same approval cannot authorize a second change.
+      await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'LATE' }] })
+        .expect(403);
+
+      const { data: applyAudit } = await admin.from('audit_logs').select('action').eq('entity_id', requestId).eq('action', 'attendance.remark_apply').maybeSingle();
+      expect(applyAudit?.action).toBe('attendance.remark_apply');
+    } finally {
+      await admin.from('attendance_records').delete().eq('class_id', classAId).eq('student_id', studentAId).eq('date', today);
+      await admin.from('attendance_remark_request_items').delete().in('request_id', (await admin.from('attendance_remark_requests').select('id').eq('class_id', classAId).eq('date', today)).data?.map((r) => r.id) ?? []);
+      await admin.from('attendance_remark_requests').delete().eq('class_id', classAId).eq('date', today);
+      await admin.from('teachers').update({ department_id: null }).eq('id', teacherATeacherId);
+      await admin.from('teachers').delete().eq('id', headTeacherId);
+      await admin.from('departments').delete().eq('id', deptId);
+      await admin.from('subject_assignments').delete().eq('subject_id', subjectId);
+      await admin.from('subjects').delete().eq('id', subjectId);
+    }
+  });
+
+  it('Task 3: a denied request shows the reason and cannot be applied; an expired approval cannot be applied either', async () => {
+    const now = new Date().toISOString();
+    const today = new Date(Date.now() + 31 * 86_400_000).toISOString().slice(0, 10);
+    const subjectId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Remark Subject 2 ${suffix}`, code: 'RM2', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectId, teacher_id: teacherATeacherId });
+
+    await request(app.getHttpServer())
+      .post('/attendance')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'PRESENT' }] })
+      .expect(201);
+
+    const deniedReq = await request(app.getHttpServer())
+      .post('/attendance/remark-requests')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, date: today, reason: 'Testing the denial path end to end for coverage.', items: [{ studentId: studentAId, proposedStatus: 'LATE' }] })
+      .expect(201);
+
+    const expiredReq = await request(app.getHttpServer())
+      .post('/attendance/remark-requests')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, date: today, reason: 'Testing the expiry path end to end for coverage.', items: [{ studentId: studentAId, proposedStatus: 'EXCUSED' }] })
+      .expect(201);
+
+    try {
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${deniedReq.body.id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ action: 'DENY', denialReason: 'Not a valid reason to change attendance.' })
+        .expect(200);
+
+      const { data: deniedRow } = await admin.from('attendance_remark_requests').select('status, denial_reason').eq('id', deniedReq.body.id).single();
+      expect(deniedRow?.status).toBe('DENIED');
+      expect(deniedRow?.denial_reason).toBe('Not a valid reason to change attendance.');
+
+      await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'LATE' }] })
+        .expect(403);
+
+      // Approve the second request, then force its expiry into the past.
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${expiredReq.body.id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ action: 'APPROVE' })
+        .expect(200);
+      await admin.from('attendance_remark_requests').update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq('id', expiredReq.body.id);
+
+      const expiredAttempt = await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'EXCUSED' }] })
+        .expect(403);
+      expect(expiredAttempt.body.message).toMatch(/expired/i);
+    } finally {
+      await admin.from('attendance_records').delete().eq('class_id', classAId).eq('student_id', studentAId).eq('date', today);
+      await admin.from('attendance_remark_request_items').delete().in('request_id', [deniedReq.body.id, expiredReq.body.id]);
+      await admin.from('attendance_remark_requests').delete().in('id', [deniedReq.body.id, expiredReq.body.id]);
+      await admin.from('subject_assignments').delete().eq('subject_id', subjectId);
+      await admin.from('subjects').delete().eq('id', subjectId);
+    }
+  });
+
+  it('Task 3: cross-tenant — a Department Head at School A never sees or can act on requests from School B; a Class Teacher\'s own re-marking routes through their Department Head, not self-approval', async () => {
+    const now = new Date().toISOString();
+    // Also avoids the beforeAll-seeded attendanceBId fixture for
+    // (classBId, studentBId, today) — see the first Task 3 test's comment.
+    const today = new Date(Date.now() + 32 * 86_400_000).toISOString().slice(0, 10);
+
+    // School A: teacherA is both the class teacher AND belongs to a department,
+    // to prove their own re-marking request routes to the head, not themself.
+    const subjectId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Remark Subject 3 ${suffix}`, code: 'RM3', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectId, teacher_id: teacherATeacherId });
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
+    const deptId = randomUUID();
+    await admin.from('departments').insert({ id: deptId, school_id: schoolAId, name: `Remark Dept 3 ${suffix}`, updated_at: now });
+    const head = await createExtraUser(schoolAId, 'TEACHER', 'task3-head2');
+    const headTeacherId = randomUUID();
+    await admin.from('teachers').insert({ id: headTeacherId, school_id: schoolAId, user_id: head.userId, department_id: deptId, staff_no: `HEAD2-${suffix}`, updated_at: now });
+    await admin.from('departments').update({ department_head_user_id: head.userId }).eq('id', deptId);
+    await admin.from('teachers').update({ department_id: deptId }).eq('id', teacherATeacherId);
+
+    // School B: an equivalent request, to prove no cross-tenant visibility.
+    const subjectBId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectBId, school_id: schoolBId, name: `Remark Subject B ${suffix}`, code: 'RMB', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classBId, subject_id: subjectBId, teacher_id: teacherBTeacherId });
+
+    await request(app.getHttpServer())
+      .post('/attendance')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, date: today, records: [{ studentId: studentAId, status: 'PRESENT' }] })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/attendance')
+      .set('Authorization', `Bearer ${tokenTeacherB}`)
+      .send({ classId: classBId, date: today, records: [{ studentId: studentBId, status: 'PRESENT' }] })
+      .expect(201);
+
+    const reqA = await request(app.getHttpServer())
+      .post('/attendance/remark-requests')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .send({ classId: classAId, date: today, reason: 'Class teacher re-marking their own class attendance record.', items: [{ studentId: studentAId, proposedStatus: 'LATE' }] })
+      .expect(201);
+    const reqB = await request(app.getHttpServer())
+      .post('/attendance/remark-requests')
+      .set('Authorization', `Bearer ${tokenTeacherB}`)
+      .send({ classId: classBId, date: today, reason: 'School B teacher requesting an unrelated re-mark.', items: [{ studentId: studentBId, proposedStatus: 'LATE' }] })
+      .expect(201);
+
+    try {
+      // The School A Department Head sees School A's request...
+      const listAsHead = await request(app.getHttpServer())
+        .get('/attendance/remark-requests')
+        .set('Authorization', `Bearer ${head.token}`)
+        .expect(200);
+      expect((listAsHead.body as Array<{ id: string }>).map((r) => r.id)).toContain(reqA.body.id);
+      // ...but never School B's.
+      expect((listAsHead.body as Array<{ id: string }>).map((r) => r.id)).not.toContain(reqB.body.id);
+
+      // And cannot act on School B's request even via a direct call.
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${reqB.body.id}`)
+        .set('Authorization', `Bearer ${head.token}`)
+        .send({ action: 'APPROVE' })
+        .expect((res) => { if (res.status !== 403 && res.status !== 404) throw new Error(`expected 403/404, got ${res.status}`); });
+
+      // teacherA (the Class Teacher who filed reqA) cannot approve their own request.
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${reqA.body.id}`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ action: 'APPROVE' })
+        .expect((res) => { if (res.status !== 403 && res.status !== 404) throw new Error(`expected 403/404, got ${res.status}`); });
+
+      // Only the actual Department Head can.
+      await request(app.getHttpServer())
+        .patch(`/attendance/remark-requests/${reqA.body.id}`)
+        .set('Authorization', `Bearer ${head.token}`)
+        .send({ action: 'APPROVE' })
+        .expect(200);
+    } finally {
+      await admin.from('attendance_records').delete().eq('class_id', classAId).eq('student_id', studentAId).eq('date', today);
+      await admin.from('attendance_records').delete().eq('class_id', classBId).eq('student_id', studentBId).eq('date', today);
+      await admin.from('attendance_remark_request_items').delete().in('request_id', [reqA.body.id, reqB.body.id]);
+      await admin.from('attendance_remark_requests').delete().in('id', [reqA.body.id, reqB.body.id]);
+      await admin.from('teachers').update({ department_id: null, is_class_teacher_of: null }).eq('id', teacherATeacherId);
+      await admin.from('teachers').delete().eq('id', headTeacherId);
+      await admin.from('departments').delete().eq('id', deptId);
+      await admin.from('subject_assignments').delete().in('subject_id', [subjectId, subjectBId]);
+      await admin.from('subjects').delete().in('id', [subjectId, subjectBId]);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 4: Approved absence requests -> auto-EXCUSED attendance
+  // ---------------------------------------------------------------------------
+
+  it('Task 4: approved absence auto-marks EXCUSED on the roster, blocks a direct override (audited, silent), and notifies the parent', async () => {
+    const now = new Date().toISOString();
+    const start = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+    const end = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+    const coveredDate = new Date(Date.now() + 6 * 86_400_000).toISOString().slice(0, 10);
+
+    const subjectId = randomUUID();
+    await admin.from('subjects').insert({ id: subjectId, school_id: schoolAId, name: `Absence Subject ${suffix}`, code: 'ABS', updated_at: now });
+    await admin.from('subject_assignments').insert({ id: randomUUID(), class_id: classAId, subject_id: subjectId, teacher_id: teacherATeacherId });
+
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task4-absence-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    const outOfScopeParent = await createExtraUser(schoolAId, 'PARENT', 'task4-absence-outofscope-parent');
+
+    try {
+      // A parent with no link to this student cannot request on their behalf.
+      await request(app.getHttpServer())
+        .post('/absence-requests')
+        .set('Authorization', `Bearer ${outOfScopeParent.token}`)
+        .send({ studentId: studentAId, startDate: start, endDate: end, reason: 'Not actually my child.' })
+        .expect(403);
+
+      const submitRes = await request(app.getHttpServer())
+        .post('/absence-requests')
+        .set('Authorization', `Bearer ${parent.token}`)
+        .send({ studentId: studentAId, startDate: start, endDate: end, reason: 'Family travel out of the country.' })
+        .expect(201);
+      const requestId = submitRes.body.id;
+
+      await request(app.getHttpServer())
+        .patch(`/absence-requests/${requestId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ action: 'APPROVE' })
+        .expect(200);
+
+      const { data: approveAudit } = await admin.from('audit_logs').select('action').eq('entity_id', requestId).eq('action', 'absence.approve').maybeSingle();
+      expect(approveAudit?.action).toBe('absence.approve');
+
+      // The roster auto-marks EXCUSED for every day in range, with no real
+      // attendance_records row ever written for it.
+      const rosterRes = await request(app.getHttpServer())
+        .get(`/attendance/roster?classId=${classAId}&date=${coveredDate}`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .expect(200);
+      const rosterEntry = (rosterRes.body as Array<{ id: string; attendance: { status: string } | null; excusedByAbsenceRequest: boolean }>)
+        .find((r) => r.id === studentAId);
+      expect(rosterEntry?.attendance?.status).toBe('EXCUSED');
+      expect(rosterEntry?.excusedByAbsenceRequest).toBe(true);
+
+      // A direct write attempt for that (student, date) is silently dropped
+      // — the call still succeeds for the rest of the batch (none, here) —
+      // and audited, rather than persisted or hard-rejected.
+      const overrideRes = await request(app.getHttpServer())
+        .post('/attendance')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ classId: classAId, date: coveredDate, records: [{ studentId: studentAId, status: 'ABSENT' }] })
+        .expect(201);
+      expect(overrideRes.body.upserted).toBe(0);
+
+      const { data: writtenRow } = await admin.from('attendance_records').select('id').eq('class_id', classAId).eq('student_id', studentAId).eq('date', coveredDate).maybeSingle();
+      expect(writtenRow).toBeNull();
+
+      const { data: overrideAudit } = await admin.from('audit_logs').select('metadata').eq('action', 'absence.override_attempt').eq('entity_id', classAId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      expect((overrideAudit?.metadata as { studentId?: string; date?: string })?.studentId).toBe(studentAId);
+
+      // The requesting parent was notified of the approval.
+      const { data: parentNotif } = await admin.from('notifications').select('id').eq('recipient_id', parent.userId).eq('type', 'ABSENCE_REQUEST_DECIDED').maybeSingle();
+      expect(parentNotif).toBeTruthy();
+    } finally {
+      await admin.from('absence_requests').delete().eq('student_id', studentAId).eq('start_date', start);
+      await admin.from('guardians').delete().eq('id', guardianId);
+      await admin.from('subject_assignments').delete().eq('subject_id', subjectId);
+      await admin.from('subjects').delete().eq('id', subjectId);
+    }
+  });
+
+  it('Task 4: the Class Teacher can approve too (FYI to Admin), the requesting parent cannot review their own request, denial shows the reason, and it is cross-tenant isolated', async () => {
+    const now = new Date().toISOString();
+    const start = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const end = new Date(Date.now() + 11 * 86_400_000).toISOString().slice(0, 10);
+
+    await admin.from('teachers').update({ is_class_teacher_of: classAId }).eq('id', teacherATeacherId);
+
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'task4-ct-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Father' });
+
+    const { data: adminARow } = await admin.from('users').select('id').eq('email', `admin-a-${suffix}@test-isolation.internal`).single();
+    const adminAUserId = adminARow!.id;
+
+    // A School B absence request, to prove no cross-tenant visibility/action.
+    const parentB = await createExtraUser(schoolBId, 'PARENT', 'task4-ct-parent-b');
+    const guardianBId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianBId, user_id: parentB.userId, student_id: studentBId, relationship: 'Mother' });
+    const submitBRes = await request(app.getHttpServer())
+      .post('/absence-requests')
+      .set('Authorization', `Bearer ${parentB.token}`)
+      .send({ studentId: studentBId, startDate: start, endDate: end, reason: 'School B unrelated absence request.' })
+      .expect(201);
+
+    try {
+      const submitRes = await request(app.getHttpServer())
+        .post('/absence-requests')
+        .set('Authorization', `Bearer ${parent.token}`)
+        .send({ studentId: studentAId, startDate: start, endDate: end, reason: 'Medical appointment out of town.' })
+        .expect(201);
+      const requestId = submitRes.body.id;
+
+      // The requesting parent cannot review their own request.
+      await request(app.getHttpServer())
+        .patch(`/absence-requests/${requestId}`)
+        .set('Authorization', `Bearer ${parent.token}`)
+        .send({ action: 'APPROVE' })
+        .expect((res) => { if (res.status !== 403 && res.status !== 404) throw new Error(`expected 403/404, got ${res.status}`); });
+
+      // The Class Teacher of studentA's class approves — an eligible
+      // approver distinct from Admin.
+      await request(app.getHttpServer())
+        .patch(`/absence-requests/${requestId}`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ action: 'APPROVE' })
+        .expect(200);
+
+      // Admin — the other eligible approver — gets an FYI notification.
+      const { data: adminNotifs } = await admin.from('notifications').select('metadata').eq('recipient_id', adminAUserId).eq('type', 'ABSENCE_REQUEST_DECIDED');
+      const adminFyi = (adminNotifs ?? []).some((n) => (n.metadata as { requestId?: string } | null)?.requestId === requestId);
+      expect(adminFyi).toBe(true);
+
+      // Cross-tenant: School A's Class Teacher never sees or can act on
+      // School B's absence request.
+      const listAsCt = await request(app.getHttpServer())
+        .get('/absence-requests')
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .expect(200);
+      expect((listAsCt.body as Array<{ id: string }>).map((r) => r.id)).not.toContain(submitBRes.body.id);
+
+      await request(app.getHttpServer())
+        .patch(`/absence-requests/${submitBRes.body.id}`)
+        .set('Authorization', `Bearer ${tokenTeacherA}`)
+        .send({ action: 'APPROVE' })
+        .expect((res) => { if (res.status !== 403 && res.status !== 404) throw new Error(`expected 403/404, got ${res.status}`); });
+
+      // A second, denied request shows the reason and is never overlaid.
+      const denyRes = await request(app.getHttpServer())
+        .post('/absence-requests')
+        .set('Authorization', `Bearer ${parent.token}`)
+        .send({ studentId: studentAId, startDate: start, endDate: end, reason: 'Second request for the same range, to be denied.' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .patch(`/absence-requests/${denyRes.body.id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ action: 'DENY', denialReason: 'Overlaps an already-approved request.' })
+        .expect(200);
+      const { data: deniedRow } = await admin.from('absence_requests').select('status, denial_reason').eq('id', denyRes.body.id).single();
+      expect(deniedRow?.status).toBe('DENIED');
+      expect(deniedRow?.denial_reason).toBe('Overlaps an already-approved request.');
+    } finally {
+      await admin.from('teachers').update({ is_class_teacher_of: null }).eq('id', teacherATeacherId);
+      await admin.from('absence_requests').delete().eq('student_id', studentAId).eq('start_date', start);
+      await admin.from('absence_requests').delete().eq('id', submitBRes.body.id);
+      await admin.from('guardians').delete().in('id', [guardianId, guardianBId]);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Notification bubble: regression coverage for the already-correct
+  // "hides entirely at zero" behavior (AvatarDropdown.tsx renders
+  // `{unread > 0 && <span>...}` — nothing in the DOM at zero, not just
+  // hidden). This repo's frontend test setup (vitest, environment: 'node',
+  // no jsdom/testing-library) can't render and inspect that JSX directly, so
+  // these tests instead pin the data contract the bubble's conditional
+  // render depends on: /notifications/unread-count must be exactly 0 for a
+  // genuinely empty inbox, and must accurately track the show/hide
+  // transition end-to-end through the real mark-read path.
+  // ---------------------------------------------------------------------------
+
+  it('Notification bubble: a brand-new user with no activity at all gets an unread count of exactly 0', async () => {
+    const freshUser = await createExtraUser(schoolAId, 'PARENT', 'bubble-fresh-parent');
+    const res = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .expect(200);
+    expect(res.body.count).toBe(0);
+  });
+
+  it('Notification bubble: a new notification takes the count from 0 to 1, and marking it read brings it back to 0', async () => {
+    const freshUser = await createExtraUser(schoolAId, 'TEACHER', 'bubble-cycle-teacher');
+
+    const before = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .expect(200);
+    expect(before.body.count).toBe(0);
+
+    await request(app.getHttpServer())
+      .post('/notifications/test')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .send({ title: 'Bubble regression check', message: 'Should show, then hide once read.' })
+      .expect(201);
+
+    const after = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .expect(200);
+    expect(after.body.count).toBe(1);
+
+    const listRes = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .expect(200);
+    const unreadIds = (listRes.body as Array<{ id: string; is_read: boolean }>).filter((n) => !n.is_read).map((n) => n.id);
+    expect(unreadIds.length).toBe(1);
+
+    await request(app.getHttpServer())
+      .patch('/notifications/read')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .send({ ids: unreadIds })
+      .expect(200);
+
+    const afterRead = await request(app.getHttpServer())
+      .get('/notifications/unread-count')
+      .set('Authorization', `Bearer ${freshUser.token}`)
+      .expect(200);
+    expect(afterRead.body.count).toBe(0);
+  });
+
+  it('Notification bubble: marking one notification read never affects another user\'s count (no cross-user leakage)', async () => {
+    const userOne = await createExtraUser(schoolAId, 'TEACHER', 'bubble-iso-one');
+    const userTwo = await createExtraUser(schoolAId, 'TEACHER', 'bubble-iso-two');
+
+    await request(app.getHttpServer())
+      .post('/notifications/test')
+      .set('Authorization', `Bearer ${userOne.token}`)
+      .send({ title: 'For user one only', message: 'User two must not see this.' })
+      .expect(201);
+
+    const userOneCount = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${userOne.token}`).expect(200);
+    expect(userOneCount.body.count).toBe(1);
+
+    const userTwoCount = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${userTwo.token}`).expect(200);
+    expect(userTwoCount.body.count).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Defensive cross-role audit — regression coverage for the two premises
+  // confirmed still true by code reading: GET /students has no per-role
+  // guard of its own and relies entirely on RLS for scoping (untested for
+  // PARENT specifically until now — only ADMIN cross-tenant cases existed),
+  // and UsersController exposes no `:id`-shaped route at all (only `me`-
+  // scoped ones), so there is no IDOR-shaped endpoint to probe.
+  //
+  // The third originally-requested check — a role-mismatched dashboard
+  // route (e.g. a Teacher hitting /parent) redirects — lives in Next.js
+  // Edge middleware (apps/web/middleware.ts) and needs a running browser
+  // session to exercise; this repo has no Playwright config and the vitest
+  // setup here is `environment: 'node'` with no edge-runtime harness, so it
+  // could not be automated. Verified instead by reading middleware.ts: it
+  // computes `expectedPath` from the caller's own `users.role` and redirects
+  // to `ROLE_HOME[role]` whenever `roleFromPath !== expectedPath` (with a
+  // deliberate, narrow SUPER_ADMIN-assist-mode exception) — logic unchanged
+  // by this PR. Left as a documented follow-up in EXECUTION_PLAN.md rather
+  // than claiming test coverage that doesn't exist.
+  // ---------------------------------------------------------------------------
+
+  it('Defensive audit: a PARENT hitting GET /students only ever sees their own linked children, never the rest of the school', async () => {
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'audit-students-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    // A second student in the same school this parent has no link to.
+    const otherStudentUserId = randomUUID();
+    const otherStudentId = randomUUID();
+    const now = new Date().toISOString();
+    await admin.from('users').insert({ id: otherStudentUserId, school_id: schoolAId, auth_id: randomUUID(), role: 'STUDENT', full_name: `Unlinked Student ${suffix}`, updated_at: now });
+    await admin.from('students').insert({ id: otherStudentId, school_id: schoolAId, user_id: otherStudentUserId, admission_no: `AUD-${suffix}`, updated_at: now });
+
+    try {
+      const res = await request(app.getHttpServer())
+        .get('/students')
+        .set('Authorization', `Bearer ${parent.token}`)
+        .expect(200);
+      const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+      expect(ids).toContain(studentAId);
+      expect(ids).not.toContain(otherStudentId);
+      expect(ids).not.toContain(studentBId); // cross-tenant, doubly so
+    } finally {
+      await admin.from('students').delete().eq('id', otherStudentId);
+      await admin.from('users').delete().eq('id', otherStudentUserId);
+      await admin.from('guardians').delete().eq('id', guardianId);
+    }
+  });
+
+  it('Defensive audit: there is no /users/:id-shaped route — a Student cannot probe another user\'s profile by ID', async () => {
+    const { data: someOtherUser } = await admin.from('users').select('id').eq('school_id', schoolAId).neq('role', 'STUDENT').limit(1).single();
+
+    const res = await request(app.getHttpServer())
+      .get(`/users/${someOtherUser!.id}`)
+      .set('Authorization', `Bearer ${tokenStudentA}`);
+    // Whatever it does, it must not leak another user's profile: either the
+    // route doesn't exist (404, the actual current behavior) or it would
+    // have to be scoped/forbidden (403/401) — 200 with someone else's data
+    // is the only unacceptable outcome.
+    expect([401, 403, 404]).toContain(res.status);
+    if (res.status === 200) throw new Error('GET /users/:id must never return 200 with another user\'s data');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bug fix: SuperAdmin broadcast not appearing on the School Admin dashboard
+  // ---------------------------------------------------------------------------
+  // Root cause (confirmed by reading, then proven here empirically): the read
+  // path itself — RLS, the notifications-page merge query, mark-read, dismiss
+  // — was already correct. The actual gap was the admin dashboard having no
+  // platform-message widget at all. This test proves the underlying read
+  // path end to end using the EXACT query shape the frontend uses (embedding
+  // platform_messages through platform_message_recipients), which is the
+  // part that would have silently broken if RLS or the FK relationship were
+  // wrong — not just a flat select.
+  // ---------------------------------------------------------------------------
+
+  it('Bug fix: a broadcast sent to one school resolves via the frontend\'s exact embed query, updates the unread count, persists read/dismiss, and is invisible to another school', async () => {
+    const baselineA = await request(app.getHttpServer())
+      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+
+    const sendRes = await request(app.getHttpServer())
+      .post('/super-admin/platform-messages')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ subject: 'Dashboard bug-fix check', body: 'Verifying the read path end to end.', audience: { type: 'MANUAL', schoolIds: [schoolAId] } })
+      .expect(201);
+    const messageId = sendRes.body.id;
+
+    try {
+      // The exact embed shape apps/web/app/(dashboard)/admin/page.tsx and
+      // notifications/page.tsx both use.
+      const embedQuery = () =>
+        clientAs(tokenA)
+          .from('platform_message_recipients')
+          .select('id, read_at, dismissed_at, message:platform_messages(subject, body, sent_at)')
+          .eq('platform_message_id', messageId);
+
+      // Also proves the underlying pm_select_recipient RLS policy grants a
+      // flat (non-embedded) read of the referenced platform_messages row —
+      // this is the exact policy that had a column-shadowing bug (see
+      // 20260725000066_fix_platform_messages_recipient_policy.sql): an
+      // unqualified `id` inside the policy's EXISTS subquery resolved to
+      // platform_message_recipients.id (the subquery's own PK) instead of
+      // correlating to the outer platform_messages.id, so the policy never
+      // actually matched any row for any School Admin.
+      const flatCheck = await clientAs(tokenA).from('platform_messages').select('id, subject').eq('id', messageId);
+      expect(flatCheck.error).toBeNull();
+      expect(flatCheck.data).toHaveLength(1);
+
+      const { data: aRows, error: aErr } = await embedQuery();
+      expect(aErr).toBeNull();
+      expect(aRows).toHaveLength(1);
+      const recipientRow = aRows![0] as unknown as { id: string; read_at: string | null; message: { subject: string; body: string } | null };
+      expect(recipientRow.read_at).toBeNull();
+      expect(recipientRow.message?.subject).toBe('Dashboard bug-fix check');
+      expect(recipientRow.message?.body).toBe('Verifying the read path end to end.');
+
+      // Cross-tenant: School B's admin gets nothing for this message.
+      const { data: bRows } = await clientAs(tokenB)
+        .from('platform_message_recipients')
+        .select('id, message:platform_messages(subject)')
+        .eq('platform_message_id', messageId);
+      expect(bRows).toHaveLength(0);
+
+      // Unread count (the header bubble's own endpoint) reflects the send.
+      const afterSend = await request(app.getHttpServer())
+        .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+      expect(afterSend.body.count).toBe(baselineA.body.count + 1);
+
+      // Marking read persists and the count drops back down.
+      const { error: readErr } = await clientAs(tokenA)
+        .from('platform_message_recipients')
+        .update({ read_at: new Date().toISOString() })
+        .eq('id', recipientRow.id);
+      expect(readErr).toBeNull();
+
+      const { data: afterReadRow } = await admin.from('platform_message_recipients').select('read_at').eq('id', recipientRow.id).single();
+      expect(afterReadRow?.read_at).toBeTruthy();
+
+      const afterRead = await request(app.getHttpServer())
+        .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+      expect(afterRead.body.count).toBe(baselineA.body.count);
+
+      // Dismissing removes it from the same filtered read both the
+      // notifications page and the new dashboard widget use.
+      await clientAs(tokenA)
+        .from('platform_message_recipients')
+        .update({ dismissed_at: new Date().toISOString() })
+        .eq('id', recipientRow.id);
+
+      const { data: afterDismiss } = await clientAs(tokenA)
+        .from('platform_message_recipients')
+        .select('id')
+        .eq('platform_message_id', messageId)
+        .is('dismissed_at', null);
+      expect(afterDismiss).toHaveLength(0);
+
+      // No noisy read-event audit log was added, per the task's explicit instruction.
+      const { data: readAuditRows } = await admin.from('audit_logs').select('id').eq('action', 'platform_message.read');
+      expect(readAuditRows ?? []).toHaveLength(0);
+    } finally {
+      await admin.from('platform_message_recipients').delete().eq('platform_message_id', messageId);
+      await admin.from('platform_messages').delete().eq('id', messageId);
+      await admin.from('audit_logs').delete().eq('entity_id', messageId);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cross-account access hardening — additional regression coverage for the
+  // two reproduction attempts from the task spec not already covered by
+  // existing tests (both were re-verified safe by reading the code; these
+  // tests pin that down so a future change can't silently regress it).
+  // ---------------------------------------------------------------------------
+
+  it('Cross-account hardening: a Student cannot PATCH another student\'s profile fields', async () => {
+    const now = new Date().toISOString();
+    const otherUserId = randomUUID();
+    const otherStudentId = randomUUID();
+    await admin.from('users').insert({ id: otherUserId, school_id: schoolAId, auth_id: randomUUID(), role: 'STUDENT', full_name: `Other Student ${suffix}`, updated_at: now });
+    await admin.from('students').insert({ id: otherStudentId, school_id: schoolAId, user_id: otherUserId, admission_no: `HARDEN-${suffix}`, updated_at: now });
+
+    try {
+      await request(app.getHttpServer())
+        .patch(`/students/${otherStudentId}`)
+        .set('Authorization', `Bearer ${tokenStudentA}`)
+        .send({ fullName: 'Hijacked Name' })
+        .expect(403);
+
+      const { data: unchanged } = await admin.from('users').select('full_name').eq('id', otherUserId).single();
+      expect(unchanged?.full_name).toBe(`Other Student ${suffix}`);
+    } finally {
+      await admin.from('students').delete().eq('id', otherStudentId);
+      await admin.from('users').delete().eq('id', otherUserId);
+    }
+  });
+
+  it('Cross-account hardening: a Parent querying attendance for a same-school student who is not their child gets nothing', async () => {
+    const now = new Date().toISOString();
+    const otherUserId = randomUUID();
+    const otherStudentId = randomUUID();
+    await admin.from('users').insert({ id: otherUserId, school_id: schoolAId, auth_id: randomUUID(), role: 'STUDENT', full_name: `Unrelated Classmate ${suffix}`, updated_at: now });
+    await admin.from('students').insert({ id: otherStudentId, school_id: schoolAId, user_id: otherUserId, current_class_id: classAId, admission_no: `HARDEN2-${suffix}`, updated_at: now });
+    await admin.from('attendance_records').insert({ id: randomUUID(), school_id: schoolAId, student_id: otherStudentId, class_id: classAId, date: new Date().toISOString().slice(0, 10), status: 'PRESENT', marked_by_id: teacherATeacherId, updated_at: now });
+
+    const parent = await createExtraUser(schoolAId, 'PARENT', 'harden-parent');
+    const guardianId = randomUUID();
+    await admin.from('guardians').insert({ id: guardianId, user_id: parent.userId, student_id: studentAId, relationship: 'Mother' });
+
+    try {
+      const res = await request(app.getHttpServer())
+        .get(`/attendance?studentId=${otherStudentId}`)
+        .set('Authorization', `Bearer ${parent.token}`)
+        .expect(200);
+      expect(res.body).toEqual([]);
+    } finally {
+      await admin.from('guardians').delete().eq('id', guardianId);
+      await admin.from('attendance_records').delete().eq('student_id', otherStudentId);
+      await admin.from('students').delete().eq('id', otherStudentId);
+      await admin.from('users').delete().eq('id', otherUserId);
     }
   });
 });

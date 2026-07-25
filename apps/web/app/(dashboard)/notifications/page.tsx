@@ -61,7 +61,7 @@ export default async function NotificationsPage() {
       alerts.push({
         id: `pm:${r.id}`,
         kind: 'notification' as const,
-        title: `[Platform] ${msg.subject}`,
+        title: msg.subject,
         body: msg.body,
         timestamp: msg.sent_at,
         isRead: !!r.read_at,

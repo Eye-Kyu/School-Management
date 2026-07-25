@@ -57,11 +57,12 @@ export default async function TeacherAttendancePage({
     admissionNo: string;
     fullName: string;
     attendance: { status: string; note: string | null } | null;
+    excusedByAbsenceRequest: boolean;
   }> = [];
-  let currentPrefectId: string | null = null;
+  let currentPrefect: { id: string; studentId: string; fullName: string } | null = null;
 
   if (selectedClassId) {
-    const [{ data: students }, { data: records }, { data: classRow }] = await Promise.all([
+    const [{ data: students }, { data: records }, { data: prefectRow }] = await Promise.all([
       supabase
         .from('students')
         .select('id, admission_no, user:users!inner(full_name)')
@@ -74,23 +75,43 @@ export default async function TeacherAttendancePage({
         .eq('class_id', selectedClassId)
         .eq('date', date),
       supabase
-        .from('classes')
-        .select('prefect_student_id')
-        .eq('id', selectedClassId)
+        .from('class_prefects')
+        .select('id, student_id, student:students!inner(user:users!inner(full_name))')
+        .eq('class_id', selectedClassId)
+        .is('revoked_at', null)
         .maybeSingle(),
     ]);
 
-    currentPrefectId = classRow?.prefect_student_id ?? null;
+    currentPrefect = prefectRow
+      ? { id: prefectRow.id, studentId: prefectRow.student_id, fullName: (prefectRow as any).student?.user?.full_name ?? '' }
+      : null;
 
     const statusMap = Object.fromEntries(
       (records ?? []).map((r) => [r.student_id, { status: r.status, note: r.note }]),
     );
 
+    // Days covered by an approved absence request are auto-EXCUSED and
+    // non-editable here — no attendance_records row is written for them,
+    // the status is computed at read time, same as AttendanceService.roster().
+    const studentIds = (students ?? []).map((s: any) => s.id);
+    const excusedIds = new Set<string>();
+    if (studentIds.length > 0) {
+      const { data: absences } = await supabase
+        .from('absence_requests')
+        .select('student_id')
+        .in('student_id', studentIds)
+        .eq('status', 'APPROVED')
+        .lte('start_date', date)
+        .gte('end_date', date);
+      for (const a of absences ?? []) excusedIds.add(a.student_id);
+    }
+
     roster = (students ?? []).map((s: any) => ({
       id: s.id,
       admissionNo: s.admission_no,
       fullName: s.user?.full_name ?? '',
-      attendance: statusMap[s.id] ?? null,
+      attendance: statusMap[s.id] ?? (excusedIds.has(s.id) ? { status: 'EXCUSED', note: 'Approved absence' } : null),
+      excusedByAbsenceRequest: excusedIds.has(s.id),
     }));
   }
 
@@ -110,7 +131,7 @@ export default async function TeacherAttendancePage({
         date={date}
         roster={roster}
         isClassTeacher={isClassTeacher}
-        currentPrefectId={currentPrefectId}
+        currentPrefect={currentPrefect}
       />
     </div>
   );

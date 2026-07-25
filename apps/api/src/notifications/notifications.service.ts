@@ -3,7 +3,18 @@ import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 
-export type NotifType = 'ABSENT_STUDENT' | 'NEW_ANNOUNCEMENT' | 'HOMEWORK_ASSIGNED' | 'NEW_MESSAGE';
+export type NotifType =
+  | 'ABSENT_STUDENT'
+  | 'NEW_ANNOUNCEMENT'
+  | 'HOMEWORK_ASSIGNED'
+  | 'NEW_MESSAGE'
+  | 'PREFECT_MESSAGE'
+  | 'BEHAVIOR_INCIDENT_SUBMITTED'
+  | 'BEHAVIOR_INCIDENT_REVIEWED'
+  | 'ATTENDANCE_REMARK_REQUESTED'
+  | 'ATTENDANCE_REMARK_DECIDED'
+  | 'ABSENCE_REQUEST_SUBMITTED'
+  | 'ABSENCE_REQUEST_DECIDED';
 
 interface BrevoClient {
   sendTransacEmail(params: {

@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { todayEnum, formatTime, DAY_LABELS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
+import RoleBadgeList from '@/components/RoleBadgeList';
+import { getMyRoleBadges } from '@/lib/roleBadges';
+import PrefectPanel from './PrefectPanel';
 
 export default async function StudentHomePage() {
   const supabase = createClient();
@@ -97,9 +100,11 @@ export default async function StudentHomePage() {
     : { data: null };
 
   const firstName = (studentUser?.full_name as string | null)?.split(' ')[0] ?? 'Student';
+  const badges = _uRow ? await getMyRoleBadges(supabase, _uRow.id, 'STUDENT') : [];
 
   return (
     <div className="space-y-8">
+      <PrefectPanel />
       {/* Header */}
       <div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -115,6 +120,7 @@ export default async function StudentHomePage() {
         <p className="text-sm text-slate-500 mt-1">
           {DAY_LABELS[today]} · {(todaySlots ?? []).length} classes today
         </p>
+        {badges.length > 0 && <RoleBadgeList badges={badges} className="mt-2" />}
       </div>
 
       {/* Cards grid */}

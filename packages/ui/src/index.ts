@@ -19,5 +19,7 @@
 // Example re-export (uncomment after running `shadcn add button`):
 // export { Button } from '../components/button';
 
+export { Badge, BADGE_VARIANTS, type BadgeProps, type BadgeVariant } from '../components/badge';
+
 // Utility re-exports - the `cn` className helper that shadcn uses everywhere.
 export { cn } from './lib/cn';

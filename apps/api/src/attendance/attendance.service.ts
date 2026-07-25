@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -6,6 +6,8 @@ import type {
   AttendanceQuery,
   AttendanceRosterQuery,
   MarkAttendanceInput,
+  RequestRemarkInput,
+  ReviewRemarkRequestInput,
 } from '@school-manager/types';
 
 @Injectable()
@@ -53,12 +55,42 @@ export class AttendanceService {
       (records ?? []).map((r) => [r.student_id, { status: r.status, note: r.note }]),
     );
 
+    const studentIds = (students ?? []).map((s) => s.id);
+    const excusedIds = studentIds.length > 0
+      ? await this._approvedAbsenceStudentIds(studentIds, query.date)
+      : new Set<string>();
+
     return (students ?? []).map((s) => ({
       id: s.id,
       admissionNo: s.admission_no,
       fullName: (s.user as unknown as { full_name: string } | null)?.full_name ?? '',
-      attendance: statusMap[s.id] ?? null,
+      attendance: statusMap[s.id] ?? (excusedIds.has(s.id) ? { status: 'EXCUSED', note: 'Approved absence' } : null),
+      excusedByAbsenceRequest: excusedIds.has(s.id),
     }));
+  }
+
+  // Students in `studentIds` who have an APPROVED absence_requests row
+  // covering `date`. No attendance_records rows are ever written for these
+  // dates — the EXCUSED status is computed here, at read time, only.
+  //
+  // Uses the admin client deliberately: this is an internal enforcement/
+  // overlay check, not a direct read of absence_requests handed back to the
+  // caller — absence_requests' own RLS only grants SELECT to the student's
+  // Class Teacher (not every subject teacher who can mark attendance for
+  // that class), so a subject teacher's forUser client would silently see
+  // no rows here and the override gate in mark() would never trigger.
+  private async _approvedAbsenceStudentIds(
+    studentIds: string[],
+    date: string,
+  ): Promise<Set<string>> {
+    const { data } = await this.supabase.admin
+      .from('absence_requests')
+      .select('student_id')
+      .in('student_id', studentIds)
+      .eq('status', 'APPROVED')
+      .lte('start_date', date)
+      .gte('end_date', date);
+    return new Set((data ?? []).map((r) => r.student_id));
   }
 
   async exportCsv(accessToken: string, query: { classId?: string; dateFrom?: string; dateTo?: string }) {
@@ -162,6 +194,24 @@ export class AttendanceService {
 
     const now = new Date().toISOString();
 
+    // Days covered by an approved absence request are non-editable here —
+    // the only way to change them is Task 3's re-marking approval flow.
+    // Silently drop those students from this write and audit the attempt,
+    // rather than rejecting the whole batch (the rest of the class may still
+    // need marking).
+    const requestedStudentIds = input.records.map((r) => r.studentId);
+    const excusedIds = await this._approvedAbsenceStudentIds(requestedStudentIds, input.date);
+    const blockedRecords = input.records.filter((r) => excusedIds.has(r.studentId));
+    const records = input.records.filter((r) => !excusedIds.has(r.studentId));
+
+    if (blockedRecords.length > 0) {
+      await client.from('audit_logs').insert(blockedRecords.map((r) => ({
+        id: randomUUID(), school_id: cls.school_id, user_id: publicUserId,
+        action: 'absence.override_attempt', entity_type: 'attendance_record', entity_id: input.classId,
+        metadata: { classId: input.classId, date: input.date, studentId: r.studentId, attemptedStatus: r.status },
+      })));
+    }
+
     // Fetch existing records for this class on this date so we can
     // update them (keeping the same PK) instead of upsert-changing the PK.
     const { data: existing } = await client
@@ -174,7 +224,7 @@ export class AttendanceService {
       (existing ?? []).map((r) => [r.student_id, r.id]),
     );
 
-    const toInsert = input.records
+    const toInsert = records
       .filter((r) => !existingMap[r.studentId])
       .map((r) => ({
         id: randomUUID(),
@@ -188,15 +238,25 @@ export class AttendanceService {
         updated_at: now,
       }));
 
-    const toUpdate = input.records
+    const toUpdate = records
       .filter((r) => existingMap[r.studentId])
       .map((r) => ({
         id: existingMap[r.studentId] as string,
+        studentId: r.studentId,
         status: r.status,
         note: r.note ?? null,
         marked_by_id: markedById,
         updated_at: now,
       }));
+
+    // Re-marking gate: any student whose record already exists requires a
+    // matching APPROVED, not-yet-applied remark request from this same
+    // teacher for this exact (class, date). First-time submissions
+    // (toInsert) are never gated — only changes to an existing record are.
+    let consumedRequestId: string | null = null;
+    if (toUpdate.length > 0) {
+      consumedRequestId = await this._authorizeRemark(client, publicUserId, input.classId, input.date, toUpdate);
+    }
 
     const inserts = toInsert.length > 0
       ? client.from('attendance_records').insert(toInsert).select()
@@ -220,18 +280,32 @@ export class AttendanceService {
 
     const totalUpserted = (insertedData?.length ?? 0) + toUpdate.length;
 
-    await client.from('audit_logs').insert({
-      id: randomUUID(),
-      school_id: cls.school_id,
-      user_id: publicUserId,
-      action: 'attendance.mark',
-      entity_type: 'attendance_record',
-      entity_id: input.classId,
-      metadata: { classId: input.classId, date: input.date, count: input.records.length },
-    });
+    if (records.length > 0) {
+      await client.from('audit_logs').insert({
+        id: randomUUID(),
+        school_id: cls.school_id,
+        user_id: publicUserId,
+        action: 'attendance.mark',
+        entity_type: 'attendance_record',
+        entity_id: input.classId,
+        metadata: { classId: input.classId, date: input.date, count: records.length },
+      });
+    }
+
+    if (consumedRequestId) {
+      // Single-use: applying the approval consumes it — a second mark() call
+      // referencing the same request id will find applied_at already set and
+      // be rejected by _authorizeRemark below.
+      await client.from('attendance_remark_requests').update({ applied_at: now, updated_at: now }).eq('id', consumedRequestId);
+      await client.from('audit_logs').insert({
+        id: randomUUID(), school_id: cls.school_id, user_id: publicUserId,
+        action: 'attendance.remark_apply', entity_type: 'attendance_remark_request', entity_id: consumedRequestId,
+        metadata: { classId: input.classId, date: input.date },
+      });
+    }
 
     // Queue absence notifications for guardians of absent students
-    const absentIds = input.records.filter((r) => r.status === 'ABSENT').map((r) => r.studentId);
+    const absentIds = records.filter((r) => r.status === 'ABSENT').map((r) => r.studentId);
     if (absentIds.length > 0) {
       await this.queueAbsenceNotifications(cls.school_id, input.classId, input.date, absentIds);
     }
@@ -313,6 +387,170 @@ export class AttendanceService {
     } catch (err) {
       console.error('[AttendanceService] absence notification error:', err);
     }
+  }
+
+  // Approval is single-use and authorizes exactly the pending edits it
+  // describes — not "the day is unlocked." Every student+proposed-status in
+  // `changes` must appear, one-for-one, in the approved request's items; any
+  // mismatch (extra student, different proposed status, subset) is rejected.
+  private async _authorizeRemark(
+    client: ReturnType<SupabaseService['forUser']>,
+    requestedByUserId: string,
+    classId: string,
+    date: string,
+    changes: Array<{ studentId: string; status: string }>,
+  ): Promise<string> {
+    const { data: candidates } = await client
+      .from('attendance_remark_requests')
+      .select('id, status, applied_at, expires_at')
+      .eq('class_id', classId).eq('date', date).eq('requested_by_user_id', requestedByUserId)
+      .eq('status', 'APPROVED').is('applied_at', null)
+      .order('reviewed_at', { ascending: false });
+
+    const now = Date.now();
+    for (const candidate of candidates ?? []) {
+      if (new Date(candidate.expires_at).getTime() < now) continue; // expired — try an older/other one, then fall through to the clear error below
+
+      const { data: items } = await client
+        .from('attendance_remark_request_items')
+        .select('student_id, proposed_status')
+        .eq('request_id', candidate.id);
+
+      const proposed = new Map((items ?? []).map((i) => [i.student_id, i.proposed_status]));
+      const matchesExactly =
+        proposed.size === changes.length &&
+        changes.every((c) => proposed.get(c.studentId) === c.status);
+
+      if (matchesExactly) return candidate.id;
+    }
+
+    // Distinguish "no approval exists" from "one existed but expired" for a
+    // clearer error message, per the spec's explicit requirement.
+    const hadOnlyExpired = (candidates ?? []).some((c) => new Date(c.expires_at).getTime() < now);
+    if (hadOnlyExpired) {
+      throw new ForbiddenException('Your approved re-marking request has expired (72-hour window) — submit a new request');
+    }
+    throw new ForbiddenException(
+      'Attendance for this class and date has already been submitted. Submit a re-marking request and wait for Department Head approval before changing it.',
+    );
+  }
+
+  async requestRemark(accessToken: string, _authUserId: string, input: RequestRemarkInput) {
+    const client = this.supabase.forUser(accessToken);
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
+    if (!me) throw new ForbiddenException('User not found');
+
+    const { data: teacherRecord } = await client
+      .from('teachers').select('id, user_id, department_id, school_id').eq('user_id', me.id).maybeSingle();
+    if (!teacherRecord) throw new ForbiddenException('Only teachers can request a re-marking');
+
+    const { data: existingRecords } = await client
+      .from('attendance_records').select('student_id, status')
+      .eq('class_id', input.classId).eq('date', input.date).in('student_id', input.items.map((i) => i.studentId));
+    const currentByStudent = new Map((existingRecords ?? []).map((r) => [r.student_id, r.status]));
+
+    const requestId = randomUUID();
+    const { error: reqError } = await client.from('attendance_remark_requests').insert({
+      id: requestId, school_id: teacherRecord.school_id, class_id: input.classId, date: input.date,
+      requested_by_user_id: teacherRecord.user_id, reason: input.reason,
+    });
+    if (reqError) throw new Error(reqError.message);
+
+    const { error: itemsError } = await client.from('attendance_remark_request_items').insert(
+      input.items.map((i) => ({
+        id: randomUUID(), request_id: requestId, student_id: i.studentId,
+        current_status: currentByStudent.get(i.studentId) ?? 'PRESENT',
+        proposed_status: i.proposedStatus, proposed_note: i.proposedNote ?? null,
+      })),
+    );
+    if (itemsError) throw new Error(itemsError.message);
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(), school_id: teacherRecord.school_id, user_id: teacherRecord.user_id,
+      action: 'attendance.remark_request', entity_type: 'attendance_remark_request', entity_id: requestId,
+      metadata: { classId: input.classId, date: input.date, itemCount: input.items.length },
+    });
+
+    // Route to the requester's own Department Head; fall back to Admin if
+    // unset. This applies identically whether the requester is a subject
+    // teacher or the Class Teacher of the class they're re-marking — Class
+    // Teachers still belong to a department, per the spec.
+    let recipientId: string | null = null;
+    if (teacherRecord.department_id) {
+      const { data: dept } = await this.supabase.admin
+        .from('departments').select('department_head_user_id').eq('id', teacherRecord.department_id).maybeSingle();
+      recipientId = dept?.department_head_user_id ?? null;
+    }
+    if (!recipientId) {
+      const { data: admins } = await this.supabase.admin
+        .from('users').select('id').eq('school_id', teacherRecord.school_id).eq('role', 'ADMIN').eq('is_active', true).is('deleted_at', null);
+      await this.notifications.queue((admins ?? []).map((a) => ({
+        schoolId: teacherRecord.school_id, recipientId: a.id, type: 'ATTENDANCE_REMARK_REQUESTED' as const,
+        title: 'Attendance re-marking request', body: `A teacher requested to change attendance for a class on ${input.date}.`,
+        metadata: { requestId, classId: input.classId, date: input.date },
+      })));
+    } else {
+      await this.notifications.queue([{
+        schoolId: teacherRecord.school_id, recipientId, type: 'ATTENDANCE_REMARK_REQUESTED',
+        title: 'Attendance re-marking request', body: `A teacher in your department requested to change attendance for a class on ${input.date}.`,
+        metadata: { requestId, classId: input.classId, date: input.date },
+      }]);
+    }
+
+    return { id: requestId };
+  }
+
+  async listRemarkRequests(accessToken: string) {
+    const { data, error } = await this.supabase.forUser(accessToken)
+      .from('attendance_remark_requests')
+      .select(`
+        id, class_id, date, reason, status, reviewed_at, denial_reason, applied_at, expires_at, created_at,
+        requested_by_user_id, requested_by:users!requested_by_user_id(full_name),
+        class:classes(name),
+        items:attendance_remark_request_items(student_id, current_status, proposed_status, proposed_note, student:students!inner(admission_no, user:users!inner(full_name)))
+      `)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+
+  async reviewRemarkRequest(accessToken: string, requestId: string, input: ReviewRemarkRequestInput) {
+    const client = this.supabase.forUser(accessToken);
+    const me = await this.supabase.currentUserRow(accessToken, 'id') as { id: string } | null;
+    if (!me) throw new ForbiddenException('User not found');
+
+    const { data: reqRow } = await client.from('attendance_remark_requests').select('id, school_id, requested_by_user_id, status').eq('id', requestId).maybeSingle();
+    if (!reqRow) throw new NotFoundException('Request not found');
+    if (reqRow.status !== 'PENDING') throw new BadRequestException('This request has already been decided');
+    if (reqRow.requested_by_user_id === me.id) throw new ForbiddenException('You cannot approve your own re-marking request');
+
+    if (input.action === 'DENY' && !input.denialReason) {
+      throw new BadRequestException('A reason is required to deny a re-marking request');
+    }
+
+    const { error } = await client.from('attendance_remark_requests').update({
+      status: input.action === 'APPROVE' ? 'APPROVED' : 'DENIED',
+      reviewed_by_user_id: me.id, reviewed_at: new Date().toISOString(),
+      denial_reason: input.action === 'DENY' ? input.denialReason : null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', requestId);
+    if (error) throw new Error(error.message);
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(), school_id: reqRow.school_id, user_id: me.id,
+      action: input.action === 'APPROVE' ? 'attendance.remark_approve' : 'attendance.remark_deny',
+      entity_type: 'attendance_remark_request', entity_id: requestId,
+      metadata: input.action === 'DENY' ? { denialReason: input.denialReason } : {},
+    });
+
+    await this.notifications.queue([{
+      schoolId: reqRow.school_id, recipientId: reqRow.requested_by_user_id, type: 'ATTENDANCE_REMARK_DECIDED',
+      title: input.action === 'APPROVE' ? 'Re-marking request approved' : 'Re-marking request denied',
+      body: input.action === 'APPROVE' ? 'You can now apply your requested attendance changes.' : (input.denialReason ?? 'Your re-marking request was denied.'),
+      metadata: { requestId },
+    }]);
+
+    return { updated: true };
   }
 }
 

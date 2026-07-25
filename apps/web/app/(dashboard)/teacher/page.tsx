@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { todayEnum, formatTime, groupByDay, DAY_LABELS, DAYS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
+import RoleBadgeList from '@/components/RoleBadgeList';
+import { getMyRoleBadges } from '@/lib/roleBadges';
+import TodaysChecklist from './TodaysChecklist';
 
 export default async function TeacherHomePage() {
   const supabase = createClient();
@@ -49,6 +52,10 @@ export default async function TeacherHomePage() {
     .map((a: any) => a.class)
     .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id));
 
+  const { data: school } = await supabase.from('schools').select('timezone').maybeSingle();
+
+  const badges = _uRow ? await getMyRoleBadges(supabase, _uRow.id, 'TEACHER') : [];
+
   const { data: announcements } = await supabase
     .from('announcements')
     .select('id, title, body, published_at')
@@ -76,7 +83,12 @@ export default async function TeacherHomePage() {
         <p className="text-sm text-slate-500 mt-1">
           {DAY_LABELS[today]} · {(todaySlots ?? []).length} classes today
         </p>
+        {badges.length > 0 && <RoleBadgeList badges={badges} className="mt-2" />}
       </div>
+
+      {teacher && (
+        <TodaysChecklist teacherId={teacher.id} timezone={school?.timezone ?? 'Africa/Nairobi'} />
+      )}
 
       {/* Cards grid */}
       <div className="grid grid-cols-2 gap-4">

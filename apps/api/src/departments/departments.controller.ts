@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { CreateDepartmentInput, UpdateDepartmentInput } from '@school-manager/types';
+import { CreateDepartmentInput, UpdateDepartmentInput, SetDepartmentHeadInput } from '@school-manager/types';
 import { DepartmentsService } from './departments.service';
 
 @Controller('departments')
@@ -30,6 +30,15 @@ export class DepartmentsController {
     @Body(new ZodValidationPipe(UpdateDepartmentInput)) body: UpdateDepartmentInput,
   ) {
     return this.departments.update(token, id, body);
+  }
+
+  @Patch(':id/head')
+  setHead(
+    @AccessToken() token: string,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(SetDepartmentHeadInput)) body: SetDepartmentHeadInput,
+  ) {
+    return this.departments.setHead(token, id, body.teacherUserId);
   }
 
   @Delete(':id')

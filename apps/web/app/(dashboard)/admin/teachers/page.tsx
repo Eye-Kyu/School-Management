@@ -13,8 +13,16 @@ export default async function TeachersPage() {
         user:users!inner(id, full_name, email, phone, is_active)
       `)
       .order('created_at'),
-    supabase.from('departments').select('id, name').is('deleted_at', null).order('name'),
+    supabase.from('departments').select('id, name, department_head_user_id').is('deleted_at', null).order('name'),
   ]);
+
+  const headDepartmentByUserId = new Map(
+    (departments ?? []).filter((d) => d.department_head_user_id).map((d) => [d.department_head_user_id as string, d.name as string]),
+  );
+  const teacherRows = (teachers ?? []).map((t: any) => ({
+    ...t,
+    headOfDepartment: headDepartmentByUserId.get(t.user?.id) ?? null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -25,7 +33,7 @@ export default async function TeachersPage() {
           <p className="text-sm text-slate-500 mt-0.5">{teachers?.length ?? 0} teachers</p>
         </div>
       </div>
-      <TeachersClient initialTeachers={(teachers ?? []) as any} departments={departments ?? []} />
+      <TeachersClient initialTeachers={teacherRows as any} departments={departments ?? []} />
     </div>
   );
 }

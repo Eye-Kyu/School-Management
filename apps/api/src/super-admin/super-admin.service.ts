@@ -193,6 +193,8 @@ export class SuperAdminService {
       throw new BadRequestException(error.message);
     }
 
+    await this.seedDefaultPrefectPowers(id);
+
     await this.supabase.admin.from('audit_logs').insert({
       id: randomUUID(),
       school_id: id,
@@ -204,6 +206,25 @@ export class SuperAdminService {
     });
 
     return data;
+  }
+
+  // Every power defaults to enabled. Existing schools (created before this
+  // table existed) are backfilled once by 20260725000061_prefect_powers.sql's
+  // own INSERT — this covers only schools created from here on.
+  private async seedDefaultPrefectPowers(schoolId: string) {
+    const powers: Array<{ power_code: string; applies_to: 'CLASS' | 'SCHOOL' }> = [
+      { power_code: 'view_class_behavior_leaderboard', applies_to: 'CLASS' },
+      { power_code: 'compose_message_to_class_teacher', applies_to: 'CLASS' },
+      { power_code: 'report_behavior_incident', applies_to: 'CLASS' },
+      { power_code: 'view_class_attendance_summary', applies_to: 'CLASS' },
+      { power_code: 'view_class_timetable_detailed', applies_to: 'CLASS' },
+      { power_code: 'view_school_behavior_leaderboard_full', applies_to: 'SCHOOL' },
+      { power_code: 'compose_message_to_admin', applies_to: 'SCHOOL' },
+      { power_code: 'report_behavior_incident_school_wide', applies_to: 'SCHOOL' },
+    ];
+    await this.supabase.admin.from('prefect_powers').insert(
+      powers.map((p) => ({ school_id: schoolId, power_code: p.power_code, applies_to: p.applies_to, enabled: true })),
+    );
   }
 
   async updateSchool(schoolId: string, input: UpdateSchoolInput, callerAuthId: string) {
@@ -514,6 +535,7 @@ export class SuperAdminService {
         if (schoolError.code === '23505') throw new BadRequestException(`Slug '${input.school.slug}' is already in use`);
         throw new BadRequestException(schoolError.message);
       }
+      await this.seedDefaultPrefectPowers(schoolId);
 
       const tempPassword = Math.random().toString(36).slice(-10) + 'Aa1!';
       const { data: authData, error: authError } = await this.supabase.admin.auth.admin.createUser({

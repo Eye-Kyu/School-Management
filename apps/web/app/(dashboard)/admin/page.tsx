@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { Badge } from '@school-manager/ui';
 import UpcomingEvents from '@/components/UpcomingEvents';
 
 type StatCard = {
@@ -23,6 +24,7 @@ export default async function AdminHomePage() {
     { count: parentCount },
     { data: feeData },
     { data: announcements },
+    { data: platformMessageRows },
     { data: events },
   ] = await Promise.all([
     supabase.from('classes').select('*', { count: 'exact', head: true }).eq('is_active', true),
@@ -36,6 +38,13 @@ export default async function AdminHomePage() {
       .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
       .order('published_at', { ascending: false })
       .limit(3),
+    // Broadcasts from the platform team (SuperAdmin) — same read shape as
+    // notifications/page.tsx's Alerts merge, RLS-scoped to this admin's own
+    // recipient rows (pmr_select_own + pm_select_recipient).
+    supabase
+      .from('platform_message_recipients')
+      .select('id, read_at, message:platform_messages(subject, body, sent_at)')
+      .is('dismissed_at', null),
     supabase
       .from('events')
       .select('id, title, starts_at, ends_at, all_day, event_type')
@@ -44,6 +53,12 @@ export default async function AdminHomePage() {
       .order('starts_at')
       .limit(10),
   ]);
+
+  const platformMessages = (platformMessageRows ?? [])
+    .map((r: any) => ({ id: r.id as string, readAt: r.read_at as string | null, ...(r.message ?? {}) }))
+    .filter((m: any) => m.subject)
+    .sort((a: any, b: any) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+    .slice(0, 3);
 
   const totalOutstanding = (feeData ?? []).reduce(
     (s, b) => s + Number(b.amount_due) - Number(b.amount_paid),
@@ -146,6 +161,32 @@ export default async function AdminHomePage() {
                   </p>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Platform messages — broadcasts from the platform team */}
+      {platformMessages.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-slate-700">Platform messages</h2>
+            <Link href="/notifications/platform" className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
+              View all →
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {platformMessages.map((m: any) => (
+              <Link key={m.id} href="/notifications/platform" className="block">
+                <div className={`bg-white border border-slate-100 border-l-4 rounded-r-xl px-5 py-3 shadow-sm hover:shadow-md transition-shadow ${m.readAt ? 'border-l-violet-200' : 'border-l-violet-500'}`}>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <Badge variant="platformMessage">From platform team</Badge>
+                    {!m.readAt && <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />}
+                  </div>
+                  <p className="font-medium text-sm">{m.subject}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{new Date(m.sent_at).toLocaleDateString()}</p>
+                </div>
+              </Link>
             ))}
           </div>
         </div>

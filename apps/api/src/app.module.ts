@@ -36,6 +36,8 @@ import { SystemHealthModule } from './system-health/system-health.module';
 import { PlatformUsersModule } from './platform-users/platform-users.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { PlatformMessagesModule } from './platform-messages/platform-messages.module';
+import { PrefectsModule } from './prefects/prefects.module';
+import { AbsenceRequestsModule } from './absence-requests/absence-requests.module';
 
 @Module({
   imports: [
@@ -83,6 +85,8 @@ import { PlatformMessagesModule } from './platform-messages/platform-messages.mo
     PlatformUsersModule,
     PlatformSettingsModule,
     PlatformMessagesModule,
+    PrefectsModule,
+    AbsenceRequestsModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AssistAuditInterceptor }],

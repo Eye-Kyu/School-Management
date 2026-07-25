@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
 import { createClient } from '@/lib/supabase/client';
 import AcknowledgeButton from './AcknowledgeButton';
@@ -88,6 +89,9 @@ export default function NotificationsView({
           ) : alerts.map((a) => (
             <div key={a.id} className={`px-4 py-3 flex items-start justify-between gap-3 ${a.isRead ? '' : 'bg-blue-50/40'}`}>
               <Link href={a.href} className="min-w-0 flex-1">
+                {a.notifType === 'PLATFORM_MESSAGE' && (
+                  <Badge variant="platformMessage" className="mb-1">From platform team</Badge>
+                )}
                 <p className={`text-sm font-medium ${a.isRead ? 'text-slate-700' : 'text-slate-900'}`}>{a.title}</p>
                 <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{a.body}</p>
                 <p className="text-xs text-slate-400 mt-1">{timeAgo(a.timestamp)}</p>

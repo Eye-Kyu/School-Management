@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { CreateDepartmentInput, UpdateDepartmentInput } from '@school-manager/types';
@@ -14,7 +14,7 @@ export class DepartmentsService {
     // the normal list explicitly.
     const { data, error } = await client
       .from('departments')
-      .select('*, teachers(count)')
+      .select('*, teachers(count), head:users!department_head_user_id(id, full_name)')
       .is('deleted_at', null)
       .order('name');
     if (error) throw new Error(error.message);
@@ -23,6 +23,46 @@ export class DepartmentsService {
       teacher_count: (d as unknown as { teachers: { count: number }[] }).teachers?.[0]?.count ?? 0,
       teachers: undefined,
     }));
+  }
+
+  // The Department Head must be a Teacher belonging to this department, and
+  // may head at most one department. Both checks require a cross-table
+  // lookup, so they live here rather than as a declarative CHECK constraint —
+  // see the migration comment for why a trigger was deliberately avoided too.
+  async setHead(accessToken: string, departmentId: string, teacherUserId: string | null) {
+    const client = this.supabase.forUser(accessToken);
+    await this.requireAdmin(accessToken);
+
+    const { data: department } = await client.from('departments').select('id, school_id, department_head_user_id').eq('id', departmentId).maybeSingle();
+    if (!department) throw new NotFoundException('Department not found');
+
+    if (teacherUserId) {
+      const { data: teacherRow } = await client.from('teachers').select('id, department_id').eq('user_id', teacherUserId).maybeSingle();
+      if (!teacherRow) throw new BadRequestException('Target user is not a teacher at this school');
+      if (teacherRow.department_id !== departmentId) {
+        throw new BadRequestException('The Department Head must be a teacher belonging to this department');
+      }
+
+      const { data: existingHeadOf } = await client
+        .from('departments').select('id, name').eq('department_head_user_id', teacherUserId).neq('id', departmentId).maybeSingle();
+      if (existingHeadOf) {
+        throw new BadRequestException(`This teacher is already Head of ${existingHeadOf.name} — one person may head at most one department`);
+      }
+    }
+
+    const { data, error } = await client
+      .from('departments')
+      .update({ department_head_user_id: teacherUserId, updated_at: new Date().toISOString() })
+      .eq('id', departmentId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+
+    await this.audit(client, accessToken, department.school_id, 'department.set_head', 'department', departmentId, {
+      previous_head_user_id: department.department_head_user_id ?? null,
+      new_head_user_id: teacherUserId,
+    });
+    return data;
   }
 
   async create(accessToken: string, input: CreateDepartmentInput) {

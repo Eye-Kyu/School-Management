@@ -54,7 +54,14 @@ export class TermsService {
     const { data: term } = await client.from('terms').select('school_id').eq('id', termId).maybeSingle();
     if (!term) throw new NotFoundException('Term not found');
 
-    // Clear existing current term for this school.
+    // The term(s) about to lose is_current are, by definition, "ending" right
+    // now — this repo has no other term-rollover signal anywhere (no cron
+    // watches end_date), so this is the one real hook available for
+    // term-bound cleanup. Capture their ids before clearing.
+    const { data: endingTerms } = await client
+      .from('terms').select('id').eq('school_id', term.school_id).eq('is_current', true);
+    const endingTermIds = (endingTerms ?? []).map((t) => t.id).filter((id) => id !== termId);
+
     await client.from('terms').update({ is_current: false }).eq('school_id', term.school_id).eq('is_current', true);
 
     const { data, error } = await client
@@ -66,7 +73,38 @@ export class TermsService {
     if (error) throw new Error(error.message);
 
     await this.audit(client, accessToken, term.school_id, 'term.set_current', 'term', termId, {});
+
+    if (endingTermIds.length > 0) {
+      await this._autoRevokeTermBoundPrefects(client, accessToken, term.school_id, endingTermIds);
+    }
+
     return data;
+  }
+
+  // Prefect records with a term_id matching an ending term are automatically
+  // revoked; records with term_id IS NULL ("until revoked") are untouched.
+  private async _autoRevokeTermBoundPrefects(
+    client: ReturnType<SupabaseService['forUser']>, accessToken: string, schoolId: string, endingTermIds: string[],
+  ) {
+    const now = new Date().toISOString();
+    const reason = 'Term ended';
+
+    const { data: revokedClass } = await client
+      .from('class_prefects')
+      .update({ revoked_at: now, revocation_reason: reason })
+      .in('term_id', endingTermIds).is('revoked_at', null)
+      .select('id');
+    const { data: revokedSchool } = await client
+      .from('school_prefects')
+      .update({ revoked_at: now, revocation_reason: reason })
+      .in('term_id', endingTermIds).is('revoked_at', null)
+      .select('id');
+
+    const count = (revokedClass?.length ?? 0) + (revokedSchool?.length ?? 0);
+    const firstEndingTermId = endingTermIds[0];
+    if (count > 0 && firstEndingTermId) {
+      await this.audit(client, accessToken, schoolId, 'prefect.term_auto_revoke', 'term', firstEndingTermId, { count, ending_term_ids: endingTermIds });
+    }
   }
 
   private async requireAdmin(accessToken: string) {

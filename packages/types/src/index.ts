@@ -35,3 +35,4 @@ export * from './schemas/billing';
 export * from './schemas/platform-users';
 export * from './schemas/platform-message';
 export * from './schemas/assist-mode';
+export * from './schemas/prefect';

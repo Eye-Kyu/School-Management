@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { CreateTeacherInput } from '@school-manager/types';
+import { Badge } from '@school-manager/ui';
 
 type Department = { id: string; name: string };
 type TeacherRow = {
@@ -12,6 +13,7 @@ type TeacherRow = {
   department_id: string | null;
   department_row: Department | null;
   user: { id: string; full_name: string; email: string | null; phone: string | null; is_active: boolean };
+  headOfDepartment?: string | null;
 };
 
 export default function TeachersClient({
@@ -178,7 +180,12 @@ export default function TeachersClient({
           {visibleTeachers.map((t) => (
             <div key={t.id} className="flex items-center justify-between px-5 py-3 gap-3">
               <div className="min-w-0">
-                <p className="font-medium text-sm">{t.user.full_name}</p>
+                <p className="font-medium text-sm flex items-center gap-2">
+                  {t.user.full_name}
+                  {t.headOfDepartment && (
+                    <Badge variant="departmentHead">Head of {t.headOfDepartment}</Badge>
+                  )}
+                </p>
                 <p className="text-xs text-slate-500">
                   {t.staff_no} · {t.user.email ?? t.user.phone}
                 </p>

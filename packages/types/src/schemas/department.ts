@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import { Uuid } from './common';
+
+export const SetDepartmentHeadInput = z.object({
+  teacherUserId: Uuid.nullable(),
+});
+export type SetDepartmentHeadInput = z.infer<typeof SetDepartmentHeadInput>;
 
 export const CreateDepartmentInput = z.object({
   name: z.string().min(1).max(100),

@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { todayEnum, formatTime, DAY_LABELS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
+import RoleBadgeList from '@/components/RoleBadgeList';
+import type { RoleBadge } from '@/lib/roleBadges';
 
 export default async function ParentHomePage() {
   const supabase = createClient();
@@ -78,6 +80,27 @@ export default async function ParentHomePage() {
         .eq('date', todayDate)
     : { data: [] };
   const todayByStudent = new Map((todayAttendanceRows ?? []).map((r: any) => [r.student_id, r]));
+
+  // Prefect badges per linked child, for the summary cards below.
+  const [{ data: classPrefectRows }, { data: schoolPrefectRows }] = studentIds.length > 0
+    ? await Promise.all([
+        supabase.from('class_prefects').select('student_id, class:classes!inner(name)').in('student_id', studentIds).is('revoked_at', null),
+        supabase.from('school_prefects').select('student_id, role_title').in('student_id', studentIds).is('revoked_at', null),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const prefectBadgesByStudent = new Map<string, RoleBadge[]>();
+  for (const r of (classPrefectRows ?? []) as any[]) {
+    const className = r.class?.name;
+    if (!className) continue;
+    const arr = prefectBadgesByStudent.get(r.student_id) ?? [];
+    arr.push({ variant: 'classPrefect', label: `Class Prefect: ${className}`, href: '/prefect-role-info' });
+    prefectBadgesByStudent.set(r.student_id, arr);
+  }
+  for (const r of (schoolPrefectRows ?? []) as any[]) {
+    const arr = prefectBadgesByStudent.get(r.student_id) ?? [];
+    arr.push({ variant: 'schoolPrefect', label: r.role_title, href: '/prefect-role-info' });
+    prefectBadgesByStudent.set(r.student_id, arr);
+  }
   const { data: feeBalances } = studentIds.length > 0
     ? await supabase
         .from('fee_balances')
@@ -125,6 +148,9 @@ export default async function ParentHomePage() {
             ? `${students.length} child${students.length > 1 ? 'ren' : ''} linked`
             : 'No students linked to your account yet'}
         </p>
+        {students.length === 1 && (prefectBadgesByStudent.get(firstStudent.id) ?? []).length > 0 && (
+          <RoleBadgeList badges={prefectBadgesByStudent.get(firstStudent.id) ?? []} className="mt-2" />
+        )}
       </div>
 
       {students.length === 0 ? (
@@ -140,9 +166,10 @@ export default async function ParentHomePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {students.map((s: any) => {
                   const todayRow = todayByStudent.get(s.id) as { status: string; updated_at: string } | undefined;
+                  const childBadges = prefectBadgesByStudent.get(s.id) ?? [];
                   return (
-                    <Link key={s.id} href="/parent/attendance" className="block group">
-                      <div className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div key={s.id} className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm hover:shadow-md transition-shadow">
+                      <Link href="/parent/attendance" className="block group">
                         <p className="font-medium text-sm text-slate-700 truncate">{(s.user as any)?.full_name}</p>
                         {todayRow ? (
                           <p className="text-sm mt-1.5">
@@ -161,8 +188,9 @@ export default async function ParentHomePage() {
                         ) : (
                           <p className="text-sm text-slate-400 mt-1.5">Not yet marked for today.</p>
                         )}
-                      </div>
-                    </Link>
+                      </Link>
+                      {childBadges.length > 0 && <RoleBadgeList badges={childBadges} className="mt-2" />}
+                    </div>
                   );
                 })}
               </div>
