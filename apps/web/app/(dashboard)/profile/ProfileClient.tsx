@@ -17,8 +17,11 @@ const DICEBEAR_PRESETS = [
   'https://api.dicebear.com/9.x/thumbs/svg?seed=Atlas&backgroundColor=ffd5dc',
 ];
 
-const NOTIF_TYPES: { key: string; label: string; desc: string; roles: string[] }[] = [
-  { key: 'ABSENT_STUDENT',   label: 'Student absence',    desc: 'When your child is marked absent',         roles: ['PARENT'] },
+// `sms: true` marks the only notification type SMS applies to so far — a
+// deliberately narrow, code-level allowlist (not just "whatever the DB
+// preference says"), matching NotificationsService's own SMS_ELIGIBLE_TYPES.
+const NOTIF_TYPES: { key: string; label: string; desc: string; roles: string[]; sms?: boolean }[] = [
+  { key: 'ABSENT_STUDENT',   label: 'Student absence',    desc: 'When your child is marked absent',         roles: ['PARENT'], sms: true },
   { key: 'NEW_ANNOUNCEMENT', label: 'Announcements',      desc: 'When the school posts an announcement',    roles: ['PARENT', 'TEACHER', 'STUDENT', 'ADMIN'] },
   { key: 'HOMEWORK_ASSIGNED',label: 'Homework alerts',    desc: 'When new homework is assigned',            roles: ['PARENT', 'STUDENT'] },
   { key: 'NEW_MESSAGE',      label: 'Messages',           desc: 'When you receive a new message',           roles: ['PARENT', 'TEACHER'] },
@@ -37,7 +40,7 @@ export default function ProfileClient({
   phone: string;
   role: string;
   avatarUrl: string | null;
-  notifPrefs: { notification_type: string; email_enabled: boolean }[];
+  notifPrefs: { notification_type: string; email_enabled: boolean; sms_enabled: boolean }[];
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +63,13 @@ export default function ProfileClient({
     const map: Record<string, boolean> = {};
     for (const t of NOTIF_TYPES) map[t.key] = true; // default on
     for (const p of initialNotifPrefs) map[p.notification_type] = p.email_enabled;
+    return map;
+  });
+  // SMS defaults to off (opt-in), matching notification_preferences.sms_enabled's own DB default.
+  const [smsPrefs, setSmsPrefs] = useState<Record<string, boolean>>(() => {
+    const map: Record<string, boolean> = {};
+    for (const t of NOTIF_TYPES) map[t.key] = false;
+    for (const p of initialNotifPrefs) map[p.notification_type] = p.sms_enabled;
     return map;
   });
   const [savingPrefs, setSavingPrefs] = useState(false);
@@ -359,7 +369,7 @@ export default function ProfileClient({
       <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <div>
           <h2 className="text-base font-semibold text-slate-800">Notification preferences</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Choose which notifications you receive by email. In-app notifications are always on.</p>
+          <p className="text-sm text-slate-500 mt-0.5">Choose which notifications you receive by email (and, where available, SMS). In-app notifications are always on.</p>
         </div>
 
         <div className="space-y-3">
@@ -386,6 +396,26 @@ export default function ProfileClient({
                     (notifPrefs[t.key] ?? true) ? 'translate-x-4' : 'translate-x-0.5'
                   }`} />
                 </button>
+                {t.sms ? (
+                  <>
+                    <span className="text-xs text-slate-400 ml-1">SMS</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={smsPrefs[t.key] ?? false}
+                      onClick={() => setSmsPrefs((p) => ({ ...p, [t.key]: !(p[t.key] ?? false) }))}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                        (smsPrefs[t.key] ?? false) ? 'bg-slate-900' : 'bg-slate-200'
+                      }`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        (smsPrefs[t.key] ?? false) ? 'translate-x-4' : 'translate-x-0.5'
+                      }`} />
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs text-slate-300 ml-1" title="SMS coming later for this notification type">SMS soon</span>
+                )}
               </div>
             </div>
           ))}
@@ -401,7 +431,11 @@ export default function ProfileClient({
               await apiFetch('/users/me/notification-preferences', {
                 method: 'PATCH',
                 body: JSON.stringify({
-                  prefs: Object.entries(notifPrefs).map(([type, emailEnabled]) => ({ type, emailEnabled })),
+                  prefs: Object.entries(notifPrefs).map(([type, emailEnabled]) => ({
+                    type,
+                    emailEnabled,
+                    smsEnabled: smsPrefs[type] ?? false,
+                  })),
                 }),
               });
               setPrefsSuccess(true);

@@ -5,6 +5,8 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import {
   UpdateProfileInput,
   type UpdateProfileInput as UpdateProfileInputType,
+  UpdateNotificationPreferencesInput,
+  type UpdateNotificationPreferencesInput as UpdateNotificationPreferencesInputType,
 } from '@school-manager/types';
 import { UsersService } from './users.service';
 
@@ -30,8 +32,8 @@ export class UsersController {
   @Patch('me/notification-preferences')
   updateNotifPrefs(
     @AccessToken() token: string,
-    @Body() body: { prefs: { type: string; emailEnabled: boolean }[] },
+    @Body(new ZodValidationPipe(UpdateNotificationPreferencesInput)) body: UpdateNotificationPreferencesInputType,
   ) {
-    return this.users.updateNotifPrefs(token, body.prefs ?? []);
+    return this.users.updateNotifPrefs(token, body.prefs);
   }
 }

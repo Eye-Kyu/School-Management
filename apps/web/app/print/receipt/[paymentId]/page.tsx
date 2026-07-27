@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import PrintButton from './PrintButton';
 
 export default async function ReceiptPage({ params }: { params: { paymentId: string } }) {
   const supabase = createClient();
@@ -22,9 +23,7 @@ export default async function ReceiptPage({ params }: { params: { paymentId: str
   return (
     <div className="page">
       <div className="no-print" style={{ marginBottom: 24 }}>
-        <button onClick={() => window.print()} style={{ fontSize: 12, padding: '6px 16px', borderRadius: 6, background: '#0f172a', color: 'white', border: 'none', cursor: 'pointer' }}>
-          🖨 Print / Save as PDF
-        </button>
+        <PrintButton />
       </div>
 
       {/* Receipt */}

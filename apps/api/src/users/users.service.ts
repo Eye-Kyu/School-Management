@@ -63,13 +63,13 @@ export class UsersService {
     const { data } = await this.supabase
       .forUser(accessToken)
       .from('notification_preferences')
-      .select('notification_type, email_enabled');
+      .select('notification_type, email_enabled, sms_enabled');
     return data ?? [];
   }
 
   async updateNotifPrefs(
     accessToken: string,
-    prefs: { type: string; emailEnabled: boolean }[],
+    prefs: { type: string; emailEnabled: boolean; smsEnabled?: boolean }[],
   ) {
     // Use getUserRole pattern to safely get user row without multi-row RLS collision
     const role = await this.supabase.getUserRole(accessToken);
@@ -96,6 +96,10 @@ export class UsersService {
           user_id: userRow.id,
           notification_type: p.type,
           email_enabled: p.emailEnabled,
+          // Omitted (not false) when the caller doesn't send it, so an
+          // upsert against an existing row leaves sms_enabled untouched —
+          // callers that predate the SMS toggle keep working unchanged.
+          ...(p.smsEnabled !== undefined ? { sms_enabled: p.smsEnabled } : {}),
         },
         { onConflict: 'user_id,notification_type' },
       );

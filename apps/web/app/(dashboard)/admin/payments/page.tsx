@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
+import PaybillDashboard from './PaybillDashboard';
 
 function fmt(n: number) { return `KES ${n.toLocaleString()}`; }
 
@@ -120,6 +121,10 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
           </table>
         </div>
       )}
+
+      <hr className="border-slate-200" />
+
+      <PaybillDashboard />
     </div>
   );
 }

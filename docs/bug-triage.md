@@ -40,6 +40,22 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 
 ---
 
+### BUG-3: `cross-tenant.e2e-spec.ts`'s system-health test asserts an auth-login count that fixture logins can never produce
+
+**Found during:** 2026-07-26, Phase 0 sub-sprint 1a (SMS via Africa's Talking) — surfaced as a failing, unrelated test while confirming the full e2e suite stayed green after the SMS changes. Reproduces in complete isolation (`-t "system health overview reports real"`, `beforeAll` fixtures only) — confirmed unrelated to this PR (a new, separate test file; no changes to `cross-tenant.e2e-spec.ts`, `system-health.service.ts`, or auth audit logging this sub-sprint).
+
+**File:** `apps/api/test/cross-tenant.e2e-spec.ts:1706` (the test), `apps/api/src/system-health/system-health.service.ts:34-37` (what it reads).
+
+**What's wrong:** The test asserts `res.body.auth.last24h.logins >= 1`, with a comment claiming *"this run alone has already generated real auth.login events (seedUser signs every fixture in via password auth)"*. That's not how `action: 'auth.login'` rows actually get written — grepped the whole codebase: the **only** place that ever inserts one is `apps/web/app/(auth)/login/page.tsx:81,122`, a fire-and-forget `POST /auth/events` call made by the frontend login page *after* a successful sign-in. Every e2e fixture (`seedUser`'s `anon.auth.signInWithPassword(...)`) authenticates directly against the Supabase Auth SDK — it never goes through the app's login page or calls `/auth/events` — so it can never produce the row this test expects. The count is correctly `0`; the test's premise was wrong from the start.
+
+**Impact:** Test-only. `system-health.service.ts` itself is reading real data correctly (confirmed by the `SELECT` shape) — there's no production bug here, just an e2e assertion resting on a false assumption about how Supabase Auth sign-ins and this app's own audit logging relate.
+
+**Why not fixed here:** Unrelated subsystem (auth audit logging vs. this PR's SMS/notifications scope), and it's a pre-existing test, not code this PR touches.
+
+**Suggested fix:** Either have the test itself call `POST /auth/events` (matching what a real login does) before asserting the count, or relax the assertion to `>= 0` and instead assert the *shape* of the response (the fields exist and are numbers) — the current assertion tests something the test's own fixtures cannot produce.
+
+---
+
 ## Resolved / re-verified (not bugs)
 
 For traceability — items raised as open questions in a prior PR's follow-up notes, re-examined during the 2026-07-25 audit and confirmed safe, not touched:

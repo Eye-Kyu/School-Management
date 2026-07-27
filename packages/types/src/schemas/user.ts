@@ -74,6 +74,17 @@ export const UpdateTeacherInput = z.object({
 });
 export type UpdateTeacherInput = z.infer<typeof UpdateTeacherInput>;
 
+// Notification preferences update — one row per notification type. smsEnabled
+// is optional so existing callers that only ever sent emailEnabled keep working.
+export const UpdateNotificationPreferencesInput = z.object({
+  prefs: z.array(z.object({
+    type: z.string().min(1),
+    emailEnabled: z.boolean(),
+    smsEnabled: z.boolean().optional(),
+  })),
+});
+export type UpdateNotificationPreferencesInput = z.infer<typeof UpdateNotificationPreferencesInput>;
+
 // CSV bulk-import - one row at a time, server validates each.
 export const StudentCsvRow = z.object({
   admissionNo: z.string().min(1),

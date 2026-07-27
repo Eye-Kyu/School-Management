@@ -180,6 +180,18 @@ export class FeesService {
       .update({ amount_paid: newAmountPaid, updated_at: new Date().toISOString() })
       .eq('id', bal.id);
 
+    // Fold-in fix (Phase 0 sub-sprint 2, Task 6b): this is a mutation on
+    // money and was previously never audit-logged at all.
+    await client.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: bal.school_id,
+      user_id: userRow?.id ?? null,
+      action: 'payment_record.created',
+      entity_type: 'payment_record',
+      entity_id: payment.id,
+      metadata: { feeBalanceId: bal.id, amount: input.amount, paymentMethod: input.paymentMethod, referenceNo: input.referenceNo ?? null },
+    });
+
     return {
       payment,
       newAmountPaid: newAmountPaid.toFixed(2),

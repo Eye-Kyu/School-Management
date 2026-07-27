@@ -105,6 +105,43 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
   }
   const workload = Object.values(workloadMap).sort((a, b) => b.classes - a.classes).slice(0, 8);
 
+  // SMS cost summary — this month / last month / last 30 days by day.
+  // Queried directly (RLS-scoped to this admin's own school via msl_select_admin),
+  // same direct-Supabase pattern as everything else on this page.
+  const nowDate = new Date();
+  const startOfThisMonth = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).toISOString();
+  const startOfLastMonth = new Date(nowDate.getFullYear(), nowDate.getMonth() - 1, 1).toISOString();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const smsWindowStart = startOfLastMonth < thirtyDaysAgo ? startOfLastMonth : thirtyDaysAgo;
+
+  const { data: smsRows } = await supabase
+    .from('message_send_log')
+    .select('sent_at, cost_amount')
+    .eq('channel', 'SMS')
+    .gte('sent_at', smsWindowStart);
+
+  const thisMonthSms = (smsRows ?? []).filter((r) => r.sent_at >= startOfThisMonth);
+  const lastMonthSms = (smsRows ?? []).filter((r) => r.sent_at >= startOfLastMonth && r.sent_at < startOfThisMonth);
+  const last30Sms = (smsRows ?? []).filter((r) => r.sent_at >= thirtyDaysAgo);
+
+  const sumCost = (rows: { cost_amount: number | null }[]) => rows.reduce((s, r) => s + Number(r.cost_amount ?? 0), 0);
+  const thisMonthSmsCount = thisMonthSms.length;
+  const thisMonthSmsCost = sumCost(thisMonthSms);
+  const lastMonthSmsCount = lastMonthSms.length;
+  const lastMonthSmsCost = sumCost(lastMonthSms);
+
+  const byDay: Record<string, { count: number; cost: number }> = {};
+  for (const r of last30Sms) {
+    const day = r.sent_at.slice(0, 10);
+    (byDay[day] ??= { count: 0, cost: 0 });
+    byDay[day]!.count += 1;
+    byDay[day]!.cost += Number(r.cost_amount ?? 0);
+  }
+  const smsByDay = Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0]));
+
+  const smsAlertThreshold = Number(process.env.SMS_MONTHLY_COST_ALERT_KES ?? 5000);
+  const smsOverThreshold = thisMonthSmsCost > smsAlertThreshold;
+
   function csv(data: object[]) {
     if (!data.length) return '';
     const keys = Object.keys(data[0]!);
@@ -205,6 +242,56 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
                 return <Bar key={t.name} label={`${t.name} — ${t.classes} class${t.classes !== 1 ? 'es' : ''}`} pct={(t.classes / maxClasses) * 100} />;
               })}
             </div>
+          )}
+        </div>
+
+        {/* SMS cost summary */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <h2 className="font-semibold text-slate-800">SMS costs</h2>
+          {smsOverThreshold && (
+            <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              This month&apos;s SMS cost exceeds the alert threshold (KES {smsAlertThreshold.toLocaleString()}). Contact platform admin if this is unexpected.
+            </p>
+          )}
+          {thisMonthSmsCount === 0 && lastMonthSmsCount === 0 ? (
+            <p className="text-sm text-slate-400">No SMS sent yet this month. SMS activates when parents opt in and eligible notifications trigger.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-400 text-xs">This month</p>
+                  <p className="font-semibold text-slate-800">{thisMonthSmsCount} sent</p>
+                  <p className="text-xs text-slate-500">KES {thisMonthSmsCost.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs">Last month</p>
+                  <p className="font-semibold text-slate-800">{lastMonthSmsCount} sent</p>
+                  <p className="text-xs text-slate-500">KES {lastMonthSmsCost.toFixed(2)}</p>
+                </div>
+              </div>
+              {smsByDay.length > 0 && (
+                <div className="max-h-48 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 text-left">
+                        <th className="font-medium pb-1">Date</th>
+                        <th className="font-medium pb-1 text-right">Sent</th>
+                        <th className="font-medium pb-1 text-right">Cost (KES)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {smsByDay.map(([day, v]) => (
+                        <tr key={day} className="border-t border-slate-50">
+                          <td className="py-1 text-slate-600">{day}</td>
+                          <td className="py-1 text-right text-slate-600">{v.count}</td>
+                          <td className="py-1 text-right text-slate-600">{v.cost.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

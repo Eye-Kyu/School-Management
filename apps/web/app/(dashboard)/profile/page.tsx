@@ -16,7 +16,7 @@ export default async function ProfilePage() {
 
   const { data: prefs } = await supabase
     .from('notification_preferences')
-    .select('notification_type, email_enabled');
+    .select('notification_type, email_enabled, sms_enabled');
 
   const badges = userRow ? await getMyRoleBadges(supabase, userRow.id, userRow.role) : [];
 
@@ -33,7 +33,7 @@ export default async function ProfilePage() {
         phone={userRow?.phone ?? ''}
         role={userRow?.role ?? ''}
         avatarUrl={userRow?.avatar_url ?? null}
-        notifPrefs={(prefs ?? []) as { notification_type: string; email_enabled: boolean }[]}
+        notifPrefs={(prefs ?? []) as { notification_type: string; email_enabled: boolean; sms_enabled: boolean }[]}
       />
     </div>
   );

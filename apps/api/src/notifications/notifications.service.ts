@@ -2,6 +2,16 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
+import { AfricasTalkingClient } from './africastalking.client';
+
+// Notification types SMS applies to. Deliberately narrow (not "every type
+// with sms_enabled=true") — a preference row alone isn't trusted to gate a
+// real per-message cost; this is the actual scope boundary. PAYMENT_RECEIVED
+// is the only payment-notification type enabled for SMS (sub-sprint 2) —
+// RECEIPT_AVAILABLE fires at the same instant and would just duplicate the
+// cost for one event, since receipts are generated on-demand, not staged.
+const SMS_ELIGIBLE_TYPES = new Set<string>(['ABSENT_STUDENT', 'PAYMENT_RECEIVED']);
+const SMS_MAX_ATTEMPTS = 3;
 
 export type NotifType =
   | 'ABSENT_STUDENT'
@@ -14,6 +24,8 @@ export type NotifType =
   | 'ATTENDANCE_REMARK_REQUESTED'
   | 'ATTENDANCE_REMARK_DECIDED'
   | 'ABSENCE_REQUEST_SUBMITTED'
+  | 'PAYMENT_RECEIVED'
+  | 'RECEIPT_AVAILABLE'
   | 'ABSENCE_REQUEST_DECIDED';
 
 interface BrevoClient {
@@ -25,9 +37,14 @@ interface BrevoClient {
   }): Promise<unknown>;
 }
 
-type PendingNotif = { id: string; recipient_id: string; type: string; title: string; body: string };
-type UserRow = { id: string; email: string | null };
-type PrefRow = { user_id: string; notification_type: string; email_enabled: boolean };
+type PendingNotif = {
+  id: string; school_id: string; recipient_id: string; type: string; title: string; body: string;
+  email_sent_at: string | null; sms_status: string; sms_send_attempts: number;
+  metadata: { paymentId?: string; paymentType?: 'paystack' | 'paybill' } | null;
+};
+const RECEIPT_NOTIF_TYPES = new Set<string>(['PAYMENT_RECEIVED', 'RECEIPT_AVAILABLE']);
+type UserRow = { id: string; email: string | null; phone: string | null };
+type PrefRow = { user_id: string; notification_type: string; email_enabled: boolean; sms_enabled: boolean };
 
 export interface NotifPayload {
   schoolId: string;
@@ -49,6 +66,7 @@ export class NotificationsService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: ConfigService,
+    private readonly africasTalking: AfricasTalkingClient,
   ) {
     this.initBrevo();
   }
@@ -80,7 +98,7 @@ export class NotificationsService {
       body: p.body,
       metadata: p.metadata ?? null,
       email_sent_at: p.skipExternalChannels ? now : null,
-      sms_sent_at: now, // SMS not implemented; pre-fill so dispatcher skips this column
+      sms_status: p.skipExternalChannels ? 'ABANDONED' : 'PENDING',
       deliver_after: p.deliverAfter ?? null,
     }));
 
@@ -243,17 +261,23 @@ export class NotificationsService {
 
   /**
    * Dispatcher — called by the scheduler every minute.
-   * Sends pending email notifications via Brevo.
-   * Uses admin client to bypass RLS. Per-row errors are logged, not thrown.
+   * Sends pending email (Brevo) and, for SMS-eligible types, pending SMS
+   * (Africa's Talking) notifications. Uses admin client to bypass RLS.
+   * Per-row errors are logged, not thrown.
    */
   async dispatch(): Promise<void> {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-
     const now = new Date().toISOString();
+
+    // A row needs work if email hasn't been resolved yet, OR it's an
+    // SMS-eligible type still PENDING for SMS — these are independent
+    // lifecycles on the same row, so a row already done with email but
+    // still retrying SMS (or vice versa) must still be fetched.
+    const smsTypesList = Array.from(SMS_ELIGIBLE_TYPES).join(',');
     const { data: rows, error } = await this.supabase.admin
       .from('notifications')
-      .select('id, recipient_id, type, title, body, email_sent_at')
-      .is('email_sent_at', null)
+      .select('id, school_id, recipient_id, type, title, body, email_sent_at, sms_status, sms_send_attempts, metadata')
+      .or(`email_sent_at.is.null,and(sms_status.eq.PENDING,type.in.(${smsTypesList}))`)
       .or(`deliver_after.is.null,deliver_after.lte.${now}`)
       .gte('created_at', cutoff)
       .limit(100);
@@ -268,19 +292,19 @@ export class NotificationsService {
     const recipientIds = [...new Set(pendingRows.map((r) => r.recipient_id))];
 
     const [{ data: users }, { data: prefs }] = await Promise.all([
-      this.supabase.admin.from('users').select('id, email').in('id', recipientIds),
+      this.supabase.admin.from('users').select('id, email, phone').in('id', recipientIds),
       this.supabase.admin
         .from('notification_preferences')
-        .select('user_id, notification_type, email_enabled')
+        .select('user_id, notification_type, email_enabled, sms_enabled')
         .in('user_id', recipientIds),
     ]);
 
     const userMap = Object.fromEntries(((users ?? []) as UserRow[]).map((u) => [u.id, u]));
 
-    // prefMap[user_id][notification_type] = { email }
-    const prefMap: Record<string, Record<string, { email: boolean }>> = {};
+    // prefMap[user_id][notification_type] = { email, sms }
+    const prefMap: Record<string, Record<string, { email: boolean; sms: boolean }>> = {};
     for (const p of (prefs as PrefRow[]) ?? []) {
-      (prefMap[p.user_id] ??= {})[p.notification_type] = { email: p.email_enabled };
+      (prefMap[p.user_id] ??= {})[p.notification_type] = { email: p.email_enabled, sms: p.sms_enabled };
     }
 
     const senderEmail = this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app';
@@ -290,34 +314,113 @@ export class NotificationsService {
       const user = userMap[row.recipient_id];
       if (!user) continue;
 
-      const emailEnabled = prefMap[row.recipient_id]?.[row.type]?.email ?? true;
+      const notifPatch: Record<string, unknown> = {};
+      let genuinelyDelivered = false; // true delivery only — not the "no email on file, mark done" case
 
-      let emailSentAt: string | null = null;
-      if (emailEnabled && user.email) {
-        const unsubToken = this.buildUnsubscribeToken(row.recipient_id, row.type);
-        const sent = await this.sendEmail(senderEmail, senderName, user.email, row.title, row.body, unsubToken);
-        if (sent) {
-          emailSentAt = new Date().toISOString();
+      // ── Email (unchanged logic, but no longer short-circuits past SMS) ──
+      if (row.email_sent_at === null) {
+        const emailEnabled = prefMap[row.recipient_id]?.[row.type]?.email ?? true;
+        if (emailEnabled && user.email) {
+          const unsubToken = this.buildUnsubscribeToken(row.recipient_id, row.type);
+          const sent = await this.sendEmail(senderEmail, senderName, user.email, row.title, row.body, unsubToken);
+          if (sent) {
+            notifPatch.email_sent_at = new Date().toISOString();
+            genuinelyDelivered = true;
+          } else {
+            notifPatch.error_message = 'Email delivery failed — will retry';
+          }
         } else {
-          // Email failed — record error so admins can see it; retry next minute
-          await this.supabase.admin
-            .from('notifications')
-            .update({ error_message: 'Email delivery failed — will retry' })
-            .eq('id', row.id);
-          continue; // do not mark email_sent_at — retry on next dispatch
+          // No email address or user opted out — mark done so it's not re-attempted
+          notifPatch.email_sent_at = new Date().toISOString();
         }
-      } else {
-        // No email address or user opted out — mark done so it's not re-attempted
-        emailSentAt = new Date().toISOString();
       }
 
-      if (emailSentAt) {
-        await this.supabase.admin
-          .from('notifications')
-          .update({ email_sent_at: emailSentAt })
-          .eq('id', row.id);
+      // ── SMS — only the types this sub-sprint enables, only while PENDING ──
+      if (SMS_ELIGIBLE_TYPES.has(row.type) && row.sms_status === 'PENDING') {
+        const smsEnabled = prefMap[row.recipient_id]?.[row.type]?.sms ?? false;
+        if (!smsEnabled) {
+          notifPatch.sms_status = 'ABANDONED'; // opted out — not a failure, nothing to audit-log
+        } else if (!user.phone) {
+          notifPatch.sms_status = 'ABANDONED';
+          await this.logSmsAbandoned(row, 'No phone number on file');
+        } else {
+          const result = await this.africasTalking.sendSms(user.phone, row.body);
+          if (result.success) {
+            notifPatch.sms_status = 'SENT';
+            notifPatch.sms_sent_at = new Date().toISOString();
+            genuinelyDelivered = true;
+            await this.logMessageSend(row, user.phone, result);
+          } else {
+            const attempts = (row.sms_send_attempts ?? 0) + 1;
+            notifPatch.sms_send_attempts = attempts;
+            if (attempts >= SMS_MAX_ATTEMPTS) {
+              notifPatch.sms_status = 'ABANDONED';
+              await this.logSmsAbandoned(row, result.error ?? 'Unknown error');
+            }
+            // else: stays PENDING, retried on the next dispatch tick
+          }
+        }
+      }
+
+      if (Object.keys(notifPatch).length > 0) {
+        await this.supabase.admin.from('notifications').update(notifPatch).eq('id', row.id);
+      }
+
+      // Fold-in fix (Task 6a): wire up the previously-dead receipt_sent_at
+      // column, on whichever payment table the notification's own metadata
+      // points at. Whichever of PAYMENT_RECEIVED/RECEIPT_AVAILABLE actually
+      // delivers first wins — the second one's write is a no-op (WHERE
+      // receipt_sent_at IS NULL), so this is safe to call from both.
+      if (genuinelyDelivered && RECEIPT_NOTIF_TYPES.has(row.type) && row.metadata?.paymentId && row.metadata?.paymentType) {
+        await this.markReceiptSent(row.metadata.paymentType, row.metadata.paymentId);
       }
     }
+  }
+
+  private async markReceiptSent(paymentType: 'paystack' | 'paybill', paymentId: string): Promise<void> {
+    const table = paymentType === 'paybill' ? 'payment_paybill_transactions' : 'payment_transactions';
+    await this.supabase.admin
+      .from(table)
+      .update({ receipt_sent_at: new Date().toISOString() })
+      .eq('id', paymentId)
+      .is('receipt_sent_at', null);
+  }
+
+  private async logMessageSend(row: PendingNotif, phone: string, result: { providerMessageId: string | null; cost: string | null }) {
+    const { amount, currency } = this.parseSmsCost(result.cost);
+    await this.supabase.admin.from('message_send_log').insert({
+      id: randomUUID(),
+      school_id: row.school_id,
+      notification_id: row.id,
+      channel: 'SMS',
+      provider: 'AFRICASTALKING',
+      provider_message_id: result.providerMessageId,
+      recipient_phone: phone,
+      cost_amount: amount,
+      cost_currency: currency,
+      cost_raw: result.cost,
+    });
+  }
+
+  private async logSmsAbandoned(row: PendingNotif, reason: string) {
+    await this.supabase.admin.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: row.school_id,
+      user_id: row.recipient_id,
+      action: 'notification.sms_abandoned',
+      entity_type: 'notification',
+      entity_id: row.id,
+      metadata: { notifType: row.type, reason },
+    });
+  }
+
+  /** Parses Africa's Talking's raw cost string (e.g. "KES 0.8000") without guessing on an unexpected shape. */
+  private parseSmsCost(raw: string | null): { amount: number | null; currency: string | null } {
+    if (!raw) return { amount: null, currency: null };
+    const match = raw.trim().match(/^([A-Z]{3})\s+([\d.]+)$/);
+    if (!match) return { amount: null, currency: null };
+    const amount = Number(match[2]);
+    return { amount: Number.isFinite(amount) ? amount : null, currency: match[1] ?? null };
   }
 
   async sendTest(accessToken: string, title?: string, message?: string): Promise<void> {

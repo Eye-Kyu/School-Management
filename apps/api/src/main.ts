@@ -22,6 +22,13 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
+  // Render (and most PaaS hosts) sit behind a reverse proxy — without this,
+  // req.ip always resolves to the proxy's own address, not the real client's,
+  // which would make the new M-Pesa Daraja callback IP allowlist check
+  // exactly the wrong IP in production. app.set() isn't on INestApplication's
+  // type (it's an Express-only method) — go through the underlying instance.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   // ---------- CORS ----------
   // Only the configured web origin can call the API in dev.
   // A trailing slash breaks the exact-match comparison against the
