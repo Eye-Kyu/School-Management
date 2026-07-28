@@ -111,21 +111,24 @@ export default function ClassesClient({
 
       {showForm && (
         <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-lg p-5 space-y-4 max-w-md">
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
           <div>
-            <label className="block text-sm font-medium text-slate-700">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Grade 5 Blue"
+            <label htmlFor="class-name" className="block text-sm font-medium text-slate-700">Name</label>
+            <input id="class-name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="Grade 5 Blue"
+              aria-label="Name"
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Grade level</label>
-              <input type="number" min={0} max={20} value={gradeLevel} onChange={(e) => setGradeLevel(e.target.value)} required
+              <label htmlFor="class-grade-level" className="block text-sm font-medium text-slate-700">Grade level</label>
+              <input id="class-grade-level" type="number" min={0} max={20} value={gradeLevel} onChange={(e) => setGradeLevel(e.target.value)} required
+                aria-label="Grade level"
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Stream (optional)</label>
-              <input value={stream} onChange={(e) => setStream(e.target.value)} placeholder="Blue"
+              <label htmlFor="class-stream" className="block text-sm font-medium text-slate-700">Stream (optional)</label>
+              <input id="class-stream" value={stream} onChange={(e) => setStream(e.target.value)} placeholder="Blue"
+                aria-label="Stream (optional)"
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
           </div>
@@ -150,8 +153,9 @@ export default function ClassesClient({
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-0.5">Class Teacher</label>
+                    <label htmlFor={`class-teacher-${c.id}`} className="block text-[11px] text-slate-500 mb-0.5">Class Teacher</label>
                     <select
+                      id={`class-teacher-${c.id}`}
                       value={currentClassTeacher?.id ?? ''}
                       onChange={(e) => handleSetClassTeacher(c.id, c.name, e.target.value)}
                       className="rounded-md border border-slate-300 px-2 py-1 text-xs min-w-[160px]"
@@ -163,7 +167,7 @@ export default function ClassesClient({
                     </select>
                   </div>
                   <button onClick={() => handleDelete(c.id)}
-                    className="text-xs text-slate-400 hover:text-red-600 transition-colors">
+                    className="text-xs text-slate-500 hover:text-red-600 transition-colors">
                     Archive
                   </button>
                 </div>

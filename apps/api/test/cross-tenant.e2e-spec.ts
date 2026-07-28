@@ -188,6 +188,14 @@ describe('Cross-tenant isolation (e2e)', () => {
       const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
       if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
 
+      // Mirror the real login page's fire-and-forget audit call
+      // (apps/web/app/(auth)/login/page.tsx) so fixtures produce genuine
+      // auth.login audit_logs rows, same as a real sign-in would.
+      await request(app.getHttpServer())
+        .post('/auth/events')
+        .set('Authorization', `Bearer ${session.session!.access_token}`)
+        .send({ action: 'auth.login' });
+
       return { authId, userId: actualUserId, token: session.session!.access_token };
     }
 
@@ -1721,6 +1729,18 @@ describe('Cross-tenant isolation (e2e)', () => {
     expect(res.body.payments.webhookDeliveries.failedLast24h).toBeGreaterThanOrEqual(0);
   });
 
+  it('BUG-3 regression: signing in through the fixture writes a real auth.login audit_logs row', async () => {
+    const { userId } = await createExtraUser(schoolAId, 'PARENT', 'auth-login-audit');
+
+    const { data: rows } = await admin
+      .from('audit_logs')
+      .select('id, action, user_id')
+      .eq('user_id', userId)
+      .eq('action', 'auth.login');
+
+    expect(rows).toHaveLength(1);
+  });
+
   it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view system health', async () => {
     await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
     await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
@@ -2032,6 +2052,10 @@ describe('Cross-tenant isolation (e2e)', () => {
     });
     const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
     if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+    await request(app.getHttpServer())
+      .post('/auth/events')
+      .set('Authorization', `Bearer ${session.session!.access_token}`)
+      .send({ action: 'auth.login' });
     return { authId: authData.user.id, userId: row?.id ?? userId, token: session.session!.access_token };
   }
 

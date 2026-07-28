@@ -13,6 +13,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import ws from 'ws';
@@ -66,6 +67,10 @@ describe('Notifications: SMS via Africa\'s Talking (e2e)', () => {
     });
     const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
     if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+    await request(app.getHttpServer())
+      .post('/auth/events')
+      .set('Authorization', `Bearer ${session.session!.access_token}`)
+      .send({ action: 'auth.login' });
     return { userId: actualUserId, token: session.session!.access_token };
   }
 
@@ -138,6 +143,34 @@ describe('Notifications: SMS via Africa\'s Talking (e2e)', () => {
     expect(sendSmsMock).toHaveBeenCalledTimes(1);
     await notifications.dispatch(); // second tick — row is already terminal on both channels
     expect(sendSmsMock).toHaveBeenCalledTimes(1); // no double-send
+  });
+
+  it('BUG-4 regression: two concurrent dispatch() calls never both send the same SMS', async () => {
+    const parent = await seedUser(schoolAId, 'PARENT', 'sms-concurrent', '+254712345682');
+    await setSmsPref(parent.userId, schoolAId, true);
+    // A small synthetic delay widens the race window so both dispatch()
+    // calls' SELECTs reliably land before either one's claim UPDATE does —
+    // without this the race is still real (every call is a genuine network
+    // round-trip to Supabase, not synchronous), just narrower.
+    sendSmsMock.mockImplementation(() => new Promise((resolve) =>
+      setTimeout(() => resolve({ success: true, providerMessageId: 'ATXid_concurrent', cost: 'KES 0.8000' }), 50),
+    ));
+
+    await notifications.queue([{ schoolId: schoolAId, recipientId: parent.userId, type: 'ABSENT_STUDENT', title: 'Absence', body: 'Your child was marked absent today.' }]);
+
+    // Simulates the scheduler-overlap scenario BUG-4 describes, at the
+    // service level — below NotificationsScheduler's own new overlap guard,
+    // so this specifically proves the DB-level atomic claim in dispatch()
+    // itself is what prevents the double-send, not just the scheduler guard.
+    await Promise.all([notifications.dispatch(), notifications.dispatch()]);
+
+    expect(sendSmsMock).toHaveBeenCalledTimes(1);
+
+    const { data: logRows } = await admin.from('message_send_log').select('id').eq('school_id', schoolAId).eq('recipient_phone', '+254712345682');
+    expect(logRows).toHaveLength(1);
+
+    const { data: notifRow } = await admin.from('notifications').select('sms_status').eq('recipient_id', parent.userId).eq('type', 'ABSENT_STUDENT').single();
+    expect(notifRow?.sms_status).toBe('SENT');
   });
 
   it('never attempts SMS for a parent who has not opted in', async () => {

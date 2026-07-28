@@ -139,17 +139,17 @@ export default async function StudentHomePage() {
             </div>
             <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
               {(todaySlots ?? []).length === 0 ? (
-                <p className="text-sm text-slate-400">No classes scheduled today.</p>
+                <p className="text-sm text-slate-500">No classes scheduled today.</p>
               ) : (
                 (todaySlots ?? []).slice(0, 3).map((s: any) => (
                   <div key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="text-slate-400 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
+                    <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
                     <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
                   </div>
                 ))
               )}
               {(todaySlots ?? []).length > 3 && (
-                <p className="text-xs text-slate-400">+{(todaySlots ?? []).length - 3} more</p>
+                <p className="text-xs text-slate-500">+{(todaySlots ?? []).length - 3} more</p>
               )}
             </div>
           </div>
@@ -203,15 +203,15 @@ export default async function StudentHomePage() {
                   }`}>
                     {todayAttendance.status.charAt(0) + todayAttendance.status.slice(1).toLowerCase()} today
                   </span>
-                  <span className="text-slate-400 text-xs ml-2">
+                  <span className="text-slate-500 text-xs ml-2">
                     updated {new Date(todayAttendance.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </p>
               ) : (
-                <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+                <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
               )}
               {attTotal === 0 ? (
-                <p className="text-sm text-slate-400">No attendance recorded yet.</p>
+                <p className="text-sm text-slate-500">No attendance recorded yet.</p>
               ) : (
                 <div className="flex gap-4 text-sm">
                   <span className="text-emerald-600 font-medium">{attPresent} present</span>
@@ -235,7 +235,7 @@ export default async function StudentHomePage() {
                            rounded-r-xl px-5 py-3 shadow-sm">
                 <p className="font-medium text-sm">{a.title}</p>
                 <p className="text-sm text-slate-600 mt-0.5 line-clamp-2">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
+                <p className="text-xs text-slate-500 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
               </div>
             ))}
           </div>

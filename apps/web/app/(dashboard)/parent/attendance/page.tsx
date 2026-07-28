@@ -103,13 +103,13 @@ export default async function ParentAttendancePage() {
               style={{ width: `${rate}%` }}
             />
           </div>
-          <p className="text-xs text-slate-400 mt-2">{total} days recorded · {present + late} attended</p>
+          <p className="text-xs text-slate-500 mt-2">{total} days recorded · {present + late} attended</p>
         </div>
       )}
 
       {/* Records table */}
       {(records ?? []).length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-500">
           No attendance records yet this term.
         </div>
       ) : (
@@ -133,7 +133,7 @@ export default async function ParentAttendancePage() {
                       {r.status.charAt(0) + r.status.slice(1).toLowerCase()}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-slate-400 text-xs">{r.note ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-slate-500 text-xs">{r.note ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

@@ -106,13 +106,13 @@ export default async function TeacherHomePage() {
             </div>
             <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
               {(todaySlots ?? []).length === 0 ? (
-                <p className="text-sm text-slate-400">No classes today.</p>
+                <p className="text-sm text-slate-500">No classes today.</p>
               ) : (
                 (todaySlots ?? []).slice(0, 3).map((s: any) => (
                   <div key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="text-slate-400 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
+                    <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
                     <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
-                    <span className="text-slate-400 text-xs truncate">{s.class?.name}</span>
+                    <span className="text-slate-500 text-xs truncate">{s.class?.name}</span>
                   </div>
                 ))
               )}
@@ -171,7 +171,7 @@ export default async function TeacherHomePage() {
             return (
               <div key={d}
                 className={`rounded-xl border p-3 ${isToday ? 'bg-sky-50 border-sky-200' : 'bg-white border-slate-200'}`}>
-                <p className={`text-xs font-semibold uppercase mb-2 ${isToday ? 'text-sky-600' : 'text-slate-400'}`}>
+                <p className={`text-xs font-semibold uppercase mb-2 ${isToday ? 'text-sky-600' : 'text-slate-500'}`}>
                   {DAY_LABELS[d]}
                 </p>
                 {daySlots.length === 0 ? (
@@ -183,7 +183,7 @@ export default async function TeacherHomePage() {
                         className={`text-xs rounded-md px-2 py-1.5
                           ${isToday ? 'bg-sky-100 text-sky-800' : 'bg-slate-50 text-slate-700'}`}>
                         <p className="font-medium truncate">{s.subject?.name}</p>
-                        <p className={`${isToday ? 'text-sky-500' : 'text-slate-400'}`}>{formatTime(s.start_time)}</p>
+                        <p className={`${isToday ? 'text-sky-500' : 'text-slate-500'}`}>{formatTime(s.start_time)}</p>
                       </div>
                     ))}
                   </div>
@@ -205,7 +205,7 @@ export default async function TeacherHomePage() {
                            rounded-r-xl px-5 py-3 shadow-sm">
                 <p className="font-medium text-sm">{a.title}</p>
                 <p className="text-sm text-slate-600 mt-0.5 line-clamp-2">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
+                <p className="text-xs text-slate-500 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
               </div>
             ))}
           </div>

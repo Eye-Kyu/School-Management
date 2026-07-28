@@ -125,7 +125,7 @@ export default function ParentFeesClient({
             <p className="font-semibold text-emerald-800">Payment received!</p>
             <p className="text-sm text-emerald-600">Your payment has been confirmed. Your balance will update shortly.</p>
           </div>
-          <button onClick={() => setPaymentSuccess(false)} className="ml-auto text-emerald-400 hover:text-emerald-600 text-xl">×</button>
+          <button onClick={() => setPaymentSuccess(false)} aria-label="Dismiss" className="ml-auto text-emerald-400 hover:text-emerald-600 text-xl">×</button>
         </div>
       )}
 
@@ -142,7 +142,7 @@ export default function ParentFeesClient({
 
       {/* Balance records */}
       {balances.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-500">
           No fee records on file.
         </div>
       ) : (
@@ -179,16 +179,16 @@ export default function ParentFeesClient({
                 {/* Amounts */}
                 <div className="px-5 py-3 grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-xs text-slate-400">Amount billed</p>
+                    <p className="text-xs text-slate-500">Amount billed</p>
                     <p className="font-medium">{b.currency} {Number(b.amount_due).toLocaleString()}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Amount paid</p>
+                    <p className="text-xs text-slate-500">Amount paid</p>
                     <p className="font-medium text-emerald-600">{b.currency} {Number(b.amount_paid).toLocaleString()}</p>
                   </div>
                   {b.notes && (
                     <div className="col-span-2">
-                      <p className="text-xs text-slate-400">Note</p>
+                      <p className="text-xs text-slate-500">Note</p>
                       <p className="text-slate-600">{b.notes}</p>
                     </div>
                   )}
@@ -213,6 +213,7 @@ export default function ParentFeesClient({
                         value={payAmount[b.id] ?? ''}
                         onChange={(e) => setPayAmount((p) => ({ ...p, [b.id]: e.target.value }))}
                         placeholder={`${outstanding.toLocaleString()} (full amount)`}
+                        aria-label={`Payment amount for ${student?.user?.full_name ?? 'this balance'}`}
                         className="flex-1 min-w-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
                       />
                       <button
@@ -243,11 +244,11 @@ export default function ParentFeesClient({
                   {isExpanded && (
                     <div className="mt-3">
                       {payments.length === 0 ? (
-                        <p className="text-xs text-slate-400">No payments recorded yet.</p>
+                        <p className="text-xs text-slate-500">No payments recorded yet.</p>
                       ) : (
                         <table className="w-full text-xs">
                           <thead>
-                            <tr className="text-slate-400 border-b border-slate-100">
+                            <tr className="text-slate-500 border-b border-slate-100">
                               <th className="text-left pb-1 font-medium">Date</th>
                               <th className="text-left pb-1 font-medium">Method</th>
                               <th className="text-right pb-1 font-medium">Amount</th>
@@ -266,7 +267,7 @@ export default function ParentFeesClient({
                                 <td className="py-1.5 text-right font-medium text-emerald-700">
                                   {b.currency} {Number(p.amount).toLocaleString()}
                                 </td>
-                                <td className="py-1.5 text-slate-400 hidden sm:table-cell">
+                                <td className="py-1.5 text-slate-500 hidden sm:table-cell">
                                   {p.reference_no ?? '—'}
                                 </td>
                               </tr>

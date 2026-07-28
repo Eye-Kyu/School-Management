@@ -39,7 +39,7 @@ export default function PrefectPanel() {
         {status.schoolPrefects.map((sp) => (
           <Badge key={sp.id} variant="schoolPrefect">{sp.role_title}</Badge>
         ))}
-        <Link href="/prefect-role-info" className="text-xs text-slate-400 hover:text-slate-600 underline">About this role</Link>
+        <Link href="/prefect-role-info" className="text-xs text-slate-500 hover:text-slate-600 underline">About this role</Link>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -134,23 +134,24 @@ function IncidentForm({ scope, onClose }: { scope: 'CLASS' | 'SCHOOL'; onClose: 
 
   return (
     <form onSubmit={handleSubmit} className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Student</label>
-        <select value={studentId} onChange={(e) => setStudentId(e.target.value)} required className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+        <label htmlFor="prefect-incident-student" className="block text-xs font-medium text-slate-600 mb-1">Student</label>
+        <select id="prefect-incident-student" value={studentId} onChange={(e) => setStudentId(e.target.value)} required className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
           <option value="">— select student —</option>
           {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Category</label>
-        <select value={category} onChange={(e) => setCategory(e.target.value as typeof category)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+        <label htmlFor="prefect-incident-category" className="block text-xs font-medium text-slate-600 mb-1">Category</label>
+        <select id="prefect-incident-category" value={category} onChange={(e) => setCategory(e.target.value as typeof category)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Description (at least 20 characters)</label>
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} required minLength={20}
+        <label htmlFor="prefect-incident-description" className="block text-xs font-medium text-slate-600 mb-1">Description (at least 20 characters)</label>
+        <textarea id="prefect-incident-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} required minLength={20}
+          aria-label="Description"
           className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none" />
       </div>
       <div className="flex gap-2">
@@ -199,12 +200,13 @@ function MessageForm({ target, onClose }: { target: 'CLASS_TEACHER' | 'ADMIN'; o
 
   return (
     <form onSubmit={handleSend} className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">
+        <label htmlFor="prefect-message-body" className="block text-xs font-medium text-slate-600 mb-1">
           Message to {target === 'CLASS_TEACHER' ? 'your Class Teacher' : 'School Admin'}
         </label>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} required
+        <textarea id="prefect-message-body" value={body} onChange={(e) => setBody(e.target.value)} rows={3} required
+          aria-label="Message"
           className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none"
           placeholder="This is delivered as a one-way notification, not a chat — the recipient can't reply through this." />
       </div>

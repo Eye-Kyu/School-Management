@@ -111,7 +111,7 @@ export default async function StudentGradesPage({
       )}
 
       {gradeRows.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-12 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-12 text-center text-sm text-slate-500">
           No grades recorded for {selectedTermName} yet.
         </div>
       ) : (
@@ -145,7 +145,7 @@ export default async function StudentGradesPage({
                     {group.rows.map((row) => {
                       const score = row.grade?.score;
                       const pct = typeof score === 'number' ? ((score / row.max_marks) * 100).toFixed(1) : null;
-                      const color = pct === null ? 'text-slate-400'
+                      const color = pct === null ? 'text-slate-500'
                         : parseFloat(pct) >= 70 ? 'text-emerald-700 font-semibold'
                         : parseFloat(pct) >= 50 ? 'text-amber-600 font-semibold'
                         : 'text-rose-600 font-semibold';
@@ -156,7 +156,7 @@ export default async function StudentGradesPage({
                             {typeof score === 'number' ? `${score} / ${row.max_marks}` : '—'}
                           </td>
                           <td className={`px-4 py-2.5 text-center ${color}`}>{pct ? `${pct}%` : '—'}</td>
-                          <td className="px-5 py-2.5 text-slate-400 text-xs hidden sm:table-cell">
+                          <td className="px-5 py-2.5 text-slate-500 text-xs hidden sm:table-cell">
                             {row.grade?.comment ?? ''}
                           </td>
                         </tr>

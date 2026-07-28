@@ -1,15 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { calculateSubjectAverage, assignLetterGrade } from '@school-manager/types';
 import PrintButton from './PrintButton';
 import CommentForm from './CommentForm';
-
-function gradeLetter(pct: number) {
-  if (pct >= 80) return 'A';
-  if (pct >= 70) return 'B';
-  if (pct >= 60) return 'C';
-  if (pct >= 50) return 'D';
-  return 'E';
-}
 
 export default async function ReportCardPage({
   params,
@@ -68,13 +61,12 @@ export default async function ReportCardPage({
     const row = bySubject[sub.id]!;
     row.assessmentCount++;
   }
-  // Compute average percentage per subject
+  // Average percentage per subject — shared with report-card/[studentId]/page.tsx
+  // via @school-manager/types (see packages/types/src/grading.ts).
   for (const subId of Object.keys(bySubject)) {
     const subAssessments = (assessments ?? []).filter((a) => (a.subject as any)?.id === subId);
     const scored = subAssessments.filter((a) => gradeMap[a.id] != null);
-    if (scored.length === 0) { bySubject[subId]!.avg = null; continue; }
-    const pctSum = scored.reduce((s, a) => s + (gradeMap[a.id]! / a.max_marks) * 100, 0);
-    bySubject[subId]!.avg = pctSum / scored.length;
+    bySubject[subId]!.avg = calculateSubjectAverage(scored.map((a) => ({ score: gradeMap[a.id]!, maxMarks: a.max_marks })));
   }
 
   // Attendance for the term
@@ -171,7 +163,7 @@ export default async function ReportCardPage({
             <tr><td colSpan={5} style={{ padding: '12px 8px', textAlign: 'center', color: '#94a3b8' }}>No grades recorded this term.</td></tr>
           ) : subjectRows.map((s, i) => {
             const pct = s.avg;
-            const letter = pct != null ? gradeLetter(pct) : '—';
+            const letter = pct != null ? assignLetterGrade(pct) : '—';
             const remarks = pct == null ? '—' : pct >= 70 ? 'Good' : pct >= 50 ? 'Average' : 'Below Average';
             return (
               <tr key={i} style={{ background: i % 2 ? '#f8fafc' : 'white', borderBottom: '1px solid #e2e8f0' }}>
@@ -188,7 +180,7 @@ export default async function ReportCardPage({
               <td style={{ padding: '6px 8px' }}>Overall</td>
               <td />
               <td style={{ padding: '6px 8px', textAlign: 'center' }}>{overallAvg.toFixed(1)}</td>
-              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{gradeLetter(overallAvg)}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{assignLetterGrade(overallAvg)}</td>
               <td />
             </tr>
           )}

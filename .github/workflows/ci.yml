@@ -55,6 +55,14 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      # Runs on every CI build, not just PRs touching supabase/migrations/ —
+      # matches the RLS check's own always-on precedent above rather than
+      # adding a new path-filtering action dependency for a check this cheap.
+      - name: Migration parity check
+        run: bash infra/scripts/check-migrations.sh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       - name: Cross-tenant isolation e2e test
         run: pnpm --filter @school-manager/api test:e2e
         env:

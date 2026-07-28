@@ -98,7 +98,7 @@ export default function StudentAssignmentsClient({
 
   if (assignments.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
+      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
         No assignments yet.
       </div>
     );
@@ -116,7 +116,7 @@ export default function StudentAssignmentsClient({
             <div className="px-5 py-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-medium text-slate-800">{a.title}</p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5">
                   {(a.subject as any)?.name ?? ''}
                   {(a.term as any)?.name ? ` · ${(a.term as any).name}` : ''}
                 </p>
@@ -134,7 +134,7 @@ export default function StudentAssignmentsClient({
                       ✓ Submitted{sub.is_late ? ' (late)' : ''}
                       {sub.grade_score != null ? ` · ${sub.grade_score}${a.max_score ? `/${a.max_score}` : ''}` : ''}
                     </span>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-500">
                       Submitted on {new Date(sub.submitted_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </p>
                     <button onClick={() => setViewOpen(viewOpen === a.id ? null : a.id)}
@@ -187,7 +187,7 @@ export default function StudentAssignmentsClient({
                   </div>
                 )}
                 {!sub.content && sub.file_urls.length === 0 && (
-                  <p className="text-sm text-slate-400">No content recorded for this submission.</p>
+                  <p className="text-sm text-slate-500">No content recorded for this submission.</p>
                 )}
               </div>
             )}
@@ -196,21 +196,22 @@ export default function StudentAssignmentsClient({
             {isOpen && !sub && (
               <form onSubmit={(e) => handleSubmit(e, a)}
                 className="border-t border-slate-100 px-5 py-4 space-y-3 bg-slate-50">
-                {err && <p className="text-sm text-red-600">{err}</p>}
+                {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
                 {uploadProgress && <p className="text-sm text-slate-500">{uploadProgress}</p>}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Your answer (text)</label>
-                  <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4}
-                    maxLength={10000} placeholder="Type your answer here…"
+                  <label htmlFor={`assignment-answer-${a.id}`} className="block text-sm font-medium text-slate-700 mb-1">Your answer (text)</label>
+                  <textarea id={`assignment-answer-${a.id}`} value={content} onChange={(e) => setContent(e.target.value)} rows={4}
+                    maxLength={10000} placeholder="Type your answer here…" aria-label="Your answer"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Attach files (optional)</label>
-                  <input type="file" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
+                  <label htmlFor={`assignment-files-${a.id}`} className="block text-sm font-medium text-slate-700 mb-1">Attach files (optional)</label>
+                  <input id={`assignment-files-${a.id}`} type="file" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
                     onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+                    aria-label="Attach files"
                     className="text-sm text-slate-600" />
                   {files.length > 0 && (
-                    <p className="text-xs text-slate-400 mt-1">{files.length} file(s) selected</p>
+                    <p className="text-xs text-slate-500 mt-1">{files.length} file(s) selected</p>
                   )}
                 </div>
                 <div className="flex justify-end">

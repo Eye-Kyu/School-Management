@@ -154,7 +154,7 @@ export default async function ParentHomePage() {
       </div>
 
       {students.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-500">
           Ask your school admin to link your child's account.
         </div>
       ) : (
@@ -181,12 +181,12 @@ export default async function ParentHomePage() {
                             }`}>
                               {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
                             </span>
-                            <span className="text-slate-400 text-xs ml-2">
+                            <span className="text-slate-500 text-xs ml-2">
                               updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </p>
                         ) : (
-                          <p className="text-sm text-slate-400 mt-1.5">Not yet marked for today.</p>
+                          <p className="text-sm text-slate-500 mt-1.5">Not yet marked for today.</p>
                         )}
                       </Link>
                       {childBadges.length > 0 && <RoleBadgeList badges={childBadges} className="mt-2" />}
@@ -215,11 +215,11 @@ export default async function ParentHomePage() {
                 </div>
                 <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
                   {(todaySlots ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-400">No classes today.</p>
+                    <p className="text-sm text-slate-500">No classes today.</p>
                   ) : (
                     (todaySlots ?? []).slice(0, 3).map((s: any) => (
                       <div key={s.id} className="flex items-center gap-3 text-sm">
-                        <span className="text-slate-400 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
+                        <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
                         <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
                       </div>
                     ))
@@ -261,16 +261,16 @@ export default async function ParentHomePage() {
                           }`}>
                             {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
                           </span>
-                          <span className="text-slate-400 text-xs ml-2">
+                          <span className="text-slate-500 text-xs ml-2">
                             updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </p>
                       ) : (
-                        <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+                        <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
                       );
                     })()}
                     {attTotal === 0 ? (
-                      <p className="text-sm text-slate-400">No attendance recorded yet.</p>
+                      <p className="text-sm text-slate-500">No attendance recorded yet.</p>
                     ) : (
                       <div className="flex gap-4 text-sm">
                         <span className="text-emerald-600 font-medium">{attPresent} present</span>
@@ -321,7 +321,7 @@ export default async function ParentHomePage() {
                 </div>
                 <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
                   {(feeBalances ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-400">No fee records yet.</p>
+                    <p className="text-sm text-slate-500">No fee records yet.</p>
                   ) : (
                     <p className="text-sm text-slate-600">
                       {(feeBalances ?? []).length} balance record{(feeBalances ?? []).length !== 1 ? 's' : ''} on file
@@ -343,7 +343,7 @@ export default async function ParentHomePage() {
                   {(announcements ?? []).slice(0, 2).map((a: any) => (
                     <div key={a.id}>
                       <p className="text-sm font-medium text-slate-700 truncate">{a.title}</p>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500">
                         {new Date(a.published_at).toLocaleDateString()}
                       </p>
                     </div>

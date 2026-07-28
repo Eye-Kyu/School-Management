@@ -36,6 +36,10 @@ export default function StudentsClient({
   const [admissionNo, setAdmissionNo] = useState('');
   const [classId, setClassId] = useState('');
   const [gender, setGender] = useState('');
+  const [birthCertificateNo, setBirthCertificateNo] = useState('');
+  const [nationality, setNationality] = useState('');
+  const [county, setCounty] = useState('');
+  const [subCounty, setSubCounty] = useState('');
   const [tempPassword, setTempPassword] = useState('');
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
@@ -45,6 +49,32 @@ export default function StudentsClient({
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ imported: number; failed: number; rows: any[] } | null>(null);
   const [importError, setImportError] = useState('');
+
+  // NEMIS export state
+  const [nemisFormat, setNemisFormat] = useState<'csv' | 'xlsx'>('csv');
+  const [nemisExporting, setNemisExporting] = useState(false);
+  const [nemisError, setNemisError] = useState('');
+
+  async function handleNemisExport() {
+    setNemisExporting(true);
+    setNemisError('');
+    try {
+      const res = await apiFetch<{ data: string; filename: string; format: 'csv' | 'xlsx' }>(
+        `/students/nemis-export?format=${nemisFormat}`,
+      );
+      const blob = res.format === 'xlsx'
+        ? new Blob([Uint8Array.from(atob(res.data), (c) => c.charCodeAt(0))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        : new Blob([res.data], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = res.filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setNemisError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setNemisExporting(false);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -56,6 +86,10 @@ export default function StudentsClient({
       admissionNo,
       classId: classId || undefined,
       gender: (gender as 'MALE' | 'FEMALE' | 'OTHER') || undefined,
+      birthCertificateNo: birthCertificateNo || undefined,
+      nationality: nationality || undefined,
+      county: county || undefined,
+      subCounty: subCounty || undefined,
     });
     if (!result.success) { setFormError(result.error.issues[0]?.message ?? 'Invalid'); return; }
 
@@ -69,6 +103,7 @@ export default function StudentsClient({
       setStudents((prev) => [...prev, created]);
       setMode('list');
       setFullName(''); setEmail(''); setPhone(''); setAdmissionNo(''); setClassId(''); setGender('');
+      setBirthCertificateNo(''); setNationality(''); setCounty(''); setSubCounty('');
       router.refresh();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed');
@@ -135,38 +170,64 @@ export default function StudentsClient({
         >
           {mode === 'bulk' ? 'Cancel' : '↑ Bulk import CSV'}
         </button>
+
+        <div className="flex items-center gap-1.5 ml-auto">
+          <label htmlFor="nemis-export-format" className="sr-only">Export format</label>
+          <select
+            id="nemis-export-format"
+            value={nemisFormat}
+            onChange={(e) => setNemisFormat(e.target.value as 'csv' | 'xlsx')}
+            className="rounded-md border border-slate-300 px-2 py-2 text-sm"
+          >
+            <option value="csv">CSV</option>
+            <option value="xlsx">XLSX</option>
+          </select>
+          <button
+            onClick={handleNemisExport}
+            disabled={nemisExporting}
+            title="Downloads active students' NEMIS/KEMIS fields (name, admission no., DOB, gender, county, guardian contact, etc.) for your school only. Field list is a best-effort match — verify against your school's KEMIS account before a real Ministry submission (see docs/audits/nemis-format-verified.md)."
+            className="px-4 py-2 rounded-md text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {nemisExporting ? 'Exporting…' : '↓ Export for NEMIS'}
+          </button>
+        </div>
       </div>
+      {nemisError && <p role="alert" className="text-sm text-red-600">{nemisError}</p>}
 
       {/* Single enrol form */}
       {mode === 'single' && (
         <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-lg p-5 space-y-4 max-w-md">
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          {formError && <p role="alert" className="text-sm text-red-600">{formError}</p>}
           <div>
-            <label className="block text-sm font-medium text-slate-700">Full name</label>
-            <input value={fullName} onChange={(e) => setFullName(e.target.value)} required
+            <label htmlFor="student-full-name" className="block text-sm font-medium text-slate-700">Full name</label>
+            <input id="student-full-name" value={fullName} onChange={(e) => setFullName(e.target.value)} required
+              aria-label="Full name"
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              <label htmlFor="student-email" className="block text-sm font-medium text-slate-700">Email</label>
+              <input id="student-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                aria-label="Email"
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Phone</label>
-              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254..."
+              <label htmlFor="student-phone" className="block text-sm font-medium text-slate-700">Phone</label>
+              <input id="student-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254..."
+                aria-label="Phone"
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Admission no.</label>
-              <input value={admissionNo} onChange={(e) => setAdmissionNo(e.target.value)} required
+              <label htmlFor="student-admission-no" className="block text-sm font-medium text-slate-700">Admission no.</label>
+              <input id="student-admission-no" value={admissionNo} onChange={(e) => setAdmissionNo(e.target.value)} required
+                aria-label="Admission no."
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Gender</label>
-              <select value={gender} onChange={(e) => setGender(e.target.value)}
+              <label htmlFor="student-gender" className="block text-sm font-medium text-slate-700">Gender</label>
+              <select id="student-gender" value={gender} onChange={(e) => setGender(e.target.value)}
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
                 <option value="">—</option>
                 <option value="MALE">Male</option>
@@ -176,13 +237,49 @@ export default function StudentsClient({
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Class</label>
-            <select value={classId} onChange={(e) => setClassId(e.target.value)}
+            <label htmlFor="student-class" className="block text-sm font-medium text-slate-700">Class</label>
+            <select id="student-class" value={classId} onChange={(e) => setClassId(e.target.value)}
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
               <option value="">— Assign later —</option>
               {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+              NEMIS details (optional)
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="student-birth-cert" className="block text-sm font-medium text-slate-700">Birth certificate no.</label>
+                <input id="student-birth-cert" value={birthCertificateNo} onChange={(e) => setBirthCertificateNo(e.target.value)}
+                  aria-label="Birth certificate no."
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="student-nationality" className="block text-sm font-medium text-slate-700">Nationality</label>
+                <input id="student-nationality" value={nationality} onChange={(e) => setNationality(e.target.value)}
+                  aria-label="Nationality"
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="student-county" className="block text-sm font-medium text-slate-700">County</label>
+                <input id="student-county" value={county} onChange={(e) => setCounty(e.target.value)}
+                  aria-label="County"
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="student-sub-county" className="block text-sm font-medium text-slate-700">Sub-county</label>
+                <input id="student-sub-county" value={subCounty} onChange={(e) => setSubCounty(e.target.value)}
+                  aria-label="Sub-county"
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              UPI number and special-needs notes aren&apos;t collected here yet — use the NEMIS export&apos;s notes for how to add them for now.
+            </p>
+          </div>
+
           <button type="submit" disabled={formLoading}
             className="bg-slate-900 text-white px-4 py-2 rounded-md text-sm disabled:opacity-50">
             {formLoading ? 'Enrolling…' : 'Enrol student'}
@@ -198,14 +295,16 @@ export default function StudentsClient({
             <pre className="text-xs bg-slate-50 border border-slate-200 rounded px-3 py-2 whitespace-pre-wrap font-mono">
               {SAMPLE_CSV}
             </pre>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-slate-500 mt-1">
               Required: <span className="font-medium">admissionNo, fullName, className</span>. Optional: gender (MALE/FEMALE/OTHER), dateOfBirth (YYYY-MM-DD).
               <br />Class names must exactly match existing classes. A placeholder login will be generated for each student.
             </p>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Paste CSV</label>
+            <label htmlFor="students-bulk-csv" className="block text-xs font-medium text-slate-600 mb-1">Paste CSV</label>
             <textarea
+              id="students-bulk-csv"
+              aria-label="Paste CSV"
               value={csv}
               onChange={(e) => setCsv(e.target.value)}
               rows={10}
@@ -214,7 +313,7 @@ export default function StudentsClient({
               required
             />
           </div>
-          {importError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{importError}</p>}
+          {importError && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{importError}</p>}
           {importResult && (
             <div className="space-y-2">
               <p className={importResult.imported > 0 ? 'text-sm text-emerald-700 font-medium' : 'text-sm text-slate-500'}>
@@ -275,7 +374,7 @@ export default function StudentsClient({
                   Report Card
                 </Link>
                 <button onClick={() => handleDeactivate(s.id)}
-                  className="text-xs text-slate-400 hover:text-red-600 transition-colors">Remove</button>
+                  className="text-xs text-slate-500 hover:text-red-600 transition-colors">Remove</button>
               </div>
             </div>
           ))}

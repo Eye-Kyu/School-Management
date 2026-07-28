@@ -1,8 +1,77 @@
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import ExcelJS from 'exceljs';
 import { SupabaseService } from '../supabase/supabase.service';
+import { csvCell } from '../common/csv';
 import type { CreateStudentInput, UpdateUserInput, PromoteStudentsInput } from '@school-manager/types';
 import { StudentCsvRow } from '@school-manager/types';
+
+// ── NEMIS/KEMIS export (Phase 0 sub-sprint 4) ──────────────────────────────
+// Field list/order is NOT independently verified against an official
+// government spec (none is publicly discoverable) — see
+// docs/audits/nemis-format-verified.md.
+
+export type NemisRow = {
+  admissionNo: string;
+  givenName: string;
+  middleName: string;
+  surname: string;
+  gender: string;
+  dateOfBirth: string;
+  birthCertificateNo: string;
+  upiNumber: string;
+  nationality: string;
+  county: string;
+  subCounty: string;
+  className: string;
+  specialNeedsNotes: string;
+  guardianName: string;
+  guardianPhone: string;
+  enrollmentDate: string;
+};
+
+export const NEMIS_COLUMNS: { key: keyof NemisRow; label: string }[] = [
+  { key: 'admissionNo', label: 'AdmissionNo' },
+  { key: 'givenName', label: 'GivenName' },
+  { key: 'middleName', label: 'MiddleName' },
+  { key: 'surname', label: 'Surname' },
+  { key: 'gender', label: 'Gender' },
+  { key: 'dateOfBirth', label: 'DateOfBirth' },
+  { key: 'birthCertificateNo', label: 'BirthCertificateNo' },
+  { key: 'upiNumber', label: 'UPINumber' },
+  { key: 'nationality', label: 'Nationality' },
+  { key: 'county', label: 'County' },
+  { key: 'subCounty', label: 'SubCounty' },
+  { key: 'className', label: 'Class' },
+  { key: 'specialNeedsNotes', label: 'SpecialNeedsNotes' },
+  { key: 'guardianName', label: 'GuardianName' },
+  { key: 'guardianPhone', label: 'GuardianPhone' },
+  { key: 'enrollmentDate', label: 'EnrollmentDate' },
+];
+
+/** Best-effort heuristic — this codebase has no stored first/middle/last split, only `users.full_name`. */
+export function splitFullName(fullName: string): { given: string; middle: string; surname: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { given: '', middle: '', surname: '' };
+  if (parts.length === 1) return { given: parts[0]!, middle: '', surname: '' };
+  if (parts.length === 2) return { given: parts[0]!, middle: '', surname: parts[1]! };
+  return { given: parts[0]!, middle: parts.slice(1, -1).join(' '), surname: parts[parts.length - 1]! };
+}
+
+export function buildNemisCsv(rows: NemisRow[]): string {
+  const header = NEMIS_COLUMNS.map((c) => c.label).join(',');
+  const lines = rows.map((r) => NEMIS_COLUMNS.map((c) => csvCell(String(r[c.key] ?? ''))).join(','));
+  return [header, ...lines].join('\n');
+}
+
+export async function buildNemisXlsx(rows: NemisRow[]): Promise<string> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('NEMIS Export');
+  sheet.columns = NEMIS_COLUMNS.map((c) => ({ header: c.label, key: c.key as string, width: 18 }));
+  for (const row of rows) sheet.addRow(row);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer).toString('base64');
+}
 
 @Injectable()
 export class StudentsService {
@@ -80,6 +149,12 @@ export class StudentsService {
         date_of_birth: input.dateOfBirth ?? null,
         gender: input.gender ?? null,
         current_class_id: input.classId ?? null,
+        birth_certificate_no: input.birthCertificateNo ?? null,
+        upi_number: input.upiNumber ?? null,
+        nationality: input.nationality ?? null,
+        county: input.county ?? null,
+        sub_county: input.subCounty ?? null,
+        special_needs_notes: input.specialNeedsNotes ?? null,
         updated_at: new Date().toISOString(),
       })
       .select()
@@ -111,7 +186,23 @@ export class StudentsService {
     const { error } = await client.from('users').update(patch).eq('id', student.user_id);
     if (error) throw new Error(error.message);
 
-    await this.audit(client, accessToken, student.school_id, 'student.update', 'student', studentId, patch);
+    // NEMIS fields live on the students row, not users — patched separately,
+    // only when at least one was actually sent.
+    const nemisPatch: Record<string, unknown> = {};
+    if (input.birthCertificateNo !== undefined) nemisPatch.birth_certificate_no = input.birthCertificateNo;
+    if (input.upiNumber !== undefined) nemisPatch.upi_number = input.upiNumber;
+    if (input.nationality !== undefined) nemisPatch.nationality = input.nationality;
+    if (input.county !== undefined) nemisPatch.county = input.county;
+    if (input.subCounty !== undefined) nemisPatch.sub_county = input.subCounty;
+    if (input.specialNeedsNotes !== undefined) nemisPatch.special_needs_notes = input.specialNeedsNotes;
+
+    if (Object.keys(nemisPatch).length > 0) {
+      nemisPatch.updated_at = new Date().toISOString();
+      const { error: nemisError } = await client.from('students').update(nemisPatch).eq('id', studentId);
+      if (nemisError) throw new Error(nemisError.message);
+    }
+
+    await this.audit(client, accessToken, student.school_id, 'student.update', 'student', studentId, { ...patch, ...nemisPatch });
     return { updated: true };
   }
 
@@ -268,6 +359,81 @@ export class StudentsService {
       failed: rows.filter(r => r.result === 'error').length,
       rows,
     };
+  }
+
+  /**
+   * Task 1 (Phase 0 sub-sprint 4) — one-click NEMIS export. Follows this
+   * codebase's established export contract exactly (attendance/grades
+   * exports): plain JSON `{ data, filename, format }`, browser builds the
+   * download client-side — no server Content-Disposition streaming, since
+   * nothing else in this app does that except the one-off PDF receipt link
+   * that has to work with no client-side JS (this endpoint always does).
+   */
+  async nemisExport(accessToken: string, format: 'csv' | 'xlsx') {
+    const client = this.supabase.forUser(accessToken);
+    await this.requireAdmin(accessToken);
+
+    const { data: school } = await client.from('schools').select('id').single();
+    if (!school) throw new ForbiddenException('No school found');
+
+    const { data: students, error } = await client
+      .from('students')
+      .select(`
+        id, admission_no, gender, date_of_birth, enrollment_date,
+        birth_certificate_no, upi_number, nationality, county, sub_county, special_needs_notes,
+        user:users!inner(full_name),
+        class:classes!current_class_id(name)
+      `)
+      .eq('is_active', true)
+      .order('admission_no');
+    if (error) throw new Error(error.message);
+
+    const studentIds = (students ?? []).map((s) => s.id);
+    const { data: guardianLinks } = studentIds.length
+      ? await client.from('guardians').select('student_id, parent:users!user_id(full_name, phone)').in('student_id', studentIds)
+      : { data: [] as { student_id: string; parent: { full_name: string; phone: string | null } | null }[] };
+
+    // Picks the first linked guardian — `guardians.is_primary` exists but
+    // isn't reliably set by any create flow today, so it isn't a safe filter.
+    const guardianByStudent = new Map<string, { full_name: string; phone: string | null }>();
+    for (const g of guardianLinks ?? []) {
+      if (!guardianByStudent.has(g.student_id) && g.parent) {
+        guardianByStudent.set(g.student_id, g.parent as unknown as { full_name: string; phone: string | null });
+      }
+    }
+
+    const rows: NemisRow[] = (students ?? []).map((s) => {
+      const { given, middle, surname } = splitFullName((s.user as unknown as { full_name: string })?.full_name ?? '');
+      const guardian = guardianByStudent.get(s.id);
+      return {
+        admissionNo: s.admission_no,
+        givenName: given,
+        middleName: middle,
+        surname,
+        gender: s.gender ?? '',
+        dateOfBirth: s.date_of_birth ?? '',
+        birthCertificateNo: s.birth_certificate_no ?? '',
+        upiNumber: s.upi_number ?? '',
+        nationality: s.nationality ?? '',
+        county: s.county ?? '',
+        subCounty: s.sub_county ?? '',
+        className: (s.class as unknown as { name: string } | null)?.name ?? '',
+        specialNeedsNotes: s.special_needs_notes ?? '',
+        guardianName: guardian?.full_name ?? '',
+        guardianPhone: guardian?.phone ?? '',
+        enrollmentDate: s.enrollment_date,
+      };
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `nemis_export_${today}.${format}`;
+    const data = format === 'xlsx' ? await buildNemisXlsx(rows) : buildNemisCsv(rows);
+
+    await this.audit(client, accessToken, school.id, 'student.nemis_export', 'student', school.id, {
+      format, row_count: rows.length, school_id: school.id,
+    });
+
+    return { data, filename, format };
   }
 
   private async requireAdmin(accessToken: string) {

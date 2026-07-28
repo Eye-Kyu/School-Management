@@ -81,11 +81,11 @@ export default function NotificationsView({
       <details open className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <summary className="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-700 flex items-center justify-between">
           Alerts
-          <span className="text-xs font-normal text-slate-400">{alerts.length}</span>
+          <span className="text-xs font-normal text-slate-500">{alerts.length}</span>
         </summary>
         <div className="border-t border-slate-100 divide-y divide-slate-100">
           {alerts.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-400 text-center">No alerts.</p>
+            <p className="px-4 py-6 text-sm text-slate-500 text-center">No alerts.</p>
           ) : alerts.map((a) => (
             <div key={a.id} className={`px-4 py-3 flex items-start justify-between gap-3 ${a.isRead ? '' : 'bg-blue-50/40'}`}>
               <Link href={a.href} className="min-w-0 flex-1">
@@ -94,7 +94,7 @@ export default function NotificationsView({
                 )}
                 <p className={`text-sm font-medium ${a.isRead ? 'text-slate-700' : 'text-slate-900'}`}>{a.title}</p>
                 <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{timeAgo(a.timestamp)}</p>
+                <p className="text-xs text-slate-500 mt-1">{timeAgo(a.timestamp)}</p>
               </Link>
               <div className="flex items-center gap-2 shrink-0">
                 {a.notifType === 'ABSENT_STUDENT' && (
@@ -103,7 +103,7 @@ export default function NotificationsView({
                     : <AcknowledgeButton id={a.id} />
                 )}
                 {!a.isRead && (
-                  <button onClick={() => markAlertRead(a)} className="text-xs text-slate-400 hover:text-slate-700">
+                  <button onClick={() => markAlertRead(a)} className="text-xs text-slate-500 hover:text-slate-700">
                     Mark read
                   </button>
                 )}
@@ -116,19 +116,19 @@ export default function NotificationsView({
       <details open className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <summary className="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-700 flex items-center justify-between">
           Conversations
-          <span className="text-xs font-normal text-slate-400">{conversations.length}</span>
+          <span className="text-xs font-normal text-slate-500">{conversations.length}</span>
         </summary>
         <div className="border-t border-slate-100 divide-y divide-slate-100">
           {conversations.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-400 text-center">No unread conversations.</p>
+            <p className="px-4 py-6 text-sm text-slate-500 text-center">No unread conversations.</p>
           ) : conversations.map((c) => (
             <div key={c.id} className="px-4 py-3 flex items-start justify-between gap-3 bg-blue-50/40">
               <Link href={c.href} className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-900">{c.otherPartyName}</p>
                 <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{c.preview}</p>
-                <p className="text-xs text-slate-400 mt-1">{timeAgo(c.timestamp)} · {c.unreadCount} unread</p>
+                <p className="text-xs text-slate-500 mt-1">{timeAgo(c.timestamp)} · {c.unreadCount} unread</p>
               </Link>
-              <button onClick={() => markConversationRead(c)} className="text-xs text-slate-400 hover:text-slate-700 shrink-0">
+              <button onClick={() => markConversationRead(c)} className="text-xs text-slate-500 hover:text-slate-700 shrink-0">
                 Mark read
               </button>
             </div>
@@ -139,11 +139,11 @@ export default function NotificationsView({
       <details open className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <summary className="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-700 flex items-center justify-between">
           Reminders
-          <span className="text-xs font-normal text-slate-400">{reminders.length}</span>
+          <span className="text-xs font-normal text-slate-500">{reminders.length}</span>
         </summary>
         <div className="border-t border-slate-100 divide-y divide-slate-100">
           {reminders.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-400 text-center">Nothing upcoming.</p>
+            <p className="px-4 py-6 text-sm text-slate-500 text-center">Nothing upcoming.</p>
           ) : reminders.map((r) => (
             <Link key={r.id} href={r.href} className="block px-4 py-3 hover:bg-slate-50">
               <p className="text-sm font-medium text-slate-800">{r.title}</p>

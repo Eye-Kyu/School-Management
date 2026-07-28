@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
@@ -42,6 +42,11 @@ export class StudentsController {
       throw new Error('csv field is required');
     }
     return this.students.importCsv(token, user.id, body.csv);
+  }
+
+  @Get('nemis-export')
+  nemisExport(@AccessToken() token: string, @Query('format') format?: string) {
+    return this.students.nemisExport(token, format === 'xlsx' ? 'xlsx' : 'csv');
   }
 
   @Patch(':id')

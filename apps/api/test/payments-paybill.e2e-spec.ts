@@ -75,6 +75,10 @@ describe('Payments: M-Pesa Paybill reconciliation (e2e)', () => {
     });
     const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
     if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+    await request(app.getHttpServer())
+      .post('/auth/events')
+      .set('Authorization', `Bearer ${session.session!.access_token}`)
+      .send({ action: 'auth.login' });
     return { userId: row?.id ?? userId, token: session.session!.access_token };
   }
 

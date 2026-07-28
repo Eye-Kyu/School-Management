@@ -264,6 +264,20 @@ export class NotificationsService {
    * Sends pending email (Brevo) and, for SMS-eligible types, pending SMS
    * (Africa's Talking) notifications. Uses admin client to bypass RLS.
    * Per-row errors are logged, not thrown.
+   *
+   * Concurrency safety (BUG-4, docs/bug-triage.md): NotificationsScheduler's
+   * @Cron(EVERY_MINUTE) has no overlap guard of its own (see
+   * notifications.scheduler.ts), so a tick that takes >60s can run
+   * concurrently with the next one on the same process — a real risk
+   * independent of horizontal scaling. The SMS branch below atomically
+   * claims a row (sms_status PENDING -> SENDING via a single conditional
+   * UPDATE...RETURNING) before ever calling the paid, external, non-
+   * idempotent sendSms() — a second concurrent dispatch() sees 0 rows
+   * claimed and skips. The email branch has the identical theoretical race
+   * (email_sent_at IS NULL -> send -> write) but is a deliberately accepted,
+   * lower-severity gap: no per-message cost, and no retry-attempt-count
+   * field to build the same claim pattern onto without a new column. Do not
+   * remove the claim step or "simplify" this back to select-then-send.
    */
   async dispatch(): Promise<void> {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
@@ -344,20 +358,38 @@ export class NotificationsService {
           notifPatch.sms_status = 'ABANDONED';
           await this.logSmsAbandoned(row, 'No phone number on file');
         } else {
-          const result = await this.africasTalking.sendSms(user.phone, row.body);
-          if (result.success) {
-            notifPatch.sms_status = 'SENT';
-            notifPatch.sms_sent_at = new Date().toISOString();
-            genuinelyDelivered = true;
-            await this.logMessageSend(row, user.phone, result);
-          } else {
-            const attempts = (row.sms_send_attempts ?? 0) + 1;
-            notifPatch.sms_send_attempts = attempts;
-            if (attempts >= SMS_MAX_ATTEMPTS) {
-              notifPatch.sms_status = 'ABANDONED';
-              await this.logSmsAbandoned(row, result.error ?? 'Unknown error');
+          // Atomically claim this row before ever calling the paid,
+          // external, non-idempotent sendSms() — see the dispatch() header
+          // comment. A second concurrent dispatch() run attempting the same
+          // claim affects 0 rows and is treated exactly like "already
+          // handled" — no send, no notifPatch.sms_status write at all.
+          const { data: claimed } = await this.supabase.admin
+            .from('notifications')
+            .update({ sms_status: 'SENDING' })
+            .eq('id', row.id)
+            .eq('sms_status', 'PENDING')
+            .select('id');
+
+          if (claimed && claimed.length > 0) {
+            const result = await this.africasTalking.sendSms(user.phone, row.body);
+            if (result.success) {
+              notifPatch.sms_status = 'SENT';
+              notifPatch.sms_sent_at = new Date().toISOString();
+              genuinelyDelivered = true;
+              await this.logMessageSend(row, user.phone, result);
+            } else {
+              const attempts = (row.sms_send_attempts ?? 0) + 1;
+              notifPatch.sms_send_attempts = attempts;
+              if (attempts >= SMS_MAX_ATTEMPTS) {
+                notifPatch.sms_status = 'ABANDONED';
+                await this.logSmsAbandoned(row, result.error ?? 'Unknown error');
+              } else {
+                // Release the claim for the next tick's retry — must be
+                // explicit now (previously implicit, since a retry-able
+                // failure never touched the row at all).
+                notifPatch.sms_status = 'PENDING';
+              }
             }
-            // else: stays PENDING, retried on the next dispatch tick
           }
         }
       }
