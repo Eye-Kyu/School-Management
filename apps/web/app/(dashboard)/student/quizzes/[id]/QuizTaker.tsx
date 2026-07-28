@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import posthog from 'posthog-js';
 
 type Option = { id: string; text: string };
 type Question = {
@@ -137,6 +138,12 @@ export default function QuizTaker({
       answers,
     }).eq('quiz_id', quiz.id).eq('student_id', studentId);
 
+    posthog.capture('quiz_submitted', {
+      score,
+      max_score: maxScore,
+      question_count: rawQuestions.length,
+      answered_count: Object.keys(answers).length,
+    });
     setResult({ score, max: maxScore });
     setSubmitted(true);
     setSubmitting(false);

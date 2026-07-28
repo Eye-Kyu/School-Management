@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import posthog from 'posthog-js';
 
 type RosterStudent = {
   id: string;
@@ -54,6 +55,7 @@ export default function GradeEntryClient({
         method: 'POST',
         body: JSON.stringify({ scores }),
       });
+      posthog.capture('assessment_grades_saved', { student_count: initialRoster.length, marked_count: filled });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
+import posthog from 'posthog-js';
 
 type RosterStudent = {
   id: string;
@@ -200,6 +201,7 @@ export default function AttendanceClient({
         method: 'POST',
         body: JSON.stringify({ classId, date, records }),
       });
+      posthog.capture('attendance_submitted', { student_count: editableRoster.length });
       setSaved(true);
       // The teacher dashboard's "Today's Checklist" auto-checks attendance
       // via a live TanStack Query — invalidate it so it flips immediately
@@ -225,6 +227,7 @@ export default function AttendanceClient({
           items: changedStudents.map((s) => ({ studentId: s.id, proposedStatus: statuses[s.id] ?? 'PRESENT' })),
         }),
       });
+      posthog.capture('attendance_remark_requested', { changed_count: changedStudents.length });
       setSaved(true);
       setShowRemarkReason(false);
       setRemarkReason('');

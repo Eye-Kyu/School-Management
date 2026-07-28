@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { apiFetch, API_BASE } from '@/lib/api';
 import { EmailLoginInput } from '@school-manager/types';
+import posthog from 'posthog-js';
 
 type Tab = 'email' | 'phone';
 
@@ -87,6 +88,10 @@ function LoginPageInner() {
       .maybeSingle();
 
     const role = userRow?.role as string | undefined;
+
+    posthog.identify(user!.id, { role });
+    posthog.capture('user_signed_in', { login_method: 'email' });
+
     const next = searchParams.get('next');
     const destination = next || (role && ROLE_HOME[role]) || '/';
 
@@ -128,6 +133,10 @@ function LoginPageInner() {
       .maybeSingle();
 
     const role = userRow?.role as string | undefined;
+
+    posthog.identify(user!.id, { role });
+    posthog.capture('user_signed_in', { login_method: 'phone_otp' });
+
     const next = searchParams.get('next');
     const destination = next || (role && ROLE_HOME[role]) || '/';
 

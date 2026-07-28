@@ -174,6 +174,9 @@ importers:
       posthog-js:
         specifier: ^1.376.0
         version: 1.376.0
+      posthog-node:
+        specifier: ^5.46.1
+        version: 5.46.1(rxjs@7.8.2)
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -1409,6 +1412,9 @@ packages:
   '@posthog/core@1.29.9':
     resolution: {integrity: sha512-DjvuIyBZ2Z/gBhtZlITlM2D8PlnMsHSQ1D78dbUYoVsgGguvanpJTobZObjLlFkybyvfZFYkpoJkFNI/2Pw4IQ==}
 
+  '@posthog/core@1.45.1':
+    resolution: {integrity: sha512-tLtvzomavb2PPWdGYKsusyIzIeL2Px47v348Smibkay7sMy/83TyPk+Ptsp2NdeOgJsbuwSxWkR2+XA0aSCAaA==}
+
   '@posthog/nextjs-config@1.9.34':
     resolution: {integrity: sha512-1lkIZIK3J9Fp5aWcHSRcKImuEhrNR9TOxf1YN7/IzhIzad2LTztBBAT+GgwOTiA+nrEMy87C91KXJ9/WecK+Ww==}
     engines: {node: ^20.20.0 || >=22.22.0}
@@ -1420,6 +1426,9 @@ packages:
 
   '@posthog/types@1.376.0':
     resolution: {integrity: sha512-gbFfxCuZDs/D4QZMwdE+smD1jsuqgGpS6yKGHZZ19foxMy8RYHsU1E47iG1b88n/uN02fAabLibVwuxLtq8juw==}
+
+  '@posthog/types@1.398.0':
+    resolution: {integrity: sha512-sJMkl4k+u8yS/0fjHsKqE9xTdsAh30a2WvgChiptellnVoE0e8QJKFgqOMD2sk8FaEArPdeFklAhXvmENAt3Sg==}
 
   '@posthog/webpack-plugin@1.4.34':
     resolution: {integrity: sha512-nwzl0yMUtsczhKyeCFE/fh+Th+YRpNPjM7mfDpIIapli9tMRQbte7ES1dFT+XtQj0KhwRVnADKiBDsp6LOudhA==}
@@ -4535,6 +4544,15 @@ packages:
   posthog-js@1.376.0:
     resolution: {integrity: sha512-YGfQ6gSmqmEh287PHjXRDJ9zML3Su1UIt1+xjRy7Yk6yW43Sc7sFK3CpCkLchCGhIA4x6VaqK+LaqB+7+MCo7A==}
 
+  posthog-node@5.46.1:
+    resolution: {integrity: sha512-WjCqExq44pBdyg9MSsH6UAE0tNZ88p4aIuVFicgqhjf2Fbws6IhS4ioYUa4aBrbUPS9EDRXtBTtF5DpP1ml8Pw==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      rxjs: ^7.0.0
+    peerDependenciesMeta:
+      rxjs:
+        optional: true
+
   preact@10.29.2:
     resolution: {integrity: sha512-7tNmwg/7mzzAoB/8kSg6Hl37JraAZw3Z3A0JSY7VXlZwo82Xn0G7wKbNNs2qoF4ZEEsQGTwDAroNdqKs1ofJxQ==}
 
@@ -6732,6 +6750,10 @@ snapshots:
     dependencies:
       '@posthog/types': 1.376.0
 
+  '@posthog/core@1.45.1':
+    dependencies:
+      '@posthog/types': 1.398.0
+
   '@posthog/nextjs-config@1.9.34(next@14.2.35(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(webpack@5.97.1(postcss@8.5.15))':
     dependencies:
       '@posthog/cli': 0.7.13
@@ -6747,6 +6769,8 @@ snapshots:
       cross-spawn: 7.0.6
 
   '@posthog/types@1.376.0': {}
+
+  '@posthog/types@1.398.0': {}
 
   '@posthog/webpack-plugin@1.4.34(webpack@5.97.1(postcss@8.5.15))':
     dependencies:
@@ -10391,6 +10415,12 @@ snapshots:
       preact: 10.29.2
       query-selector-shadow-dom: 1.0.1
       web-vitals: 5.2.0
+
+  posthog-node@5.46.1(rxjs@7.8.2):
+    dependencies:
+      '@posthog/core': 1.45.1
+    optionalDependencies:
+      rxjs: 7.8.2
 
   preact@10.29.2: {}
 
