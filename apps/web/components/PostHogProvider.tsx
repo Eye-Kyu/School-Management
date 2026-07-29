@@ -8,6 +8,7 @@ import { useEffect, Suspense } from 'react';
 if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_POSTHOG_KEY) {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://eu.i.posthog.com',
+    defaults: '2026-01-30',
     capture_pageview: false, // handled manually below
     capture_pageleave: true,
     person_profiles: 'identified_only',
