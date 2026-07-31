@@ -8,7 +8,7 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 
 ## Open
 
-### BUG-1: middleware doesn't redirect a roleless/soft-deleted-but-authenticated session away from dashboard routes
+### BUG-1: `middleware.ts` doesn't redirect when an authenticated session has no resolvable role
 
 **Found during:** 2026-07-25, "Cross-account access hardening" audit (bug-fix PR — Task 2).
 
@@ -37,6 +37,30 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 **Why not fixed here:** This is a correctness/audit-integrity bug, not a cross-account access bug — nobody's data was read or modified incorrectly. Task 2's scope was specifically unauthorized data access/modification.
 
 **Suggested fix:** After the `.update(...).select()` call, check that a row was actually returned/affected before writing the audit log or queuing the notification; if none, throw `ForbiddenException` (matching the pattern already used elsewhere in this same file, e.g. `_authorizeRemark`).
+
+---
+
+### BUG-6: a new message inflates the unread badge by 2, not 1, and reading the thread only clears half of it
+
+**Found during:** 2026-07-31, Bucket 1 PR 1 (unified dashboard feed) e2e verification — a newly-written test (`cross-tenant.e2e-spec.ts`, "Task 7: unread-count includes unread conversations, and drops after marking read") asserted `withUnread.count === baseline.count + 1` after one fresh message; it consistently got `+2` instead, even in isolation with no other tests running (ruled out as a flake). Root-caused by reading the actual query paths, not by adjusting the assertion until it passed.
+
+**File:** `apps/api/src/messaging/messaging.service.ts`'s `_insertMessage()` (queues the duplicate signal) and `markRead()` (only clears one of the two), `apps/api/src/notifications-aggregation/notifications-aggregation.service.ts`'s `getUnreadCount()` (sums both without deduping).
+
+**What's wrong:** Sending a message creates **two independent, never-reconciled "you have an unread message" signals** for the recipient:
+1. `_insertMessage()` increments the conversation's own `{parent,teacher,admin}_unread_count` column (counted by `buildConversations()`).
+2. The same call also does `this.notifications.queue([{ type: 'NEW_MESSAGE', ... }])`, inserting an unread row into the plain `notifications` table (counted by `buildAlerts()`, since `buildAlerts()` fetches all `notifications` rows with no `type` filter).
+
+`getUnreadCount()` sums `unreadAlerts + feed.conversations.length + feed.reminders.length` — both signals count, so one message adds 2 to the badge, not 1. Confirmed pre-existing, not introduced by this PR: `git diff HEAD` on the now-deleted `NotificationsService.unreadCount()` shows the exact same shape — `alertsUnreadCount()` (all unread `notifications`, no type filter) added to `conversationsUnreadCount()` — so this double-count has been live since before this PR touched anything.
+
+Worse, they never reconcile: `messaging.service.ts`'s `markRead()` (called by `PATCH /messaging/conversations/:id/read`, which is all `ThreadClient.tsx` calls when a user opens a conversation) only zeroes the conversation's unread counter — it never touches the paired `NEW_MESSAGE` row in `notifications`. That row only clears via a separate, explicit `PATCH /dashboard-feed/read` call, which nothing in the message-reading flow triggers (confirmed: `FeedCard.tsx`'s card click just navigates via `<Link href>`; only its distinct hover-only "mark read" affordance calls `onMarkRead`). So after a user reads a message thread normally, the badge drops by 1 (the conversation's contribution) but stays permanently inflated by 1 per message ever received, until the user separately finds and dismisses each `NEW_MESSAGE` alert in the feed/notifications page.
+
+**Impact:** Real, live, user-facing — the bell badge and dashboard feed's unread count both over-count and under-clear for every message anyone receives. Not a security/data issue. Predates this PR; this PR's new e2e coverage is simply the first thing to have ever asserted the exact arithmetic and caught it.
+
+**Why not fixed here:** Out of scope for a dashboard-feed/settings-consolidation PR — the actual fix requires a product decision (should `NEW_MESSAGE` notifications even exist as a separate Alerts-bucket item given the conversation itself already represents "unread," or should `markRead()` also clear the paired notification row) that shouldn't be made silently inside an unrelated PR's verification pass.
+
+**Suggested fix:** Most likely correct direction: stop double-representing the same event. Either (a) exclude `type = 'NEW_MESSAGE'` from `buildAlerts()`'s query entirely (the conversation already represents it in the Conversations bucket, with its own href/preview), or (b) keep both but have `messaging.service.ts`'s `markRead()` also mark any `NEW_MESSAGE` notifications for that `conversationId` as read (join on `metadata->>'conversationId'`). Option (a) is simpler and matches how the Alerts bucket already treats `ATTENDANCE_REMARK_REQUESTED`/`ABSENCE_REQUEST_DECIDED` as the only real "notification-only" types.
+
+**Test-impact note:** `cross-tenant.e2e-spec.ts`'s "Task 7: unread-count includes unread conversations..." test was updated to assert the actual, verified behavior (`baseline + 2` after sending, `baseline + 1` — not fully back to baseline — after marking only the conversation read) rather than the originally-assumed `+1`/`+0`, with a comment pointing here. The test still correctly proves conversations contribute to the badge; it no longer asserts the incorrect "fully reconciled" behavior this bug shows doesn't exist.
 
 ---
 
@@ -72,6 +96,29 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 - **Scope boundary, deliberately not fixed:** the identical theoretical race exists on the email path (`email_sent_at IS NULL` → send → write) — email has no per-message cost and no existing retry-attempt-count field to build the same claim pattern onto without a new column, so this is a documented, accepted, lower-severity gap (see the doc comment above `dispatch()` in the source), not fixed in this pass.
 
 **Verification:** new concurrency regression test in `apps/api/test/notifications-sms.e2e-spec.ts` ("BUG-4 regression: two concurrent dispatch() calls never both send the same SMS") calls `Promise.all([notifications.dispatch(), notifications.dispatch()])` against one queued PENDING SMS-eligible notification and asserts `sendSmsMock` was called exactly once, `message_send_log` has exactly one row, and `sms_status` ends at `'SENT'`. New unit test `apps/api/src/__tests__/notifications-scheduler.spec.ts` covers the scheduler's overlap guard in isolation (mocks `svc.dispatch()` to hang, fires the decorated method twice, asserts the service method was invoked once) — passing, 127/127 API unit tests green. **Live-verified 2026-07-29** after the user applied migration `20260728000075`: full `notifications-sms.e2e-spec.ts` run, 7/7 passing, including the new concurrency test. One unrelated issue surfaced and was fixed during that verification — the new test's hardcoded phone number (`+254712345680`) collided with the pre-existing "retries a provider failure" test's own hardcoded number in the same school, tripping the `users(school_id, phone)` unique index and silently leaving that other test's user with `phone: null` (the seed fixture's upsert doesn't check its own error). A test-fixture bug, not a dispatch-logic bug — fixed by giving the new test its own phone number (`+254712345682`).
+
+---
+
+### BUG-5: `notifications.acknowledged_at` migration was never actually applied to production, despite `_migration_log` claiming it was
+
+**Found during:** 2026-07-29/30, Bucket 1 PR 1 (unified dashboard feed) — surfaced as a live e2e test failure (`PATCH /dashboard-feed/read` test) when porting the `/notifications` page's existing Alerts query into a new backend service. The query is unchanged from what the page has been running in production — this bug predates this PR entirely, it was just never caught by an e2e test until now.
+
+**File:** `supabase/migrations/20260527000019_notification_ack.sql` (the migration, never actually run), `apps/api/src/notifications-aggregation/notifications-aggregation.service.ts`'s `buildAlerts()` (where it surfaced), `apps/web/app/(dashboard)/notifications/NotificationsView.tsx`'s `AcknowledgeButton` (the feature this column exists for).
+
+**What was wrong:** `public.notifications` did not have an `acknowledged_at` column in the live database — confirmed directly via a `SELECT acknowledged_at FROM notifications LIMIT 1` probe, which returned Postgres error `42703: column notifications.acknowledged_at does not exist`. But `_migration_log` had a row for `20260527000019_notification_ack.sql` (which does `ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ`), so `infra/scripts/check-migrations.sh` reported no drift — a **false negative**. Almost certainly explained by how the log was built: sub-sprint 4's migration-tracking system backfilled all 72 pre-existing filenames into `_migration_log` on the assumption each had already been applied (verified in bulk by checking most tables existed, not by checking every single column of every single migration) — this is the one column that assumption got wrong.
+
+**Impact:** Real, was live. Any query anywhere that selected `notifications.acknowledged_at` — the `/notifications` page's Alerts section (`apps/web/app/(dashboard)/notifications/page.tsx`) being the main one — had been failing/returning no rows in production the whole time. `AcknowledgeButton` (used for `ABSENT_STUDENT` notifications) could never have actually rendered correctly, since the page-level query it depends on errored out first.
+
+Broader than initially scoped: `buildAlerts()`'s `notifications`-table query failing meant **regular `notifications` rows never contributed to the dashboard feed or the bell's unread count at all** (platform messages, conversations, and reminders were unaffected — separate queries within the same function/service). Confirmed via three live e2e failures, all with the identical shape ("expected count to include a just-queued notification, got the pre-existing count unchanged"), all blocked on this one column, none a regression from Bucket 1 PR 1's own logic:
+- `apps/api/test/dashboard-feed.e2e-spec.ts` — `PATCH /dashboard-feed/read marks a notification read...`
+- `apps/api/test/cross-tenant.e2e-spec.ts` — `Notification bubble: a new notification takes the count from 0 to 1...`
+- `apps/api/test/cross-tenant.e2e-spec.ts` — `Notification bubble: marking one notification read never affects another user's count...`
+
+**Fix (2026-07-31, applied directly by the project owner against production):** `ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;` — the exact statement `20260527000019_notification_ack.sql` already contained. Idempotent, safe, no data migration needed since the column is purely additive and nullable.
+
+**Verification:** Live column-existence probe against production (`SELECT acknowledged_at FROM notifications LIMIT 1`) confirmed the column now exists. Re-ran the three previously-blocked tests live: `dashboard-feed.e2e-spec.ts` went from 4/5 to **5/5 passing**; `cross-tenant.e2e-spec.ts -t "Notification bubble"` went from 1/3 to **3/3 passing**. Full live e2e regression (`pnpm test:e2e`, all spec files) re-run afterward to confirm no other drift — see `EXECUTION_PLAN.md`'s Bucket 1 entry for the final suite-wide count.
+
+**Follow-up not done here (still worth doing):** spot-check a handful of the other 71 backfilled `_migration_log` filenames' actual column-level effects, not just table existence — `check-migrations.sh` can only ever catch "this file was never run at all," never "this file was recorded as run but didn't fully take effect." No other instances found or suspected; this is a hygiene suggestion, not a known second occurrence.
 
 ---
 

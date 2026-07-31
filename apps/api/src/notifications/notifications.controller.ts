@@ -18,14 +18,6 @@ export class NotificationsController {
 
   @ApiBearerAuth()
   @UseGuards(AuthGuard)
-  @Get('unread-count')
-  async unreadCount(@AccessToken() token: string) {
-    const count = await this.svc.unreadCount(token);
-    return { count };
-  }
-
-  @ApiBearerAuth()
-  @UseGuards(AuthGuard)
   @Patch('read')
   markRead(@AccessToken() token: string, @Body() body: { ids?: string[] }) {
     return this.svc.markRead(token, body.ids ?? []);

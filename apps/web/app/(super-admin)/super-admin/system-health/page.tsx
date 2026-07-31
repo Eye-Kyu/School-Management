@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { usePlatformPermissions } from '@/lib/hooks/usePlatformPermissions';
 import StatCard from '../../StatCard';
+import ConfigurationTab from './ConfigurationTab';
 
 type Overview = {
   api: { status: 'OK'; version: string; timestamp: string };
@@ -46,9 +49,32 @@ function SectionHeading({ title, status }: { title: string; status: string }) {
   );
 }
 
+type Tab = 'overview' | 'configuration';
+
 export default function SystemHealthPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-400 text-center py-6">Loading…</p>}>
+      <SystemHealthContent />
+    </Suspense>
+  );
+}
+
+// useSearchParams() (for the ?tab=configuration deep link) needs a Suspense
+// boundary in the App Router — same pattern already used in
+// super-admin/audit/page.tsx for its own searchParams-dependent section.
+function SystemHealthContent() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [err, setErr] = useState('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { hasPermission } = usePlatformPermissions();
+  const canManageSettings = hasPermission('MANAGE_PLATFORM_SETTINGS');
+
+  const tab: Tab = searchParams.get('tab') === 'configuration' ? 'configuration' : 'overview';
+
+  function setTab(next: Tab) {
+    router.replace(next === 'configuration' ? '/super-admin/system-health?tab=configuration' : '/super-admin/system-health');
+  }
 
   useEffect(() => {
     apiFetch<Overview>('/super-admin/system-health/overview')
@@ -63,9 +89,38 @@ export default function SystemHealthPage() {
         <p className="text-sm text-slate-500 mt-0.5">A real-time operational snapshot — every number here is measured live or drawn from real records, not projected.</p>
       </div>
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {/* Hand-rolled tab toggle — no Tabs component exists anywhere in this
+          codebase yet, and pulling in shadcn/radix for two buttons would be
+          inconsistent with everything else here. The Configuration tab is
+          only shown to SuperAdmins with MANAGE_PLATFORM_SETTINGS — a UX
+          layer matching how SuperAdminShell already filters nav items; the
+          real boundary is the backend's own @RequirePlatformPermission. */}
+      {canManageSettings && (
+        <div className="flex gap-1 border-b border-slate-200">
+          <button
+            onClick={() => setTab('overview')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === 'overview' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setTab('configuration')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === 'configuration' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Configuration
+          </button>
+        </div>
+      )}
 
-      {!overview ? (
+      {tab === 'configuration' && canManageSettings ? (
+        <ConfigurationTab />
+      ) : err ? (
+        <p className="text-sm text-red-600">{err}</p>
+      ) : !overview ? (
         <p className="text-sm text-slate-400 text-center py-6">Loading…</p>
       ) : (
         <>

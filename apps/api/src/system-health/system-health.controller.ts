@@ -19,4 +19,14 @@ export class SystemHealthController {
   getOverview() {
     return this.svc.getOverview();
   }
+
+  // Narrower permission than this controller's own route-level VIEW_SYSTEM_HEALTH
+  // gate, matching what the old standalone Platform Settings page required —
+  // preserves the exact prior permission boundary for this specific content.
+  @ApiOperation({ summary: 'Read-only platform configuration — the deployment env vars that actually shape behavior' })
+  @RequirePlatformPermission('MANAGE_PLATFORM_SETTINGS')
+  @Get('configuration')
+  getConfiguration() {
+    return this.svc.getConfiguration();
+  }
 }

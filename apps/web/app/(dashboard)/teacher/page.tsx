@@ -5,6 +5,7 @@ import UpcomingEvents from '@/components/UpcomingEvents';
 import RoleBadgeList from '@/components/RoleBadgeList';
 import { getMyRoleBadges } from '@/lib/roleBadges';
 import TodaysChecklist from './TodaysChecklist';
+import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
 
 export default async function TeacherHomePage() {
   const supabase = createClient();
@@ -55,13 +56,6 @@ export default async function TeacherHomePage() {
   const { data: school } = await supabase.from('schools').select('timezone').maybeSingle();
 
   const badges = _uRow ? await getMyRoleBadges(supabase, _uRow.id, 'TEACHER') : [];
-
-  const { data: announcements } = await supabase
-    .from('announcements')
-    .select('id, title, body, published_at')
-    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
-    .order('published_at', { ascending: false })
-    .limit(3);
 
   const now = new Date().toISOString();
   const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -194,21 +188,11 @@ export default async function TeacherHomePage() {
         </div>
       </section>
 
-      {/* Announcements */}
-      {(announcements ?? []).length > 0 && (
+      {/* What's new for you */}
+      {_uRow && (
         <section>
-          <h2 className="text-base font-semibold mb-3 text-slate-700">Announcements</h2>
-          <div className="space-y-2">
-            {(announcements ?? []).map((a: any) => (
-              <div key={a.id}
-                className="bg-white border border-slate-100 border-l-4 border-l-violet-500
-                           rounded-r-xl px-5 py-3 shadow-sm">
-                <p className="font-medium text-sm">{a.title}</p>
-                <p className="text-sm text-slate-600 mt-0.5 line-clamp-2">{a.body}</p>
-                <p className="text-xs text-slate-500 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
-              </div>
-            ))}
-          </div>
+          <h2 className="text-base font-semibold mb-3 text-slate-700">What&apos;s new for you</h2>
+          <DashboardFeed userId={_uRow.id} role="TEACHER" />
         </section>
       )}
 

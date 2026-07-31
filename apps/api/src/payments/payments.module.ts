@@ -10,6 +10,6 @@ import { ReceiptPdfService } from './receipt-pdf.service';
   imports: [NotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, MpesaDarajaService, PaybillReconciliationService, ReceiptPdfService],
-  exports: [PaymentsService],
+  exports: [PaymentsService, PaybillReconciliationService],
 })
 export class PaymentsModule {}

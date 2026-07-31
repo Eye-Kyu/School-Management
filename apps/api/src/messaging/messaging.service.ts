@@ -10,6 +10,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { CreateConversationInput, SendMessageInput, BroadcastToClassInput } from '@school-manager/types';
 import type { NotifPayload } from '../notifications/notifications.service';
+import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
 
 // Basic wordlist — flags messages for admin review without blocking send.
 const PROFANITY = ['fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'damn', 'piss'];
@@ -356,6 +357,8 @@ export class MessagingService {
         .update({ [counterField]: 0 })
         .eq('id', conversationId);
     }
+
+    invalidateUserFeedCache(userRow.id);
   }
 
   async unreadCount(accessToken: string): Promise<number> {
@@ -605,6 +608,8 @@ export class MessagingService {
         ? (counters?.admin_unread_count ?? 0) + 1
         : (counters?.admin_unread_count ?? 0),
     }).eq('id', conversationId);
+
+    invalidateUserFeedCache(recipientId);
 
     // Quiet hours only apply when the recipient is a teacher (the only role
     // with quiet-hours columns), and only when not explicitly bypassed

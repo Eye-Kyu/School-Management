@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
-import { createClient } from '@/lib/supabase/client';
 import AcknowledgeButton from './AcknowledgeButton';
 
 type AlertItem = {
@@ -35,19 +34,16 @@ export default function NotificationsView({
   conversations: ConversationItem[];
   reminders: ReminderItem[];
 }) {
-  const supabase = createClient();
   const [alerts, setAlerts] = useState(initialAlerts);
   const [conversations, setConversations] = useState(initialConversations);
   const markedRef = useRef(false);
 
   async function markAlertRead(item: AlertItem) {
     setAlerts((prev) => prev.map((a) => a.id === item.id ? { ...a, isRead: true } : a));
-    if (item.notifType === 'PLATFORM_MESSAGE') {
-      const recipientId = item.id.replace(/^pm:/, '');
-      await supabase.from('platform_message_recipients').update({ read_at: new Date().toISOString() }).eq('id', recipientId);
-    } else {
-      await apiFetch('/notifications/read', { method: 'PATCH', body: JSON.stringify({ ids: [item.id] }) }).catch(() => {});
-    }
+    // Handles both plain notification ids and `pm:`-prefixed platform-message
+    // ids in one call — the backend splits them, so the client no longer
+    // needs to know which table each id belongs to.
+    await apiFetch('/dashboard-feed/read', { method: 'PATCH', body: JSON.stringify({ ids: [item.id] }) }).catch(() => {});
   }
 
   async function markConversationRead(conv: ConversationItem) {
@@ -61,10 +57,8 @@ export default function NotificationsView({
     const t = setTimeout(() => {
       markedRef.current = true;
       const unreadAlerts = initialAlerts.filter((a) => !a.isRead);
-      const notifIds = unreadAlerts.filter((a) => a.notifType !== 'PLATFORM_MESSAGE').map((a) => a.id);
-      const pmIds = unreadAlerts.filter((a) => a.notifType === 'PLATFORM_MESSAGE').map((a) => a.id.replace(/^pm:/, ''));
-      if (notifIds.length > 0) apiFetch('/notifications/read', { method: 'PATCH', body: JSON.stringify({ ids: notifIds }) }).catch(() => {});
-      if (pmIds.length > 0) supabase.from('platform_message_recipients').update({ read_at: new Date().toISOString() }).in('id', pmIds).then(() => {});
+      const allIds = unreadAlerts.map((a) => a.id); // already `pm:`-prefixed where applicable
+      if (allIds.length > 0) apiFetch('/dashboard-feed/read', { method: 'PATCH', body: JSON.stringify({ ids: allIds }) }).catch(() => {});
       if (unreadAlerts.length > 0) setAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })));
 
       for (const c of initialConversations) {

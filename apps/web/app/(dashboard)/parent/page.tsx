@@ -4,6 +4,7 @@ import { todayEnum, formatTime, DAY_LABELS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
 import RoleBadgeList from '@/components/RoleBadgeList';
 import type { RoleBadge } from '@/lib/roleBadges';
+import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
 
 export default async function ParentHomePage() {
   const supabase = createClient();
@@ -114,14 +115,6 @@ export default async function ParentHomePage() {
     0,
   );
   const currency = (feeBalances ?? [])[0] ? (feeBalances as any[])[0].currency : 'KES';
-
-  // Announcements
-  const { data: announcements } = await supabase
-    .from('announcements')
-    .select('id, title, body, published_at')
-    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
-    .order('published_at', { ascending: false })
-    .limit(3);
 
   const now = new Date().toISOString();
   const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -331,28 +324,16 @@ export default async function ParentHomePage() {
               </div>
             </Link>
 
-            {/* Announcements card */}
-            {(announcements ?? []).length > 0 && (
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
-                  <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">Announcements</span>
-                  <p className="text-3xl sm:text-4xl font-bold text-white mt-2">{(announcements ?? []).length}</p>
-                  <p className="text-violet-100 text-sm mt-1">recent notices</p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
-                  {(announcements ?? []).slice(0, 2).map((a: any) => (
-                    <div key={a.id}>
-                      <p className="text-sm font-medium text-slate-700 truncate">{a.title}</p>
-                      <p className="text-xs text-slate-500">
-                        {new Date(a.published_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </>
+      )}
+
+      {/* What's new for you */}
+      {userRow && (
+        <section>
+          <h2 className="text-base font-semibold mb-3 text-slate-700">What&apos;s new for you</h2>
+          <DashboardFeed userId={userRow.id} role="PARENT" />
+        </section>
       )}
 
       <UpcomingEvents events={(events ?? []) as any[]} />
