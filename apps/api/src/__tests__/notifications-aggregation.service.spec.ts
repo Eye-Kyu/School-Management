@@ -17,6 +17,7 @@ type TableResult = { data: unknown; error: unknown; count?: number };
 class FakeQueryBuilder implements PromiseLike<TableResult> {
   constructor(private readonly result: TableResult) {}
   select() { return this; }
+  update() { return this; }
   eq() { return this; }
   in() { return this; }
   gt() { return this; }
@@ -189,5 +190,39 @@ describe('NotificationsAggregationService', () => {
     const svc = new NotificationsAggregationService(supabase, makeFakePaybill());
     const count = await svc.getUnreadCount('token');
     expect(count).toBe(1); // only n1 is unread; conversations/reminders empty here
+  });
+
+  it('markRead() cascades to conversations when a NEW_MESSAGE id is included (BUG-6)', async () => {
+    const { supabase, fromCalls } = makeFakeSupabase({
+      userRow: { id: 'parent-user-3', role: 'PARENT' },
+      tableQueues: {
+        // First from('notifications'): the pre-update lookup for NEW_MESSAGE rows.
+        // Second from('notifications'): the actual is_read update.
+        notifications: [
+          { data: [{ metadata: { conversationId: 'conv-1' } }], error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    const svc = new NotificationsAggregationService(supabase, makeFakePaybill());
+    await svc.markRead('token', ['n1']);
+
+    expect(fromCalls.filter((t) => t === 'conversations')).toHaveLength(1);
+  });
+
+  it('markRead() does not touch conversations when no NEW_MESSAGE id is included', async () => {
+    const { supabase, fromCalls } = makeFakeSupabase({
+      userRow: { id: 'parent-user-4', role: 'PARENT' },
+      tableQueues: {
+        notifications: [
+          { data: [], error: null }, // pre-update lookup finds no NEW_MESSAGE rows
+          { data: null, error: null }, // the actual is_read update
+        ],
+      },
+    });
+    const svc = new NotificationsAggregationService(supabase, makeFakePaybill());
+    await svc.markRead('token', ['n1']);
+
+    expect(fromCalls.filter((t) => t === 'conversations')).toHaveLength(0);
   });
 });

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaybillReconciliationService } from '../payments/paybill-reconciliation.service';
 import { getCachedFeed, setCachedFeed, invalidateUserFeedCache } from './feed-cache';
+import { cascadeNotificationReadToConversation } from '../messaging/message-read-cascade';
 import type { DashboardFeedResponse, FeedAlertItem, FeedConversationItem, FeedReminderItem, Role } from './feed.types';
 
 type Client = ReturnType<SupabaseService['forUser']>;
@@ -66,6 +67,25 @@ export class NotificationsAggregationService {
     const pmIds = ids.filter((id) => id.startsWith('pm:')).map((id) => id.slice(3));
 
     const client = this.supabase.forUser(accessToken);
+
+    // BUG-6: look up which of these are NEW_MESSAGE before marking them
+    // read, so their conversations can cascade too — see
+    // message-read-cascade.ts for why this can't recurse into
+    // MessagingService.markRead().
+    let newMessageConversationIds: string[] = [];
+    if (notifIds.length > 0) {
+      const { data: newMessageRows } = await client
+        .from('notifications')
+        .select('metadata')
+        .in('id', notifIds)
+        .eq('type', 'NEW_MESSAGE');
+      newMessageConversationIds = Array.from(new Set(
+        (newMessageRows ?? [])
+          .map((r) => (r.metadata as Record<string, unknown> | null)?.conversationId as string | undefined)
+          .filter((id): id is string => !!id),
+      ));
+    }
+
     await Promise.all([
       notifIds.length > 0
         ? client.from('notifications').update({ is_read: true }).in('id', notifIds)
@@ -75,8 +95,15 @@ export class NotificationsAggregationService {
         : Promise.resolve(),
     ]);
 
-    const me = (await this.supabase.currentUserRow(accessToken, 'id')) as { id: string } | null;
-    if (me) invalidateUserFeedCache(me.id);
+    const me = (await this.supabase.currentUserRow(accessToken, 'id, role')) as { id: string; role: Role } | null;
+    if (me) {
+      await Promise.all(
+        newMessageConversationIds.map((conversationId) =>
+          cascadeNotificationReadToConversation(client, conversationId, me.role),
+        ),
+      );
+      invalidateUserFeedCache(me.id);
+    }
   }
 
   private notifHref(type: string, metadata: Record<string, unknown> | null, role: Role): string {

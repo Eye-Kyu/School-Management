@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import type { CreateConversationInput, SendMessageInput, BroadcastToClassInput } from '@school-manager/types';
 import type { NotifPayload } from '../notifications/notifications.service';
 import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
+import { cascadeConversationReadToNotifications } from './message-read-cascade';
 
 // Basic wordlist — flags messages for admin review without blocking send.
 const PROFANITY = ['fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'damn', 'piss'];
@@ -357,6 +358,11 @@ export class MessagingService {
         .update({ [counterField]: 0 })
         .eq('id', conversationId);
     }
+
+    // BUG-6: reading the conversation also clears the paired NEW_MESSAGE
+    // notification row(s) — see message-read-cascade.ts for why this can't
+    // recurse into NotificationsAggregationService.markRead().
+    await cascadeConversationReadToNotifications(client, conversationId, userRow.id);
 
     invalidateUserFeedCache(userRow.id);
   }
