@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 
 type Assignment = {
@@ -211,7 +212,12 @@ function AssignmentList({ items, onDelete }: { items: Assignment[]; onDelete: (i
               </span>
             </div>
           </div>
-          <button onClick={() => onDelete(a.id)} className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600">Delete</button>
+          <div className="ml-3 shrink-0 flex items-center gap-3">
+            <Link href={`/teacher/homework/${a.id}`} className="text-xs text-slate-500 hover:text-slate-800">
+              Grade submissions
+            </Link>
+            <button onClick={() => onDelete(a.id)} className="text-xs text-red-400 hover:text-red-600">Delete</button>
+          </div>
         </div>
       ))}
     </div>

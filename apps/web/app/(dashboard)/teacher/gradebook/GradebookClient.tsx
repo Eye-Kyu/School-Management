@@ -37,6 +37,7 @@ export default function GradebookClient({
   const [aMax, setAMax]           = useState('100');
   const [aDate, setADate]         = useState('');
   const [creating, setCreating]   = useState(false);
+  const [formError, setFormError] = useState('');
 
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -79,6 +80,16 @@ export default function GradebookClient({
   async function createAssessment(e: React.FormEvent) {
     e.preventDefault();
     if (!classId || !subjectId) return;
+
+    // BUG-9: parseFloat(aMax) || 100 only catches falsy results (0/NaN/'') —
+    // a genuinely negative value like "-5" is truthy and would slip through.
+    const maxMarks = aMax.trim() === '' ? 100 : parseFloat(aMax);
+    if (isNaN(maxMarks) || maxMarks <= 0) {
+      setFormError('Max score must be a positive number.');
+      return;
+    }
+    setFormError('');
+
     setCreating(true);
     const userRow = await getCurrentUserRow('id, school_id');
     await supabase.from('assessments').insert({
@@ -88,7 +99,7 @@ export default function GradebookClient({
       term_id: termId || null,
       teacher_id: teacherId,
       name: aName.trim(),
-      max_marks: parseFloat(aMax) || 100,
+      max_marks: maxMarks,
       assessment_date: aDate || null,
     });
     setAName(''); setADate(''); setShowForm(false); setCreating(false);
@@ -210,6 +221,9 @@ export default function GradebookClient({
           {showForm && (
             <form onSubmit={createAssessment}
               className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {formError && (
+                <p className="col-span-2 sm:col-span-3 text-sm text-red-600" role="alert">{formError}</p>
+              )}
               <div className="col-span-2 sm:col-span-1">
                 <label htmlFor="assessment-name" className="block text-xs font-medium text-slate-500 mb-1">Name</label>
                 <input id="assessment-name" value={aName} onChange={(e) => setAName(e.target.value)} required

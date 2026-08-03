@@ -4,6 +4,8 @@ Phase 0 closed 2026-07-29 (see [`docs/phase-0/00-master-plan.md`](../phase-0/00-
 
 None of these five items has started. This is a backlog, not a schedule — items activate in whatever order their blockers clear, not necessarily the order listed.
 
+Items 6-7 below are a different kind of entry: deliberately deferred scope from Bucket 1, PR 2a, not externally blocked — they get a **Trigger** line instead of **External blockers**, since nothing outside this project needs to happen first, only a product signal.
+
 ---
 
 ## 1. WhatsApp (via Meta Business API)
@@ -53,6 +55,26 @@ None of these five items has started. This is a backlog, not a schedule — item
 **External blockers:** None — new planning cycle required. No planning doc exists yet; needs a translation-ownership decision (who writes and maintains translated strings) before implementation scoping.
 
 **Planning docs:** None — new planning cycle required.
+
+---
+
+## 6. Full quiz backend migration
+
+**What:** Move quiz creation, question storage, attempt tracking, and grading logic from client-side Supabase to NestJS — quizzes currently have no NestJS backend at all (confirmed in `docs/audits/homework-quiz-gradebook-relationship.md`), including MCQ auto-grading, which runs unverified in the student's own browser.
+
+**Trigger:** post-B1-2b evaluation of pilot school feedback on quiz reliability, or the introduction of any anti-cheating feature that requires server-side validation (client-side auto-grading has no server-side re-check today).
+
+**Planning docs:** None yet — `docs/audits/homework-quiz-gradebook-relationship.md` has the current-state findings this work would build on.
+
+---
+
+## 7. Rich homework grading UI
+
+**What:** Inline comments on submission content, a late-mark badge, a resubmit flow, submission-content annotation. Homework grading shipped in B1-2a as deliberately simple (score + one grader note, no content viewer — homework here is physical/in-person with nothing to view; see the B1-2a PR description).
+
+**Trigger:** pilot school feedback that simple grading is insufficient, or a specific school requesting the feature.
+
+**Planning docs:** None yet.
 
 ---
 

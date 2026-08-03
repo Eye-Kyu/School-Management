@@ -9,6 +9,9 @@ type Assignment = {
   class: { name: string } | null;
   subject: { name: string } | null;
   completedAt: string | null;
+  max_score: number | null;
+  score: number | null;
+  graderNote: string | null;
 };
 
 function isOverdue(dueDate: string, completedAt: string | null) {
@@ -39,14 +42,19 @@ export default async function ParentHomeworkPage() {
   if (studentRow?.current_class_id) {
     const { data: hwRows } = await supabase
       .from('homework_assignments')
-      .select('id, title, description, due_date, class:classes(name), subject:subjects(name), completions:homework_completions(student_id, completed_at)')
+      .select('id, title, description, due_date, max_score, class:classes(name), subject:subjects(name), completions:homework_completions(student_id, completed_at, score, grader_note)')
       .eq('class_id', studentRow.current_class_id)
       .order('due_date', { ascending: true });
 
     assignments = (hwRows ?? []).map((hw: any) => {
       const match = hw.completions?.find((c: any) => c.student_id === studentRow.id);
       const { completions: _c, ...rest } = hw;
-      return { ...rest, completedAt: match?.completed_at ?? null };
+      return {
+        ...rest,
+        completedAt: match?.completed_at ?? null,
+        score: match?.score ?? null,
+        graderNote: match?.grader_note ?? null,
+      };
     });
   }
 
@@ -118,8 +126,16 @@ export default async function ParentHomeworkPage() {
                     <p className="text-xs text-slate-400 mt-0.5">
                       Due {new Date(hw.due_date).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}
                     </p>
+                    {hw.graderNote && <p className="text-xs text-slate-500 mt-0.5">&quot;{hw.graderNote}&quot;</p>}
                   </div>
-                  <span className="shrink-0 text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded font-medium">✓ Done</span>
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded font-medium">✓ Done</span>
+                    {hw.score != null && (
+                      <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded font-medium">
+                        Score: {hw.score}{hw.max_score != null ? `/${hw.max_score}` : ''}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

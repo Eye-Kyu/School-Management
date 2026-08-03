@@ -2,6 +2,13 @@
 # =============================================================================
 # Migration parity check: every file on disk is applied, nothing else is
 # =============================================================================
+# DATABASE_URL must be the DIRECT (non-pooled) connection string, not the
+# Prisma/app-runtime pooled one — `psql` rejects the pooled URL's
+# `?pgbouncer=true` query parameter outright ("invalid URI query parameter").
+# Use the DIRECT_URL value from RENDER_DEPLOYMENT.md / your .env, not
+# DATABASE_URL, when running this locally. (Found the hard way during the
+# BUG-5 follow-up PR — noted here so the next person doesn't lose an hour.)
+#
 # Prompted by a real incident (Phase 0 sub-sprint 2, 2026-07-27):
 # 20260529000019_payments.sql was checked off in EXECUTION_PLAN.md but had
 # never actually been applied to production — a checkbox that says "this

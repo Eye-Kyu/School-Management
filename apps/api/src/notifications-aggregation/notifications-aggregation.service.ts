@@ -112,6 +112,8 @@ export class NotificationsAggregationService {
         return role === 'PARENT' ? '/parent/attendance' : role === 'ADMIN' ? '/admin/attendance' : '/notifications';
       case 'HOMEWORK_ASSIGNED':
         return role === 'STUDENT' ? '/student/homework' : role === 'PARENT' ? '/parent/homework' : role === 'TEACHER' ? '/teacher/homework' : '/notifications';
+      case 'HOMEWORK_GRADED':
+        return role === 'STUDENT' ? '/student/homework' : role === 'PARENT' ? '/parent/homework' : '/notifications';
       case 'NEW_ANNOUNCEMENT':
         return role === 'ADMIN' ? '/admin/announcements' : `/${role.toLowerCase()}`;
       case 'NEW_MESSAGE': {

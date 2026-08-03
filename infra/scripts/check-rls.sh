@@ -5,6 +5,11 @@
 # Run after every migration. If a new table is added but RLS isn't enabled,
 # this fails loudly. Cheaper than discovering it via a cross-tenant leak.
 #
+# DATABASE_URL must be the DIRECT (non-pooled) connection string, not the
+# Prisma/app-runtime pooled one — `psql` rejects the pooled URL's
+# `?pgbouncer=true` query parameter outright. Use DIRECT_URL, not
+# DATABASE_URL, when running this locally.
+#
 # Usage:  DATABASE_URL=... ./check-rls.sh
 # =============================================================================
 

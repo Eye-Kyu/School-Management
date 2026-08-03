@@ -40,54 +40,6 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 
 ---
 
-### BUG-7: Prisma's `Score` model maps to `scores`, but the live table is `grades` — a second, undocumented instance of the sub-sprint-4 drift class
-
-**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit (`docs/audits/homework-quiz-gradebook-relationship.md`) — surfaced while tracing the gradebook schema to design a homework/quiz linking feature.
-
-**File:** `packages/db/prisma/schema.prisma:373-391` (`model Score`, `@@map("scores")`); every live consumer instead reads/writes `public.grades` (`apps/api/src/assessments/assessments.service.ts:136,165,198,235`).
-
-**What's wrong:** No migration anywhere creates a `public.scores` table (confirmed via `grep -rn "CREATE TABLE.*scores"` across all of `supabase/migrations` — zero results). The actual table, created in `supabase/migrations/20260527000012_gradebook.sql:54-66`, is `public.grades`. Prisma's `@@map("scores")` for this model is simply wrong and has been since the model was written — it doesn't match anything in the live database. This is the same underlying class of problem as the already-fixed `assessments` drift (`20260728000073_fix_assessments_schema_drift.sql`) — a Prisma model asserting a shape/name that was never actually true on the real, migration-built schema — just never caught because nothing in this codebase runs `prisma migrate diff` or equivalent against the live DB to compare the two.
-
-**Impact:** No runtime impact today — no code path ever calls anything that would resolve `Score`/`scores` through Prisma's client against the live DB (Prisma is only used for `prisma generate`/type generation in this project, not as a runtime query layer for this table; confirmed all live reads/writes go through hand-written Supabase-js queries against `grades`). The risk is purely for future work: anyone who trusts the Prisma schema as ground truth (e.g., generating a new service off `model Score`, or writing a migration "to match Prisma") would build against a table name that doesn't exist.
-
-**Why not fixed here:** Out of scope for an audit-only PR phase; not blocking Bucket 1 PR 2's actual work, which reads the real `grades` table directly per this audit's own findings.
-
-**Suggested fix:** `packages/db/prisma/schema.prisma`'s `model Score` should be `@@map("grades")`, and its field names/mappings should be reconciled against `grades`'s actual columns (`assessment_id`, `student_id`, `score`, `comment`, `graded_by_id`, `graded_at`) the same way `20260728000073_fix_assessments_schema_drift.sql` reconciled `Assessment`. No migration needed (Prisma schema is not itself a migration source in this project's workflow) — just a Prisma schema edit plus `prisma generate`.
-
----
-
-### BUG-8: `assessments.term_id`'s nullability/cascade behavior was never reconciled between the original migration and Prisma, unlike `teacher_id`/`max_marks`
-
-**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether `assessments.term_id` could safely be relied on as NOT NULL for a homework/quiz linking feature.
-
-**File:** `supabase/migrations/20260527000012_gradebook.sql:44` (original: `term_id UUID REFERENCES public.terms(id) ON DELETE SET NULL` — nullable); `packages/db/prisma/schema.prisma:349` (`termId String` — non-optional, `onDelete: Cascade` at line 361); `supabase/migrations/20260728000073_fix_assessments_schema_drift.sql` (the sub-sprint-4 drift fix, which explicitly reconciled `teacher_id`/`max_marks` to NOT NULL at lines 43-51, but never touches `term_id` at all, since `term_id`'s *name* matched between the buggy original and the real Prisma-built table, so it fell outside that migration's detection scope, which was column-existence based).
-
-**What's wrong:** The original migration and Prisma disagree on whether `term_id` is nullable and what happens to an `assessments` row when its term is deleted (`SET NULL` vs. `Cascade`). The live database — built originally via `prisma db push` before the migration-file workflow existed — presumably matches Prisma (NOT NULL, Cascade), consistent with the API layer treating `term_id` as always required (`CreateAssessmentInput.termId` has no `.optional()` in `packages/types/src/schemas/assessments.ts:5`). But no migration file ever asserts this the way `20260728000073` explicitly did for `teacher_id`/`max_marks` — so a from-scratch bootstrap replaying only the migration files from empty would produce a table with nullable `term_id`/`ON DELETE SET NULL`, silently diverging from both Prisma and from what the application code assumes.
-
-**Impact:** No live impact on the existing, already-bootstrapped production database (which almost certainly already has the Prisma-shaped column, same reasoning as the other columns `20260728000073` fixed). The risk is confined to a genuinely fresh bootstrap (a new deployment target, a disaster-recovery rebuild from migrations alone, or a test database built the same way) ending up with a different `term_id` shape than production has — the same category of risk the original `assessments` drift incident was.
-
-**Why not fixed here:** Out of scope for an audit-only PR phase.
-
-**Suggested fix:** A small additive migration, following the exact pattern `20260728000073_fix_assessments_schema_drift.sql` already established: conditionally `ALTER TABLE assessments ALTER COLUMN term_id SET NOT NULL` (guarded by a check for existing NULLs, matching how that migration handled `teacher_id`/`max_marks`), and separately reconcile the `ON DELETE` behavior if it matters operationally (dropping and re-adding the FK with `ON DELETE CASCADE` to match Prisma, or leaving `SET NULL` and updating Prisma to match — whichever is actually true in production should be verified live first, the same way `20260728000073`'s own postmortem recommends verifying rather than assuming).
-
----
-
-### BUG-9: `assessments.max_marks` has no DB-level positivity guard, and one of the two grade-entry paths doesn't guard it at the app layer either
-
-**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether a future score-normalization formula (`score / max_marks`) could safely assume a positive `max_marks`.
-
-**File:** `supabase/migrations/20260527000012_gradebook.sql:39-52` / `20260728000073_fix_assessments_schema_drift.sql` (no `CHECK` constraint on `max_marks` in either); `packages/types/src/schemas/assessments.ts:10` (`maxMarks: z.number().int().positive().max(1000)` — the only positivity guard, and it only applies to `POST /assessments`); `apps/web/app/(dashboard)/teacher/gradebook/GradebookClient.tsx:91` (`max_marks: parseFloat(aMax) || 100` — the direct-Supabase creation path, which does not reuse the Zod schema).
-
-**What's wrong:** There is no `CHECK (max_marks > 0)` anywhere at the database level, so the only thing standing between a zero-or-negative `max_marks` and a live `assessments` row is app-layer validation — and that validation exists on exactly one of the two paths that can create an assessment. `GradebookClient.tsx:91`'s `parseFloat(aMax) || 100` only catches falsy results (`0`, `NaN`, empty string) by falling back to `100` — it does **not** catch a genuinely negative input like `"-5"`, which `parseFloat` returns as `-5` (truthy, so the `||` fallback never triggers), and there is nothing else in that write path to reject it before the `insert()` call.
-
-**Impact:** Already-live: `packages/types/src/grading.ts`'s `calculateSubjectAverage()` already has to defensively drop any row with `maxMarks <= 0` from its term-average calculation (confirmed during this audit) — meaning this exact gap has presumably already been anticipated by whoever wrote that function, even though the root cause (no DB guard, one incomplete app-layer guard) was never itself fixed or documented until now. Not a security issue — worst case is a malformed assessment silently excluded from term averages, not incorrect data exposure.
-
-**Why not fixed here:** Out of scope for an audit-only PR phase — directly relevant to (and should inform) Bucket 1 PR 2's own Phase 2 score-normalization work, which will need its own explicit zero/negative guard regardless of whether this underlying gap is ever closed, since it can't assume `max_marks` is trustworthy.
-
-**Suggested fix:** Add `CHECK (max_marks > 0)` to `assessments` via an additive migration (idempotent `ALTER TABLE ... ADD CONSTRAINT ... CHECK (max_marks > 0) NOT VALID` then `VALIDATE CONSTRAINT` if any existing bad rows need tolerating, otherwise a plain `ADD CONSTRAINT`), and fix `GradebookClient.tsx:91` to reuse the same `.positive()` validation `CreateAssessmentInput` already has, rather than a bespoke `parseFloat(...) || 100` fallback.
-
----
-
 ---
 
 ## Fixed
@@ -169,6 +121,42 @@ Worse, they never reconciled: `messaging.service.ts`'s `markRead()` (called by `
 Neither function calls the other or calls back into either service's `markRead()` — each is a targeted single-table write, so there is no code path for a cascade to re-trigger a cascade. This is a structural guarantee, not a runtime flag. Both use the caller's RLS-scoped client, so a crafted/guessed id from another user or school naturally matches zero rows (`notif_update`/`conv_update` RLS policies), with no new app-level tenant check needed.
 
 **Verification:** new unit tests (`apps/api/src/__tests__/message-read-cascade.spec.ts`, 7 cases — asserts the exact filters each direction builds) and a `markRead()`-level unit test in `notifications-aggregation.service.spec.ts` (2 cases — cascades only when a `NEW_MESSAGE` id is present); 142/142 API unit tests passing. Five new live e2e cases in `apps/api/test/dashboard-feed.e2e-spec.ts` (forward cascade, reverse cascade, bulk, idempotency, cross-tenant) — **10/10 passing** against real Supabase. `cross-tenant.e2e-spec.ts`'s "Task 7: unread-count includes unread conversations..." test (the one that originally caught this bug) updated to assert full reconciliation (`baseline + 2` after sending, back to exactly `baseline` after conversation mark-read) instead of the previously-documented broken `+1` floor. See `EXECUTION_PLAN.md`'s entry dated 2026-07-31 for the full writeup.
+
+---
+
+### BUG-7: Prisma's `Score` model maps to `scores`, but the live table is `grades` — a second, undocumented instance of the sub-sprint-4 drift class
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit (`docs/audits/homework-quiz-gradebook-relationship.md`) — surfaced while tracing the gradebook schema to design a homework/quiz linking feature.
+
+**File:** `packages/db/prisma/schema.prisma` (`model Score`, `@@map("scores")`, deleted); every live consumer instead reads/writes `public.grades` (`apps/api/src/assessments/assessments.service.ts`).
+
+**What was wrong:** No migration anywhere creates a `public.scores` table. The actual table, created in `supabase/migrations/20260527000012_gradebook.sql`, is `public.grades`. Prisma's `@@map("scores")` for this model was simply wrong and had been since the model was written.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** Confirmed zero live call sites for the Prisma `Score` model (grep across `apps/api/src`/`apps/web` — only coincidental name matches like `UpsertScoresInput`; this codebase never uses Prisma as a runtime query layer, confirmed via a repo-wide check for `prisma.<model>.` calls returning zero results for every model). Per the audit's own "trivial: remove, no rename needed" branch, `model Score` (and the `scores Score[]` back-relation fields on `School`, `Student`, and `Assessment`) were deleted outright — no replacement `Grade` model added, since nothing would use it. `pnpm --filter @school-manager/db generate` verified clean, no missing-table warnings.
+
+---
+
+### BUG-8: `assessments.term_id`'s nullability/cascade behavior was never reconciled between the original migration and Prisma, unlike `teacher_id`/`max_marks`
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether `assessments.term_id` could safely be relied on as NOT NULL for a homework/quiz linking feature.
+
+**File:** `supabase/migrations/20260527000012_gradebook.sql` (original: `term_id UUID REFERENCES public.terms(id) ON DELETE SET NULL` — nullable); `packages/db/prisma/schema.prisma` (`termId String` — non-optional, `onDelete: Cascade`).
+
+**What was wrong:** The original migration and Prisma disagreed on whether `term_id` is nullable and what happens to an `assessments` row when its term is deleted. No migration file ever asserted NOT NULL/CASCADE the way `20260728000073_fix_assessments_schema_drift.sql` explicitly did for `teacher_id`/`max_marks` — a from-scratch bootstrap replaying only the migration files would have produced a table diverging from both Prisma and the application code's assumptions.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** `supabase/migrations/20260728000076_fix_assessments_term_id_drift.sql` — conditionally `ALTER TABLE assessments ALTER COLUMN term_id SET NOT NULL` (guarded by a check for existing NULLs, matching `20260728000073`'s own pattern), then drops and re-adds the `term_id` FK with `ON DELETE CASCADE` to match Prisma. Confirmed live via a read-only probe before writing the migration: **zero rows** in `assessments` in production, so this converges cleanly with no backfill risk regardless of the exact prior live state.
+
+---
+
+### BUG-9: `assessments.max_marks` has no DB-level positivity guard, and one of the two grade-entry paths doesn't guard it at the app layer either
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether a future score-normalization formula (`score / max_marks`) could safely assume a positive `max_marks`.
+
+**File:** `supabase/migrations/20260527000012_gradebook.sql` (no `CHECK` constraint on `max_marks`); `apps/web/app/(dashboard)/teacher/gradebook/GradebookClient.tsx` (`max_marks: parseFloat(aMax) || 100` — only caught falsy results, not a genuine negative like `"-5"`).
+
+**What was wrong:** No `CHECK (max_marks > 0)` existed at the database level, and only one of the two grade-entry paths (`POST /assessments`, via Zod's `.positive()`) validated it at the app layer. The direct-Supabase `GradebookClient.tsx` path had no equivalent guard.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** `supabase/migrations/20260728000077_assessments_max_marks_positive.sql` — adds `CHECK (max_marks > 0)`, guarded by a check for existing violating rows first (none found live, confirmed via the same read-only probe as BUG-8). `GradebookClient.tsx` now validates `max_marks > 0` client-side before submitting, showing an inline error instead of silently substituting `100`.
 
 ---
 

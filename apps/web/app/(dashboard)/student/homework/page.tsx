@@ -11,6 +11,9 @@ type Assignment = {
   class: { name: string } | null;
   subject: { name: string } | null;
   completedAt: string | null;
+  max_score: number | null;
+  score: number | null;
+  graderNote: string | null;
 };
 
 function isOverdue(dueDate: string, completedAt: string | null) {
@@ -122,13 +125,19 @@ export default function StudentHomeworkPage() {
                   className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-slate-900"
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-slate-600 text-sm line-through">{hw.title}</span>
                     <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">Done</span>
+                    {hw.score != null && (
+                      <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">
+                        Score: {hw.score}{hw.max_score != null ? `/${hw.max_score}` : ''}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Due {new Date(hw.due_date).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}
                   </p>
+                  {hw.graderNote && <p className="text-xs text-slate-500 mt-0.5">&quot;{hw.graderNote}&quot;</p>}
                 </div>
               </label>
             ))}

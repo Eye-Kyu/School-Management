@@ -43,7 +43,6 @@ model School {
   feeBalances       FeeBalance[]
   paymentRecords    PaymentRecord[]
   assessments       Assessment[]
-  scores            Score[]
   announcements     Announcement[]
   auditLogs         AuditLog[]
 
@@ -116,7 +115,6 @@ model Student {
   attendanceRecords AttendanceRecord[]
   feeBalances       FeeBalance[]
   paymentRecords    PaymentRecord[]
-  scores            Score[]
 
   @@unique([schoolId, admissionNo])
   @@index([schoolId])
@@ -362,32 +360,11 @@ model Assessment {
   class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
   subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  scores  Score[]
 
   @@unique([termId, classId, subjectId, name])
   @@index([teacherId, termId])
   @@index([classId, subjectId])
   @@map("assessments")
-}
-
-model Score {
-  id            String   @id @default(uuid()) @db.Uuid
-  schoolId      String   @map("school_id") @db.Uuid
-  assessmentId  String   @map("assessment_id") @db.Uuid
-  studentId     String   @map("student_id") @db.Uuid
-  marksObtained Decimal? @map("marks_obtained") @db.Decimal(5, 2)
-  comments      String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  school     School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@unique([assessmentId, studentId])
-  @@index([studentId, assessmentId])
-  @@index([schoolId, studentId])
-  @@map("scores")
 }
 
 model PaymentRecord {
