@@ -40,30 +40,6 @@ Each entry: what's wrong, where, why it wasn't fixed on the spot, and enough det
 
 ---
 
-### BUG-6: a new message inflates the unread badge by 2, not 1, and reading the thread only clears half of it
-
-**Found during:** 2026-07-31, Bucket 1 PR 1 (unified dashboard feed) e2e verification — a newly-written test (`cross-tenant.e2e-spec.ts`, "Task 7: unread-count includes unread conversations, and drops after marking read") asserted `withUnread.count === baseline.count + 1` after one fresh message; it consistently got `+2` instead, even in isolation with no other tests running (ruled out as a flake). Root-caused by reading the actual query paths, not by adjusting the assertion until it passed.
-
-**File:** `apps/api/src/messaging/messaging.service.ts`'s `_insertMessage()` (queues the duplicate signal) and `markRead()` (only clears one of the two), `apps/api/src/notifications-aggregation/notifications-aggregation.service.ts`'s `getUnreadCount()` (sums both without deduping).
-
-**What's wrong:** Sending a message creates **two independent, never-reconciled "you have an unread message" signals** for the recipient:
-1. `_insertMessage()` increments the conversation's own `{parent,teacher,admin}_unread_count` column (counted by `buildConversations()`).
-2. The same call also does `this.notifications.queue([{ type: 'NEW_MESSAGE', ... }])`, inserting an unread row into the plain `notifications` table (counted by `buildAlerts()`, since `buildAlerts()` fetches all `notifications` rows with no `type` filter).
-
-`getUnreadCount()` sums `unreadAlerts + feed.conversations.length + feed.reminders.length` — both signals count, so one message adds 2 to the badge, not 1. Confirmed pre-existing, not introduced by this PR: `git diff HEAD` on the now-deleted `NotificationsService.unreadCount()` shows the exact same shape — `alertsUnreadCount()` (all unread `notifications`, no type filter) added to `conversationsUnreadCount()` — so this double-count has been live since before this PR touched anything.
-
-Worse, they never reconcile: `messaging.service.ts`'s `markRead()` (called by `PATCH /messaging/conversations/:id/read`, which is all `ThreadClient.tsx` calls when a user opens a conversation) only zeroes the conversation's unread counter — it never touches the paired `NEW_MESSAGE` row in `notifications`. That row only clears via a separate, explicit `PATCH /dashboard-feed/read` call, which nothing in the message-reading flow triggers (confirmed: `FeedCard.tsx`'s card click just navigates via `<Link href>`; only its distinct hover-only "mark read" affordance calls `onMarkRead`). So after a user reads a message thread normally, the badge drops by 1 (the conversation's contribution) but stays permanently inflated by 1 per message ever received, until the user separately finds and dismisses each `NEW_MESSAGE` alert in the feed/notifications page.
-
-**Impact:** Real, live, user-facing — the bell badge and dashboard feed's unread count both over-count and under-clear for every message anyone receives. Not a security/data issue. Predates this PR; this PR's new e2e coverage is simply the first thing to have ever asserted the exact arithmetic and caught it.
-
-**Why not fixed here:** Out of scope for a dashboard-feed/settings-consolidation PR — the actual fix requires a product decision (should `NEW_MESSAGE` notifications even exist as a separate Alerts-bucket item given the conversation itself already represents "unread," or should `markRead()` also clear the paired notification row) that shouldn't be made silently inside an unrelated PR's verification pass.
-
-**Suggested fix:** Most likely correct direction: stop double-representing the same event. Either (a) exclude `type = 'NEW_MESSAGE'` from `buildAlerts()`'s query entirely (the conversation already represents it in the Conversations bucket, with its own href/preview), or (b) keep both but have `messaging.service.ts`'s `markRead()` also mark any `NEW_MESSAGE` notifications for that `conversationId` as read (join on `metadata->>'conversationId'`). Option (a) is simpler and matches how the Alerts bucket already treats `ATTENDANCE_REMARK_REQUESTED`/`ABSENCE_REQUEST_DECIDED` as the only real "notification-only" types.
-
-**Test-impact note:** `cross-tenant.e2e-spec.ts`'s "Task 7: unread-count includes unread conversations..." test was updated to assert the actual, verified behavior (`baseline + 2` after sending, `baseline + 1` — not fully back to baseline — after marking only the conversation read) rather than the originally-assumed `+1`/`+0`, with a comment pointing here. The test still correctly proves conversations contribute to the badge; it no longer asserts the incorrect "fully reconciled" behavior this bug shows doesn't exist.
-
----
-
 ---
 
 ## Fixed
@@ -118,7 +94,69 @@ Broader than initially scoped: `buildAlerts()`'s `notifications`-table query fai
 
 **Verification:** Live column-existence probe against production (`SELECT acknowledged_at FROM notifications LIMIT 1`) confirmed the column now exists. Re-ran the three previously-blocked tests live: `dashboard-feed.e2e-spec.ts` went from 4/5 to **5/5 passing**; `cross-tenant.e2e-spec.ts -t "Notification bubble"` went from 1/3 to **3/3 passing**. Full live e2e regression (`pnpm test:e2e`, all spec files) re-run afterward to confirm no other drift — see `EXECUTION_PLAN.md`'s Bucket 1 entry for the final suite-wide count.
 
-**Follow-up not done here (still worth doing):** spot-check a handful of the other 71 backfilled `_migration_log` filenames' actual column-level effects, not just table existence — `check-migrations.sh` can only ever catch "this file was never run at all," never "this file was recorded as run but didn't fully take effect." No other instances found or suspected; this is a hygiene suggestion, not a known second occurrence.
+**Follow-up done (2026-07-31):** investigated why `check-migrations.sh` — the tool built specifically to catch this class of drift — missed it. Root cause: the registry row for this migration and the check itself were both introduced in the *same* commit (`20260728000072_migration_log.sql`'s 72-file backfill, 2026-07-29); the backfill's claim of having verified every column was a manual, unchecked assertion, wrong for this one file, so the check was structurally blind to this specific drift from the moment it existed — never a failure that got ignored. Full postmortem now lives in `check-migrations.sh`'s own header comment. The suggested spot-check was also done, in full rather than "a handful": every `ADD COLUMN` target across all 76 migration files on disk was extracted and individually verified live — **24/24 present, no second instance found.** The script itself was fixed with a new heuristic (`STALE_COLUMN`) that checks the 5 most recent migrations' `ADD COLUMN` targets against the live schema on every CI run going forward, plus a new regression test suite (`infra/scripts/tests/check-migrations.test.sh`) so the checker's own correctness is no longer untested. See the `EXECUTION_PLAN.md` entry dated 2026-07-31 for the full writeup.
+
+---
+
+### BUG-6: a new message inflates the unread badge by 2, not 1, and reading the thread only clears half of it
+
+**Found during:** 2026-07-31, Bucket 1 PR 1 (unified dashboard feed) e2e verification — a newly-written test (`cross-tenant.e2e-spec.ts`, "Task 7: unread-count includes unread conversations, and drops after marking read") asserted `withUnread.count === baseline.count + 1` after one fresh message; it consistently got `+2` instead, even in isolation with no other tests running (ruled out as a flake). Root-caused by reading the actual query paths, not by adjusting the assertion until it passed.
+
+**File:** `apps/api/src/messaging/messaging.service.ts`'s `_insertMessage()` (queued the duplicate signal) and `markRead()` (only cleared one of the two), `apps/api/src/notifications-aggregation/notifications-aggregation.service.ts`'s `getUnreadCount()` (summed both without deduping).
+
+**What was wrong:** Sending a message created **two independent, never-reconciled "you have an unread message" signals** for the recipient:
+1. `_insertMessage()` incremented the conversation's own `{parent,teacher,admin}_unread_count` column (counted by `buildConversations()`).
+2. The same call also did `this.notifications.queue([{ type: 'NEW_MESSAGE', ... }])`, inserting an unread row into the plain `notifications` table (counted by `buildAlerts()`, since `buildAlerts()` fetches all `notifications` rows with no `type` filter).
+
+`getUnreadCount()` summed `unreadAlerts + feed.conversations.length + feed.reminders.length` — both signals counted, so one message added 2 to the badge, not 1. Confirmed pre-existing, not introduced by Bucket 1 PR 1: `git diff HEAD` on the now-deleted `NotificationsService.unreadCount()` showed the exact same shape — `alertsUnreadCount()` (all unread `notifications`, no type filter) added to `conversationsUnreadCount()` — so this double-count was live since before that PR touched anything.
+
+Worse, they never reconciled: `messaging.service.ts`'s `markRead()` (called by `PATCH /messaging/conversations/:id/read`, which is all `ThreadClient.tsx` called when a user opened a conversation) only zeroed the conversation's unread counter — it never touched the paired `NEW_MESSAGE` row in `notifications`. That row only cleared via a separate, explicit `PATCH /dashboard-feed/read` call, which nothing in the message-reading flow triggered. So after a user read a message thread normally, the badge dropped by 1 (the conversation's contribution) but stayed permanently inflated by 1 per message ever received, until the user separately found and dismissed each `NEW_MESSAGE` alert in the feed/notifications page.
+
+**Impact:** Real, live, user-facing — the bell badge and dashboard feed's unread count both over-counted and under-cleared for every message anyone received. Not a security/data issue.
+
+**Fix (2026-07-31, Option B from the review — cascade, not dedupe):** `NEW_MESSAGE` notification rows stay in `notifications` (the unified feed needs them to show messages as feed items), but read-state is now cascaded between the two signals in both directions. New plain module `apps/api/src/messaging/message-read-cascade.ts` (not a NestJS provider — matches the `feed-cache.ts` precedent, avoids any circular-module risk) exports two single-table-`UPDATE` functions:
+- `cascadeConversationReadToNotifications()` — called from `MessagingService.markRead()` (every surface that marks a conversation read already funnels through this one method), marks the matching unread `NEW_MESSAGE` row(s) read.
+- `cascadeNotificationReadToConversation()` — called from `NotificationsAggregationService.markRead()` (every surface that marks a notification read, including bulk "mark all," already funnels through this one method), zeroes the caller's own unread column on the linked conversation.
+
+Neither function calls the other or calls back into either service's `markRead()` — each is a targeted single-table write, so there is no code path for a cascade to re-trigger a cascade. This is a structural guarantee, not a runtime flag. Both use the caller's RLS-scoped client, so a crafted/guessed id from another user or school naturally matches zero rows (`notif_update`/`conv_update` RLS policies), with no new app-level tenant check needed.
+
+**Verification:** new unit tests (`apps/api/src/__tests__/message-read-cascade.spec.ts`, 7 cases — asserts the exact filters each direction builds) and a `markRead()`-level unit test in `notifications-aggregation.service.spec.ts` (2 cases — cascades only when a `NEW_MESSAGE` id is present); 142/142 API unit tests passing. Five new live e2e cases in `apps/api/test/dashboard-feed.e2e-spec.ts` (forward cascade, reverse cascade, bulk, idempotency, cross-tenant) — **10/10 passing** against real Supabase. `cross-tenant.e2e-spec.ts`'s "Task 7: unread-count includes unread conversations..." test (the one that originally caught this bug) updated to assert full reconciliation (`baseline + 2` after sending, back to exactly `baseline` after conversation mark-read) instead of the previously-documented broken `+1` floor. See `EXECUTION_PLAN.md`'s entry dated 2026-07-31 for the full writeup.
+
+---
+
+### BUG-7: Prisma's `Score` model maps to `scores`, but the live table is `grades` — a second, undocumented instance of the sub-sprint-4 drift class
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit (`docs/audits/homework-quiz-gradebook-relationship.md`) — surfaced while tracing the gradebook schema to design a homework/quiz linking feature.
+
+**File:** `packages/db/prisma/schema.prisma` (`model Score`, `@@map("scores")`, deleted); every live consumer instead reads/writes `public.grades` (`apps/api/src/assessments/assessments.service.ts`).
+
+**What was wrong:** No migration anywhere creates a `public.scores` table. The actual table, created in `supabase/migrations/20260527000012_gradebook.sql`, is `public.grades`. Prisma's `@@map("scores")` for this model was simply wrong and had been since the model was written.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** Confirmed zero live call sites for the Prisma `Score` model (grep across `apps/api/src`/`apps/web` — only coincidental name matches like `UpsertScoresInput`; this codebase never uses Prisma as a runtime query layer, confirmed via a repo-wide check for `prisma.<model>.` calls returning zero results for every model). Per the audit's own "trivial: remove, no rename needed" branch, `model Score` (and the `scores Score[]` back-relation fields on `School`, `Student`, and `Assessment`) were deleted outright — no replacement `Grade` model added, since nothing would use it. `pnpm --filter @school-manager/db generate` verified clean, no missing-table warnings.
+
+---
+
+### BUG-8: `assessments.term_id`'s nullability/cascade behavior was never reconciled between the original migration and Prisma, unlike `teacher_id`/`max_marks`
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether `assessments.term_id` could safely be relied on as NOT NULL for a homework/quiz linking feature.
+
+**File:** `supabase/migrations/20260527000012_gradebook.sql` (original: `term_id UUID REFERENCES public.terms(id) ON DELETE SET NULL` — nullable); `packages/db/prisma/schema.prisma` (`termId String` — non-optional, `onDelete: Cascade`).
+
+**What was wrong:** The original migration and Prisma disagreed on whether `term_id` is nullable and what happens to an `assessments` row when its term is deleted. No migration file ever asserted NOT NULL/CASCADE the way `20260728000073_fix_assessments_schema_drift.sql` explicitly did for `teacher_id`/`max_marks` — a from-scratch bootstrap replaying only the migration files would have produced a table diverging from both Prisma and the application code's assumptions.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** `supabase/migrations/20260728000076_fix_assessments_term_id_drift.sql` — conditionally `ALTER TABLE assessments ALTER COLUMN term_id SET NOT NULL` (guarded by a check for existing NULLs, matching `20260728000073`'s own pattern), then drops and re-adds the `term_id` FK with `ON DELETE CASCADE` to match Prisma. Confirmed live via a read-only probe before writing the migration: **zero rows** in `assessments` in production, so this converges cleanly with no backfill risk regardless of the exact prior live state.
+
+---
+
+### BUG-9: `assessments.max_marks` has no DB-level positivity guard, and one of the two grade-entry paths doesn't guard it at the app layer either
+
+**Found during:** 2026-07-31, Bucket 1 PR 2 Phase 1 audit — surfaced while checking whether a future score-normalization formula (`score / max_marks`) could safely assume a positive `max_marks`.
+
+**File:** `supabase/migrations/20260527000012_gradebook.sql` (no `CHECK` constraint on `max_marks`); `apps/web/app/(dashboard)/teacher/gradebook/GradebookClient.tsx` (`max_marks: parseFloat(aMax) || 100` — only caught falsy results, not a genuine negative like `"-5"`).
+
+**What was wrong:** No `CHECK (max_marks > 0)` existed at the database level, and only one of the two grade-entry paths (`POST /assessments`, via Zod's `.positive()`) validated it at the app layer. The direct-Supabase `GradebookClient.tsx` path had no equivalent guard.
+
+**Fix (2026-08-03, Bucket 1 PR 2a):** `supabase/migrations/20260728000077_assessments_max_marks_positive.sql` — adds `CHECK (max_marks > 0)`, guarded by a check for existing violating rows first (none found live, confirmed via the same read-only probe as BUG-8). `GradebookClient.tsx` now validates `max_marks > 0` client-side before submitting, showing an inline error instead of silently substituting `100`.
 
 ---
 

@@ -38,7 +38,7 @@ describe('Dashboard feed (e2e)', () => {
   let parentAUserId: string;
   let childId: string;
 
-  async function seedUser(schoolId: string, role: 'ADMIN' | 'PARENT', label: string) {
+  async function seedUser(schoolId: string, role: 'ADMIN' | 'PARENT' | 'TEACHER', label: string) {
     const email = `${label}-${suffix}@test-feed.internal`;
     const password = `TestPass${suffix}!`;
     const { data: authData, error: authErr } = await admin.auth.admin.createUser({
@@ -219,6 +219,150 @@ describe('Dashboard feed (e2e)', () => {
 
     const after = await request(app.getHttpServer()).get('/dashboard-feed').set('Authorization', `Bearer ${freshParent.token}`).expect(200);
     expect(after.body.alerts.find((a: { id: string }) => a.id === notifId)?.isRead).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // BUG-6 cascade: conversation read-state <-> NEW_MESSAGE notification read-state
+  // ---------------------------------------------------------------------------
+
+  it('marking a conversation read cascades to its NEW_MESSAGE notification — count drops by 2, not 1', async () => {
+    const teacher = await seedUser(schoolAId, 'TEACHER', 'cascade-teacher-1');
+    const parent = await seedUser(schoolAId, 'PARENT', 'cascade-parent-1');
+
+    // Fresh teacher's first-ever fetch — baseline is unambiguously 0.
+    const baseline = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(baseline.body.count).toBe(0);
+
+    const convRes = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ recipientUserId: teacher.userId, firstMessage: 'BUG-6 cascade check' })
+      .expect(201);
+    const conversationId = convRes.body.id;
+
+    // Both signals present: the conversation's own unread counter, and the
+    // paired NEW_MESSAGE row in `notifications`.
+    const withUnread = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(withUnread.body.count).toBe(2);
+
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationId}/read`)
+      .set('Authorization', `Bearer ${teacher.token}`)
+      .expect(200);
+
+    const afterRead = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(afterRead.body.count).toBe(0); // fully reconciled, not stuck at 1 (BUG-6)
+  });
+
+  it('marking the NEW_MESSAGE notification read also marks the conversation read (reverse cascade)', async () => {
+    const teacher = await seedUser(schoolAId, 'TEACHER', 'cascade-teacher-2');
+    const parent = await seedUser(schoolAId, 'PARENT', 'cascade-parent-2');
+
+    await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ recipientUserId: teacher.userId, firstMessage: 'BUG-6 reverse cascade check' })
+      .expect(201);
+
+    const { data: notifRow } = await admin.from('notifications')
+      .select('id').eq('recipient_id', teacher.userId).eq('type', 'NEW_MESSAGE').single();
+    expect(notifRow).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .patch('/dashboard-feed/read')
+      .set('Authorization', `Bearer ${teacher.token}`)
+      .send({ ids: [notifRow!.id] })
+      .expect(200);
+
+    const after = await request(app.getHttpServer())
+      .get('/dashboard-feed').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(after.body.conversations).toHaveLength(0);
+
+    const count = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(count.body.count).toBe(0);
+  });
+
+  it('bulk mark-all-read cascades every NEW_MESSAGE row\'s conversation, not just the first', async () => {
+    const teacher = await seedUser(schoolAId, 'TEACHER', 'cascade-teacher-3');
+    const parentA = await seedUser(schoolAId, 'PARENT', 'cascade-parent-3a');
+    const parentB = await seedUser(schoolAId, 'PARENT', 'cascade-parent-3b');
+
+    await request(app.getHttpServer()).post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parentA.token}`)
+      .send({ recipientUserId: teacher.userId, firstMessage: 'Bulk cascade A' }).expect(201);
+    await request(app.getHttpServer()).post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parentB.token}`)
+      .send({ recipientUserId: teacher.userId, firstMessage: 'Bulk cascade B' }).expect(201);
+
+    const { data: notifRows } = await admin.from('notifications')
+      .select('id').eq('recipient_id', teacher.userId).eq('type', 'NEW_MESSAGE');
+    expect(notifRows).toHaveLength(2);
+
+    await request(app.getHttpServer())
+      .patch('/dashboard-feed/read')
+      .set('Authorization', `Bearer ${teacher.token}`)
+      .send({ ids: notifRows!.map((r) => r.id) })
+      .expect(200);
+
+    const after = await request(app.getHttpServer())
+      .get('/dashboard-feed').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(after.body.conversations).toHaveLength(0); // both cascaded, not just the first
+  });
+
+  it('idempotency — marking an already-read conversation read again does not error or go negative', async () => {
+    const teacher = await seedUser(schoolAId, 'TEACHER', 'cascade-teacher-4');
+    const parent = await seedUser(schoolAId, 'PARENT', 'cascade-parent-4');
+
+    const convRes = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parent.token}`)
+      .send({ recipientUserId: teacher.userId, firstMessage: 'Idempotency check' })
+      .expect(201);
+    const conversationId = convRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationId}/read`)
+      .set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationId}/read`)
+      .set('Authorization', `Bearer ${teacher.token}`).expect(200); // second call, same conversation
+
+    const count = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${teacher.token}`).expect(200);
+    expect(count.body.count).toBe(0);
+  });
+
+  it('cross-tenant — a crafted conversation id from another school 404s and touches neither table', async () => {
+    const teacherA = await seedUser(schoolAId, 'TEACHER', 'cascade-teacher-5');
+    const parentA = await seedUser(schoolAId, 'PARENT', 'cascade-parent-5');
+    const adminB = await seedUser(schoolBId, 'ADMIN', 'cascade-admin-5b');
+
+    const convRes = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${parentA.token}`)
+      .send({ recipientUserId: teacherA.userId, firstMessage: 'Cross-tenant cascade check' })
+      .expect(201);
+    const conversationId = convRes.body.id;
+
+    // School B's admin, given school A's real conversation id, is not a
+    // participant — conv_select RLS resolves nothing, so this 404s before
+    // ever reaching the cascade.
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${conversationId}/read`)
+      .set('Authorization', `Bearer ${adminB.token}`)
+      .expect(404);
+
+    const { data: convRow } = await admin.from('conversations')
+      .select('teacher_unread_count').eq('id', conversationId).single();
+    expect(convRow!.teacher_unread_count).toBe(1); // untouched
+
+    const { data: notifRow } = await admin.from('notifications')
+      .select('is_read').eq('recipient_id', teacherA.userId).eq('type', 'NEW_MESSAGE').single();
+    expect(notifRow!.is_read).toBe(false); // untouched
   });
 
   it('rejects an unauthenticated request', async () => {

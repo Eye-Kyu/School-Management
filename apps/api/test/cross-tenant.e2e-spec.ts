@@ -3018,24 +3018,23 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(201);
     const newConversationId = convRes.body.id;
 
-    // A fresh message actually adds 2 to the badge, not 1: MessagingService's
+    // A fresh message adds 2 to the badge, not 1: MessagingService's
     // _insertMessage() both bumps the conversation's own unread counter
     // (counted here) AND queues a plain NEW_MESSAGE row in `notifications`
     // (also counted, since buildAlerts() has no type filter) — two
-    // independent, never-reconciled "unread" signals for the same event.
-    // Pre-existing, not caused by this PR (the old, now-deleted
-    // NotificationsService.unreadCount() summed the same two sources) — see
-    // docs/bug-triage.md BUG-6.
+    // independent signals for the same event. This is intentional (Option B,
+    // BUG-6): the unified feed needs the NEW_MESSAGE row to show the message
+    // as a feed item, so it isn't removed — instead the two signals'
+    // read-state is cascaded together (see message-read-cascade.ts).
     const withUnread = await request(app.getHttpServer())
       .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${tokenTeacherA}`)
       .expect(200);
     expect(withUnread.body.count).toBe(baseline.body.count + 2);
 
-    // Marking the conversation read only clears the conversation-side signal
-    // — messaging.service.ts's markRead() never touches the paired
-    // NEW_MESSAGE notification row, so the badge stays 1 above baseline
-    // (BUG-6), not back to baseline.
+    // Marking the conversation read cascades to the paired NEW_MESSAGE
+    // notification row too (BUG-6 fix) — back to baseline exactly, not
+    // stuck 1 above it.
     await request(app.getHttpServer())
       .patch(`/messaging/conversations/${newConversationId}/read`)
       .set('Authorization', `Bearer ${tokenTeacherA}`)
@@ -3044,7 +3043,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${tokenTeacherA}`)
       .expect(200);
-    expect(afterRead.body.count).toBe(baseline.body.count + 1);
+    expect(afterRead.body.count).toBe(baseline.body.count);
   });
 
   it('Task 7: unread-count includes platform messages for ADMIN only, isolated per school', async () => {
