@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
+import { fetchAttendanceRateInputs } from '@/lib/attendance/fetchAttendanceRateInputs';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 function Bar({ pct, color = 'bg-slate-700' }: { pct: number; color?: string }) {
   return (
@@ -67,24 +69,42 @@ export default async function TeacherAnalyticsPage({
     return { ...a, avg, pct, count: scores.length };
   });
 
-  // Attendance trends per week for the class
-  const { data: attRecords } = classId && term
-    ? await supabase.from('attendance_records')
-        .select('student_id, date, status')
-        .in('student_id', (students ?? []).map((s) => s.id))
-        .gte('date', term.start_date).lte('date', term.end_date)
-    : { data: [] };
+  // Attendance trends per week for the class, plus per-student rates below
+  // for at-risk detection — both built from one shared fetch of records +
+  // approved-absence overlay for this class's students.
+  const attendanceInput = classId && term
+    ? await fetchAttendanceRateInputs(supabase, {
+        studentIds: (students ?? []).map((s) => s.id),
+        startDate: term.start_date,
+        endDate: term.end_date,
+      })
+    : { records: [], approvedAbsences: [] };
 
-  const weekMap: Record<string, { present: number; total: number }> = {};
-  for (const r of attRecords ?? []) {
-    const d = new Date(r.date);
-    d.setDate(d.getDate() - d.getDay());
-    const key = d.toISOString().slice(0, 10);
-    if (!weekMap[key]) weekMap[key] = { present: 0, total: 0 };
-    weekMap[key]!.total++;
-    if (r.status === 'PRESENT' || r.status === 'LATE') weekMap[key]!.present++;
+  function weekStartOf(date: string): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+    return d.toISOString().slice(0, 10);
   }
-  const weeks = Object.entries(weekMap).slice(-8);
+
+  const weekBuckets = new Map<string, { records: typeof attendanceInput.records; approvedAbsences: typeof attendanceInput.approvedAbsences }>();
+  for (const r of attendanceInput.records) {
+    const wk = weekStartOf(r.date);
+    if (!weekBuckets.has(wk)) weekBuckets.set(wk, { records: [], approvedAbsences: [] });
+    weekBuckets.get(wk)!.records.push(r);
+  }
+  for (const a of attendanceInput.approvedAbsences) {
+    const wk = weekStartOf(a.absence_date);
+    if (!weekBuckets.has(wk)) weekBuckets.set(wk, { records: [], approvedAbsences: [] });
+    weekBuckets.get(wk)!.approvedAbsences.push(a);
+  }
+
+  const weeks = Array.from(weekBuckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-8)
+    .map(([weekKey, bucket]) => {
+      const result = calculateAttendanceRate(bucket);
+      return [weekKey, { present: result.present_days, total: result.total_school_days }] as const;
+    });
 
   // Per-student averages for at-risk detection
   const { data: classAssignments } = classId
@@ -95,17 +115,17 @@ export default async function TeacherAnalyticsPage({
     ? await supabase.from('submissions').select('student_id, assignment_id').in('assignment_id', assignmentIds)
     : { data: [] };
 
-  const attTotal = (attRecords ?? []).length;
-
   type StudentRisk = {
     id: string; name: string; attRate: number | null;
     gradeAvg: number | null; subRate: number | null; riskLevel: 'HIGH' | 'MEDIUM' | null;
   };
 
   const studentStats: StudentRisk[] = (students ?? []).map((s) => {
-    const myAtt = (attRecords ?? []).filter((r) => r.student_id === s.id);
-    const myPresent = myAtt.filter((r) => r.status === 'PRESENT' || r.status === 'LATE').length;
-    const attRate = myAtt.length ? (myPresent / myAtt.length) * 100 : null;
+    const myResult = calculateAttendanceRate({
+      records: attendanceInput.records.filter((r) => r.student_id === s.id),
+      approvedAbsences: attendanceInput.approvedAbsences.filter((a) => a.student_id === s.id),
+    });
+    const attRate = myResult.total_school_days > 0 ? myResult.attendance_rate : null;
 
     const myGrades = aIds.map((aId) => {
       const g = (allGrades ?? []).find((gr) => gr.assessment_id === aId && gr.student_id === s.id);

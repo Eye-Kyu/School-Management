@@ -7,6 +7,7 @@ import { RequireModule } from '../common/decorators/require-module.decorator';
 import {
   CreateHomeworkInput, type CreateHomeworkInput as CreateHomeworkInputType,
   GradeHomeworkInput, type GradeHomeworkInput as GradeHomeworkInputType,
+  LinkToGradebookInput, type LinkToGradebookInput as LinkToGradebookInputType,
 } from '@school-manager/types';
 import { HomeworkService } from './homework.service';
 
@@ -53,5 +54,19 @@ export class HomeworkController {
     @Body(new ZodValidationPipe(GradeHomeworkInput)) input: GradeHomeworkInputType,
   ) {
     return this.homework.gradeSubmission(token, homeworkId, submissionId, input);
+  }
+
+  @Post(':homeworkId/link-to-gradebook')
+  linkToGradebook(
+    @AccessToken() token: string,
+    @Param('homeworkId') homeworkId: string,
+    @Body(new ZodValidationPipe(LinkToGradebookInput)) input: LinkToGradebookInputType,
+  ) {
+    return this.homework.linkToGradebook(token, homeworkId, input);
+  }
+
+  @Delete(':homeworkId/link-to-gradebook')
+  unlinkFromGradebook(@AccessToken() token: string, @Param('homeworkId') homeworkId: string) {
+    return this.homework.unlinkFromGradebook(token, homeworkId);
   }
 }

@@ -18,7 +18,7 @@
  * three grades) — locking in that it now has exactly one answer.
  */
 
-import { calculateSubjectAverage, assignLetterGrade } from '@school-manager/types';
+import { calculateSubjectAverage, assignLetterGrade, normalizeScore, calculateStudentTermAverage } from '@school-manager/types';
 
 describe('calculateSubjectAverage', () => {
   it('returns null for an empty list (nothing graded yet)', () => {
@@ -79,6 +79,127 @@ describe('assignLetterGrade', () => {
     expect(assignLetterGrade(59)).toBe('D');
     expect(assignLetterGrade(50)).toBe('D');
     expect(assignLetterGrade(49)).toBe('E');
+  });
+});
+
+describe('normalizeScore (Bucket 1, PR 2b — homework/quiz score onto a linked assessment)', () => {
+  it('projects a homework/quiz score onto the assessment scale', () => {
+    expect(normalizeScore(8, 10, 100)).toBe(80); // 8/10 -> 80/100
+    expect(normalizeScore(3, 5, 20)).toBe(12); // 3/5 -> 12/20
+  });
+
+  it('sourceScore = 0 is a valid result (0), not treated as division-by-zero', () => {
+    expect(normalizeScore(0, 10, 100)).toBe(0);
+  });
+
+  it('rounds to 2 decimal places', () => {
+    expect(normalizeScore(1, 3, 10)).toBe(3.33); // 3.333... -> 3.33
+    expect(normalizeScore(2, 3, 10)).toBe(6.67); // 6.666... -> 6.67
+  });
+
+  it('handles a small source max score without precision blowing up', () => {
+    expect(normalizeScore(1, 1, 100)).toBe(100);
+  });
+
+  it('handles large numbers correctly', () => {
+    expect(normalizeScore(950, 1000, 500)).toBe(475);
+  });
+
+  it('throws for a non-positive source max score (would be a division by zero/negative)', () => {
+    expect(() => normalizeScore(5, 0, 100)).toThrow(/source max score/);
+    expect(() => normalizeScore(5, -1, 100)).toThrow(/source max score/);
+  });
+
+  it('throws for a non-positive assessment max marks', () => {
+    expect(() => normalizeScore(5, 10, 0)).toThrow(/assessment max marks/);
+    expect(() => normalizeScore(5, 10, -5)).toThrow(/assessment max marks/);
+  });
+
+  it('a perfect score normalizes to exactly the assessment max, not a rounding-drifted near-value', () => {
+    expect(normalizeScore(10, 10, 37)).toBe(37);
+  });
+});
+
+describe('calculateStudentTermAverage (Foundation PR — shared helpers)', () => {
+  it('returns null/zero for a student with nothing graded yet', () => {
+    const result = calculateStudentTermAverage({ gradesFromGradebook: [], homeworkCompletions: [], quizAttempts: [] });
+    expect(result).toEqual({ overall_average_percentage: null, assessment_count: 0, by_subject: [] });
+  });
+
+  it('overall average is the mean across every post-dedup assessment percentage, not a mean of subject averages', () => {
+    // Maths: two assessments (90%, 50%) -> subject avg 70%. English: one assessment (60%).
+    // Mean-of-subjects would be (70 + 60) / 2 = 65. Per-assessment mean is (90+50+60)/3 = 66.67.
+    const result = calculateStudentTermAverage({
+      gradesFromGradebook: [
+        { assessment_id: 'a1', subject_id: 'math', subject_name: 'Maths', score: 18, max_marks: 20 }, // 90%
+        { assessment_id: 'a2', subject_id: 'math', subject_name: 'Maths', score: 10, max_marks: 20 }, // 50%
+        { assessment_id: 'a3', subject_id: 'eng', subject_name: 'English', score: 12, max_marks: 20 }, // 60%
+      ],
+      homeworkCompletions: [],
+      quizAttempts: [],
+    });
+    expect(result.assessment_count).toBe(3);
+    expect(result.overall_average_percentage).toBeCloseTo((90 + 50 + 60) / 3, 5);
+    expect(result.overall_average_percentage).not.toBeCloseTo(65, 5);
+    const math = result.by_subject.find((s) => s.subject_id === 'math')!;
+    expect(math.average_percentage).toBeCloseTo(70, 5);
+    expect(math.assessment_count).toBe(2);
+  });
+
+  it('dedups an unlinked homework score by homework_id against a grades row\'s source_id, not the completion row\'s own id', () => {
+    // The linked grade row's assessment_id/id is unrelated to the homework's
+    // own id — dedup must match on source_id === homework_id, not id === id.
+    const result = calculateStudentTermAverage({
+      gradesFromGradebook: [
+        { assessment_id: 'assess-99', subject_id: 'math', subject_name: 'Maths', score: 8, max_marks: 10, source_type: 'HOMEWORK', source_id: 'hw-1' },
+      ],
+      homeworkCompletions: [
+        // Same homework (hw-1), already counted via the grades row above — must NOT be double-counted.
+        { homework_id: 'hw-1', subject_id: 'math', subject_name: 'Maths', score: 8, max_score: 10 },
+        // A different, never-linked homework — must be counted.
+        { homework_id: 'hw-2', subject_id: 'math', subject_name: 'Maths', score: 5, max_score: 10 },
+      ],
+      quizAttempts: [],
+    });
+    expect(result.assessment_count).toBe(2); // hw-1 counted once (via grades), hw-2 counted once
+    expect(result.overall_average_percentage).toBeCloseTo((80 + 50) / 2, 5);
+  });
+
+  it('dedups an unlinked quiz score by quiz_id against a grades row\'s source_id', () => {
+    const result = calculateStudentTermAverage({
+      gradesFromGradebook: [
+        { assessment_id: 'assess-1', subject_id: 'sci', subject_name: 'Science', score: 9, max_marks: 10, source_type: 'QUIZ', source_id: 'quiz-1' },
+      ],
+      homeworkCompletions: [],
+      quizAttempts: [
+        { quiz_id: 'quiz-1', subject_id: 'sci', subject_name: 'Science', score: 9, max_score: 10 }, // already linked, skip
+        { quiz_id: 'quiz-2', subject_id: 'sci', subject_name: 'Science', score: 4, max_score: 10 }, // unlinked, count
+      ],
+    });
+    expect(result.assessment_count).toBe(2);
+  });
+
+  it('skips a grades row with non-positive max_marks (bad data), not NaN/Infinity', () => {
+    const result = calculateStudentTermAverage({
+      gradesFromGradebook: [
+        { assessment_id: 'a1', subject_id: 'math', subject_name: 'Maths', score: 10, max_marks: 20 },
+        { assessment_id: 'a2', subject_id: 'math', subject_name: 'Maths', score: 5, max_marks: 0 },
+      ],
+      homeworkCompletions: [],
+      quizAttempts: [],
+    });
+    expect(result.assessment_count).toBe(1);
+    expect(Number.isFinite(result.overall_average_percentage)).toBe(true);
+  });
+
+  it('skips unlinked homework/quiz rows with non-positive max_score', () => {
+    const result = calculateStudentTermAverage({
+      gradesFromGradebook: [],
+      homeworkCompletions: [{ homework_id: 'hw-1', subject_id: 'math', subject_name: 'Maths', score: 5, max_score: 0 }],
+      quizAttempts: [{ quiz_id: 'q-1', subject_id: 'math', subject_name: 'Maths', score: 5, max_score: 0 }],
+    });
+    expect(result.assessment_count).toBe(0);
+    expect(result.overall_average_percentage).toBeNull();
   });
 });
 

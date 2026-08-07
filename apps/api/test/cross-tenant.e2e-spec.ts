@@ -285,8 +285,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     documentAId = randomUUID();
     documentBId = randomUUID();
     const { error: docErr } = await admin.from('documents').insert([
-      { id: documentAId, school_id: schoolAId, uploaded_by_id: adminA.userId, title: 'Alpha Doc', file_url: 'https://example.com/a.pdf', file_name: 'a.pdf' },
-      { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  file_url: 'https://example.com/b.pdf', file_name: 'b.pdf' },
+      { id: documentAId, school_id: schoolAId, uploaded_by_id: adminA.userId, title: 'Alpha Doc', storage_path: `${schoolAId}/a.pdf`, file_name: 'a.pdf' },
+      { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  storage_path: `${schoolBId}/b.pdf`, file_name: 'b.pdf' },
     ]);
     if (docErr) throw new Error(`Document insert failed: ${docErr.message}`);
 

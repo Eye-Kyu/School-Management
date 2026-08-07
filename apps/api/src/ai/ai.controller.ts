@@ -10,6 +10,8 @@ import { FeatureGuard } from '../common/guards/feature.guard';
 import { RequireModule } from '../common/decorators/require-module.decorator';
 import { AiService } from './ai.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import { fetchAttendanceRateInputs } from '../attendance/fetchers';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -99,17 +101,13 @@ export class AiController {
     const { data: termRow } = await client.from('terms').select('start_date, end_date').eq('id', body.termId).maybeSingle();
     let attendanceRate: number | null = null;
     if (termRow) {
-      const { data: att } = await client
-        .from('attendance_records')
-        .select('status')
-        .eq('student_id', body.studentId)
-        .gte('date', termRow.start_date)
-        .lte('date', termRow.end_date);
-      const total = (att ?? []).length;
-      if (total > 0) {
-        const present = (att ?? []).filter((r) => r.status === 'PRESENT' || r.status === 'LATE').length;
-        attendanceRate = (present / total) * 100;
-      }
+      const input = await fetchAttendanceRateInputs(client, this.supabase.admin, {
+        studentIds: [body.studentId],
+        startDate: termRow.start_date,
+        endDate: termRow.end_date,
+      });
+      const result = calculateAttendanceRate(input);
+      attendanceRate = result.total_school_days > 0 ? result.attendance_rate : null;
     }
 
     const comment = await this.ai.generateReportCardComment({
@@ -136,7 +134,7 @@ export class AiController {
     // own school — no ownership check needed beyond letting RLS decide.
     const { data: doc } = await client
       .from('documents')
-      .select('id, school_id, file_url, title')
+      .select('id, school_id, storage_path, title')
       .eq('id', body.documentId)
       .maybeSingle();
     if (!doc) throw new NotFoundException('Document not found');
@@ -144,7 +142,7 @@ export class AiController {
     // Chunk insertion needs the service-role client — chunks_insert RLS
     // requires ADMIN/TEACHER, but docs_select also permits STUDENT/PARENT,
     // so this stays on `admin` now that ownership is already verified above.
-    const chunked = await this.ai.extractAndChunkDocument(doc.id, doc.school_id, doc.file_url, doc.title);
+    const chunked = await this.ai.extractAndChunkDocument(doc.id, doc.school_id, doc.storage_path, doc.title);
     return { chunked };
   }
 

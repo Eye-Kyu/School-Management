@@ -160,6 +160,34 @@ Neither function calls the other or calls back into either service's `markRead()
 
 ---
 
+### BUG-10: the `documents` Storage bucket was public, allowing unauthenticated downloads that bypassed table RLS entirely
+
+**Found during:** 2026-08-04, Bucket 1 PR 3 Phase 1 audit (`docs/audits/documents-current-state.md` §1.1).
+
+**File:** `supabase/migrations/20260527000015_documents_bucket.sql` (`public: true`, `documents_read` policy with no auth requirement); `apps/web/app/(dashboard)/admin/documents/page.tsx` (stored and rendered the resulting public URL directly).
+
+**What was wrong:** The `documents` Storage bucket was created with `public: true`, and its `documents_read` policy (`FOR SELECT USING (bucket_id = 'documents')`) had no role restriction at all. Combined, anyone who knew or could guess a file's storage path — authenticated or not, at this school or any other — could download it directly from Supabase Storage's CDN. The `documents` table's own RLS (`school_id`/`module_enabled`, and later the scope check) governed the *row* but had no bearing on the *file bytes*, which were reachable independently via the public URL stored in `file_url`.
+
+**Fix (2026-08-04, Bucket 1 PR 3 Phase 2):** `supabase/migrations/20260728000084_documents_bucket_privacy.sql` flips the bucket to `public: false` and drops the read policy. All downloads now go through `GET /documents/:id/download-url` (`DocumentsService.issueDownloadUrl()`), which re-checks visibility via `user_can_see_document()` (the same RLS-backing function `docs_select` uses) before issuing a 5-minute signed URL via the service-role client. `file_url` (a public URL, meaningless once the bucket is private) is dropped from the table in the same migration set; `storage_path` (the bucket-relative key) replaces it.
+
+**Verification:** applied to production 2026-08-05, confirmed via `check-migrations.sh` (88/88 migrations, zero drift) and a live e2e run (`documents-scope.e2e-spec.ts`, `SCHOOL_WIDE`/`CLASS`/`SUBJECT`/`ASSIGNMENT` download-url tests, 15/15 passing) plus a direct regression test asserting a raw authenticated client cannot bypass the API and write to the bucket. Full suite regression after applying: 221/221 passing across all 10 e2e files.
+
+---
+
+### BUG-11: `documents` Storage-object write policies allowed any authenticated user to write or delete files, disagreeing with the table's own role gate
+
+**Found during:** 2026-08-04, Bucket 1 PR 3 Phase 1 audit (`docs/audits/documents-current-state.md` §1.1).
+
+**File:** `supabase/migrations/20260527000015_documents_bucket.sql` (`documents_insert`/`documents_update`/`documents_delete` policies, `TO authenticated WITH CHECK (bucket_id = 'documents')` — no role check).
+
+**What was wrong:** The `documents` table's own RLS restricts row INSERT/UPDATE/DELETE to `ADMIN`/`TEACHER`, but the Storage-object policies governing the *same feature's file bytes* had no equivalent restriction — any authenticated user, including a STUDENT or PARENT, could write, overwrite, or delete objects in the bucket directly via the Storage API, completely independent of (and disagreeing with) the table's role gate.
+
+**Fix (2026-08-04, Bucket 1 PR 3 Phase 2):** `supabase/migrations/20260728000084_documents_bucket_privacy.sql` drops all three write policies with no replacement. Every legitimate write now goes through `DocumentsService.upload()`'s service-role client (`this.supabase.admin.storage...`), called only after the caller's role and scope have already been verified against the RLS-respecting client — service-role bypasses RLS by design, so the app's own upload/delete calls are unaffected; only the direct authenticated-role Storage-API access (the actual bug) is closed.
+
+**Verification:** applied to production 2026-08-05, same migration as BUG-10. Live-verified directly: `documents-scope.e2e-spec.ts`'s "a raw authenticated client cannot write directly to the documents Storage bucket" test asserts a genuine authenticated Supabase client's own `.storage.from('documents').upload(...)` call is rejected — proves the policy removal, not just that the app's own service-role path still works.
+
+---
+
 ## Resolved / re-verified (not bugs)
 
 For traceability — items raised as open questions in a prior PR's follow-up notes, re-examined during the 2026-07-25 audit and confirmed safe, not touched:

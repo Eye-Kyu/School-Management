@@ -6,6 +6,8 @@ import RoleBadgeList from '@/components/RoleBadgeList';
 import { getMyRoleBadges } from '@/lib/roleBadges';
 import PrefectPanel from './PrefectPanel';
 import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 export default async function StudentHomePage() {
   const supabase = createClient();
@@ -50,20 +52,22 @@ export default async function StudentHomePage() {
   // the filter would silently exclude attendance marked today, making a
   // freshly-marked record look like it never reflected on the dashboard.
   const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
-  const attQuery = studentId
-    ? supabase.from('attendance_records').select('status').eq('student_id', studentId)
-    : null;
-  const { data: attendanceRecords } = attQuery
-    ? termCoversToday
-      ? await attQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
-      : await attQuery
-    : { data: [] };
+  // No reliable current term covering today — widen to "all time up to
+  // today" rather than leaving the range unbounded (the approved-absences
+  // endpoint requires explicit start/end dates).
+  const attendanceRange = termCoversToday
+    ? { startDate: currentTerm!.start_date, endDate: currentTerm!.end_date }
+    : { startDate: '2000-01-01', endDate: todayDate };
 
-  const attTotal = (attendanceRecords ?? []).length;
-  const attPresent = (attendanceRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attendanceRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attendanceRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+  const attendanceInput = studentId
+    ? await fetchAttendanceData(supabase, studentId, attendanceRange)
+    : { records: [], approvedAbsences: [] };
+
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attAbsent = attendanceInput.records.filter((r) => r.status === 'ABSENT').length;
+  const attOverall = calculateAttendanceRate(attendanceInput);
+  const attRate = attOverall.total_school_days > 0 ? Math.round(attOverall.attendance_rate) : null;
 
   // Today's status — always queried by exact date, never term-range filtered,
   // so it can never be silently excluded by term-boundary staleness.
@@ -203,7 +207,7 @@ export default async function StudentHomePage() {
               ) : (
                 <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
               )}
-              {attTotal === 0 ? (
+              {attOverall.total_school_days === 0 ? (
                 <p className="text-sm text-slate-500">No attendance recorded yet.</p>
               ) : (
                 <div className="flex gap-4 text-sm">

@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 function Bar({ pct, color }: { pct: number; color: string }) {
   return (
@@ -70,33 +72,45 @@ export default async function StudentAnalyticsPage({ searchParams }: { searchPar
     }
   }
 
-  // Attendance by week
-  const { data: attRecords } = student && termRow
-    ? await supabase.from('attendance_records')
-        .select('date, status')
-        .eq('student_id', student.id)
-        .gte('date', termRow.start_date).lte('date', termRow.end_date)
-        .order('date')
-    : { data: [] };
+  // Attendance — student has no RLS path to absence_requests directly (see
+  // docs/audits/shared-helpers-call-sites.md §1.3), so the approved-absence
+  // overlay comes from the approved-absences endpoint via fetchAttendanceData.
+  const attendanceInput = student && termRow
+    ? await fetchAttendanceData(supabase, student.id, { startDate: termRow.start_date, endDate: termRow.end_date })
+    : { records: [], approvedAbsences: [] };
 
-  const attTotal = (attRecords ?? []).length;
-  const attPresent = (attRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? ((attPresent + attLate) / attTotal) * 100 : null;
+  // Present/Late/Absent cards stay raw record-status counts (informational,
+  // unaffected by the overlay) — only the headline rate below applies it.
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attAbsent = attendanceInput.records.filter((r) => r.status === 'ABSENT').length;
+  const attOverall = calculateAttendanceRate(attendanceInput);
+  const attRate = attOverall.total_school_days > 0 ? attOverall.attendance_rate : null;
 
-  // Attendance by week (group by ISO week)
-  const weekMap: Record<string, { present: number; total: number }> = {};
-  for (const r of attRecords ?? []) {
-    const d = new Date(r.date);
-    const weekStart = new Date(d);
-    weekStart.setDate(d.getDate() - d.getDay()); // Sunday
-    const key = weekStart.toISOString().slice(0, 10);
-    if (!weekMap[key]) weekMap[key] = { present: 0, total: 0 };
-    weekMap[key]!.total++;
-    if (r.status === 'PRESENT' || r.status === 'LATE') weekMap[key]!.present++;
+  // Attendance by week (group by ISO week), overlay-aware via calculateAttendanceRate per bucket.
+  function weekStartOf(date: string): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+    return d.toISOString().slice(0, 10);
   }
-  const weeks = Object.entries(weekMap).slice(-8); // last 8 weeks
+  const weekBuckets = new Map<string, { records: typeof attendanceInput.records; approvedAbsences: typeof attendanceInput.approvedAbsences }>();
+  for (const r of attendanceInput.records) {
+    const wk = weekStartOf(r.date);
+    if (!weekBuckets.has(wk)) weekBuckets.set(wk, { records: [], approvedAbsences: [] });
+    weekBuckets.get(wk)!.records.push(r);
+  }
+  for (const a of attendanceInput.approvedAbsences) {
+    const wk = weekStartOf(a.absence_date);
+    if (!weekBuckets.has(wk)) weekBuckets.set(wk, { records: [], approvedAbsences: [] });
+    weekBuckets.get(wk)!.approvedAbsences.push(a);
+  }
+  const weeks = Array.from(weekBuckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-8)
+    .map(([weekKey, bucket]) => {
+      const result = calculateAttendanceRate(bucket);
+      return [weekKey, { present: result.present_days, total: result.total_school_days }] as const;
+    });
 
   // Assignment submission rate
   const { data: classAssignments } = student
