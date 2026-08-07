@@ -386,13 +386,16 @@ export class PlatformPrivilegedAccessService {
     return data ?? [];
   }
 
-  /** Mirrors the tenant document-library page's own select shape — metadata + the already-public file_url, no signed-URL step needed. */
+  // Metadata only — the bucket is private (BUG-10 fix, B1-3) and issuing a
+  // signed URL is a distinct, RLS-checked action of its own
+  // (DocumentsService.issueDownloadUrl()); this oversight endpoint doesn't
+  // need to duplicate that to list what exists.
   async getSchoolDocuments(schoolId: string, callerAuthId: string) {
     const grant = await this.assertActiveGrant(callerAuthId, schoolId, 'DOCUMENTS');
 
     const { data, error } = await this.supabase.admin
       .from('documents')
-      .select('id, title, file_url, file_name, file_size, mime_type, audience, target_grade_level, tags, created_at, uploader:users!uploaded_by_id(full_name)')
+      .select('id, title, storage_path, file_name, file_size, mime_type, scope_type, scope_subtype, scope_id, tags, created_at, uploader:users!uploaded_by_id(full_name)')
       .eq('school_id', schoolId)
       .order('created_at', { ascending: false });
     if (error) throw new BadRequestException(error.message);

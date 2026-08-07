@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { calculateSubjectAverage, assignLetterGrade } from '@school-manager/types';
+import { assignLetterGrade, calculateAttendanceRate, calculateStudentTermAverage } from '@school-manager/types';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { fetchStudentTermAverage } from '@/lib/grading/fetchStudentTermAverage';
 import PrintButton from './PrintButton';
 import CommentForm from './CommentForm';
 
@@ -37,50 +39,36 @@ export default async function ReportCardPage({
   const { data: school } = await supabase
     .from('schools').select('name').maybeSingle();
 
-  // Grades grouped by subject
-  const { data: assessments } = await supabase
-    .from('assessments')
-    .select('id, name, max_marks, subject:subjects(id, name)')
-    .eq('class_id', student.current_class_id ?? '')
-    .eq('term_id', termId ?? '');
+  // Grades — unions `grades` (direct + already-linked homework/quizzes) with
+  // any unlinked homework_completions/quiz_attempts, via the shared
+  // calculateStudentTermAverage (see packages/types/src/grading.ts). Shared
+  // with report-card/[studentId]/page.tsx via @school-manager/types.
+  const termAverageInput = termId
+    ? await fetchStudentTermAverage(supabase, { studentId: params.studentId, termId })
+    : { gradesFromGradebook: [], homeworkCompletions: [], quizAttempts: [] };
+  const termAverage = calculateStudentTermAverage(termAverageInput);
+  const subjectRows = termAverage.by_subject.map((s) => ({
+    name: s.subject_name,
+    assessmentCount: s.assessment_count,
+    avg: s.average_percentage as number | null,
+  }));
+  const overallAvg = termAverage.overall_average_percentage;
 
-  const assessmentIds = (assessments ?? []).map((a) => a.id);
-  const { data: grades } = assessmentIds.length
-    ? await supabase.from('grades').select('assessment_id, score').eq('student_id', params.studentId).in('assessment_id', assessmentIds)
-    : { data: [] };
-
-  const gradeMap = Object.fromEntries((grades ?? []).map((g) => [g.assessment_id, g.score]));
-
-  // Group by subject → average
-  type SubjectRow = { name: string; assessmentCount: number; avg: number | null };
-  const bySubject: Record<string, SubjectRow> = {};
-  for (const a of assessments ?? []) {
-    const sub = a.subject as unknown as { id: string; name: string } | null;
-    if (!sub) continue;
-    if (!bySubject[sub.id]) bySubject[sub.id] = { name: sub.name, assessmentCount: 0, avg: null };
-    const row = bySubject[sub.id]!;
-    row.assessmentCount++;
-  }
-  // Average percentage per subject — shared with report-card/[studentId]/page.tsx
-  // via @school-manager/types (see packages/types/src/grading.ts).
-  for (const subId of Object.keys(bySubject)) {
-    const subAssessments = (assessments ?? []).filter((a) => (a.subject as any)?.id === subId);
-    const scored = subAssessments.filter((a) => gradeMap[a.id] != null);
-    bySubject[subId]!.avg = calculateSubjectAverage(scored.map((a) => ({ score: gradeMap[a.id]!, maxMarks: a.max_marks })));
-  }
-
-  // Attendance for the term
+  // Attendance for the term — via fetchAttendanceData(), which applies the
+  // approved-absence overlay through the approved-absences endpoint (this
+  // page is also viewable by the student/guardian once published, and
+  // neither has a direct RLS path to absence_requests — see
+  // docs/audits/shared-helpers-call-sites.md §1.3).
   const { data: termRow } = await supabase.from('terms').select('start_date, end_date').eq('id', termId ?? '').maybeSingle();
-  const { data: attRecords } = termRow
-    ? await supabase.from('attendance_records')
-        .select('status').eq('student_id', params.studentId)
-        .gte('date', termRow.start_date).lte('date', termRow.end_date)
-    : { data: [] };
-  const attTotal = (attRecords ?? []).length;
-  const attPresent = (attRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+  const attendanceInput = termRow
+    ? await fetchAttendanceData(supabase, params.studentId, { startDate: termRow.start_date, endDate: termRow.end_date })
+    : { records: [], approvedAbsences: [] };
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attResult = calculateAttendanceRate(attendanceInput);
+  const attTotal = attResult.total_school_days;
+  const attAbsent = attResult.unapproved_absences;
+  const attRate = attTotal > 0 ? Math.round(attResult.attendance_rate) : null;
 
   // Report card comments
   const { data: rc } = await supabase
@@ -100,10 +88,6 @@ export default async function ReportCardPage({
   }
   const locked = !!rc?.locked_at;
   const signerName = (rc?.signer as unknown as { full_name: string } | null)?.full_name ?? null;
-  const subjectRows = Object.values(bySubject);
-  const overallAvg = subjectRows.filter((s) => s.avg != null).length
-    ? subjectRows.filter((s) => s.avg != null).reduce((sum, s) => sum + s.avg!, 0) / subjectRows.filter((s) => s.avg != null).length
-    : null;
 
   return (
     <div className="page">

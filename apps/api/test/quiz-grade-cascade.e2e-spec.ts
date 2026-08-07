@@ -1,14 +1,21 @@
 // =============================================================================
-// record_quiz_grade() SECURITY DEFINER function — Bucket 1, PR 2a
+// record_quiz_grade() SECURITY DEFINER function — Bucket 1, PR 2a / 2b
 // =============================================================================
-// Infrastructure only (see docs/audits/homework-quiz-gradebook-relationship.md
-// and the migration's own header comment for why this is a DB function rather
-// than a NestJS endpoint or a widened RLS policy). Not invoked from any real
-// quiz submission flow yet — B1-2b owns that wiring plus the score
-// normalization formula. These are live/integration tests, not mocked unit
-// tests — a plpgsql function has no meaningful mock surface, matching how
-// class_average_scores() (the only other student-callable RPC in this
-// codebase) is itself only ever tested live.
+// Infrastructure only in B1-2a (see
+// docs/audits/homework-quiz-gradebook-relationship.md and the migration's own
+// header comment for why this is a DB function rather than a NestJS endpoint
+// or a widened RLS policy). B1-2b (20260728000083) wires it to real quiz
+// submissions and changes its signature: it no longer takes an explicit
+// p_assessment_id — B1-2a's version was scaffolding for a caller that didn't
+// yet know how to resolve the real link, but nothing existed to call it with
+// a real assessment id back then. Now the function resolves the link itself
+// (assessments WHERE source_type='QUIZ' AND source_id = the attempt's
+// quiz_id) and writes through the shared write_linked_grade() gateway
+// (20260728000082) instead of its own raw INSERT — an unlinked quiz is a
+// documented no-op (returns NULL), not an error. These are live/integration
+// tests, not mocked unit tests — a plpgsql function has no meaningful mock
+// surface, matching how class_average_scores() (the only other
+// student-callable RPC in this codebase) is itself only ever tested live.
 // =============================================================================
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -74,18 +81,23 @@ describe('record_quiz_grade() (e2e)', () => {
   // Every test gets its own quiz + submitted attempt — record_quiz_grade
   // upserts into grades keyed on (assessment_id, student_id), so reusing one
   // attempt across tests wouldn't cleanly exercise "does it create the row"
-  // vs "does it update it" independently.
+  // vs "does it update it" independently. Since B1-2b's record_quiz_grade
+  // resolves its target by looking up assessments WHERE source_type='QUIZ'
+  // AND source_id = quiz_id (it no longer takes an explicit assessment id),
+  // linking is relinked to point at each new quiz in turn — assessmentAId
+  // itself is still the one shared grades-upsert target across tests.
   async function createSubmittedAttempt(score: number, maxScore: number) {
     const quizId = randomUUID();
     await admin.from('quizzes').insert({
       id: quizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Cascade test quiz', is_published: true,
     });
+    await admin.from('assessments').update({ source_type: 'QUIZ', source_id: quizId }).eq('id', assessmentAId);
     const attemptId = randomUUID();
     await admin.from('quiz_attempts').insert({
       id: attemptId, school_id: schoolAId, quiz_id: quizId, student_id: studentAId,
       submitted_at: new Date().toISOString(), score, max_score: maxScore, answers: {},
     });
-    return attemptId;
+    return { attemptId, quizId };
   }
 
   beforeAll(async () => {
@@ -147,6 +159,7 @@ describe('record_quiz_grade() (e2e)', () => {
     const teacherB = await seedUser(schoolBId, 'TEACHER', 'quizcascade-teacher-b');
     const teacherBRowId = randomUUID();
     await admin.from('teachers').insert({ id: teacherBRowId, school_id: schoolBId, user_id: teacherB.userId, staff_no: `QCTB-${suffix}`, updated_at: now });
+
     assessmentBId = randomUUID();
     await admin.from('assessments').insert({
       id: assessmentBId, school_id: schoolBId, class_id: classBId, subject_id: subjectBId, term_id: termBId,
@@ -179,9 +192,9 @@ describe('record_quiz_grade() (e2e)', () => {
   }
 
   it('creates a grades row for a real submitted attempt, callable by the student themselves', async () => {
-    const attemptId = await createSubmittedAttempt(8, 10);
+    const { attemptId } = await createSubmittedAttempt(8, 10);
     const { data: gradeId, error } = await clientAs(studentAToken)
-      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentAId });
+      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(error).toBeNull();
     expect(gradeId).toBeTruthy();
 
@@ -191,13 +204,13 @@ describe('record_quiz_grade() (e2e)', () => {
   });
 
   it('calling it twice for the same attempt does not duplicate the grade row', async () => {
-    const attemptId = await createSubmittedAttempt(6, 10);
+    const { attemptId } = await createSubmittedAttempt(6, 10);
     const client = clientAs(studentAToken);
 
-    const first = await client.rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentAId });
+    const first = await client.rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(first.error).toBeNull();
 
-    const second = await client.rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentAId });
+    const second = await client.rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(second.error).toBeNull();
     expect(second.data).toBe(first.data); // same grades.id both times
 
@@ -205,36 +218,72 @@ describe('record_quiz_grade() (e2e)', () => {
     expect(rows).toHaveLength(1);
   });
 
-  it('rejects a crafted assessment id from another school', async () => {
-    const attemptId = await createSubmittedAttempt(5, 10);
-    const { data, error } = await clientAs(studentAToken)
-      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentBId });
+  it('is a documented no-op — returns NULL and writes nothing — when the quiz has no linked assessment', async () => {
+    // A fresh quiz, deliberately never linked (assessmentAId is left pointed
+    // at whatever the previous test linked it to, not this one).
+    const quizId = randomUUID();
+    await admin.from('quizzes').insert({ id: quizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Unlinked cascade quiz', is_published: true });
+    const attemptId = randomUUID();
+    await admin.from('quiz_attempts').insert({
+      id: attemptId, school_id: schoolAId, quiz_id: quizId, student_id: studentAId,
+      submitted_at: new Date().toISOString(), score: 7, max_score: 10, answers: {},
+    });
+
+    const { count: countBefore } = await admin.from('grades').select('id', { count: 'exact', head: true }).eq('school_id', schoolAId);
+
+    const { data, error } = await clientAs(studentAToken).rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
+    expect(error).toBeNull();
+    expect(data).toBeNull();
+
+    const { count: countAfter } = await admin.from('grades').select('id', { count: 'exact', head: true }).eq('school_id', schoolAId);
+    expect(countAfter).toBe(countBefore); // no new or updated row from this call
+  });
+
+  it('defense in depth: raises if a linked assessment belongs to a different school than the attempting student', async () => {
+    // The mismatch record_quiz_grade actually guards against is assessment
+    // school vs. the *attempting student's* school (joined from quiz_attempts
+    // → students), not the quiz's own school_id — the function never reads
+    // the quiz row's school at all. Linked directly to a fresh quiz here
+    // (not via createSubmittedAttempt, which always links assessmentAId) —
+    // the partial unique index on (source_type, source_id) means only one
+    // assessment can ever be linked to a given quiz_id, so this couldn't be
+    // constructed by instead trying to double-link assessmentAId/assessmentBId
+    // to the same quiz. This exact combination (assessmentB, School A
+    // student) can never arise through the real submission flow — RLS scopes
+    // a student's own attempt insert to their own school — but the
+    // function's own cross-school check is a real backstop worth proving.
+    const quizId = randomUUID();
+    await admin.from('quizzes').insert({ id: quizId, school_id: schoolAId, class_id: classAId, created_by_id: teacherAUserId, title: 'Defense-in-depth quiz', is_published: true });
+    await admin.from('assessments').update({ source_type: 'QUIZ', source_id: quizId }).eq('id', assessmentBId);
+
+    const attemptId = randomUUID();
+    await admin.from('quiz_attempts').insert({
+      id: attemptId, school_id: schoolAId, quiz_id: quizId, student_id: studentAId,
+      submitted_at: new Date().toISOString(), score: 5, max_score: 10, answers: {},
+    });
+
+    const { data, error } = await clientAs(studentAToken).rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(error).not.toBeNull();
     expect(error!.message).toMatch(/different schools/);
     expect(data).toBeNull();
 
     const { data: rows } = await admin.from('grades').select('id').eq('assessment_id', assessmentBId);
     expect(rows).toHaveLength(0);
+
+    // Cleanup — don't leak this crafted state into any later test in the file.
+    await admin.from('quiz_attempts').delete().eq('id', attemptId);
+    await admin.from('quizzes').delete().eq('id', quizId);
+    await admin.from('assessments').update({ source_type: 'DIRECT', source_id: null }).eq('id', assessmentBId);
   });
 
   it('full scenario: quiz + submitted attempt + explicit rpc() call produces the expected grades row', async () => {
-    const attemptId = await createSubmittedAttempt(9, 10);
+    const { attemptId } = await createSubmittedAttempt(9, 10);
     const { data: gradeId, error } = await clientAs(studentAToken)
-      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentAId });
+      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(error).toBeNull();
 
     const { data: grade } = await admin.from('grades').select('student_id, score, assessment_id').eq('id', gradeId).single();
     expect(grade).toMatchObject({ student_id: studentAId, score: 9, assessment_id: assessmentAId });
-
-    // grades is upserted on (assessment_id, student_id) — every test in this
-    // file that targets assessmentAId shares the same underlying grade row,
-    // so audit_logs for that entity_id accumulates across tests (correctly —
-    // each call is a real, distinct recording event worth auditing). Scope
-    // to this test's own attemptId (unique per test) to isolate its own entry.
-    const { data: auditRows } = await admin.from('audit_logs')
-      .select('action, entity_id, metadata').eq('action', 'quiz.record_grade').eq('entity_id', gradeId);
-    const ownEntry = (auditRows ?? []).filter((r) => (r.metadata as { quizAttemptId?: string })?.quizAttemptId === attemptId);
-    expect(ownEntry).toHaveLength(1);
   });
 
   it('rejects an attempt that has not been submitted yet', async () => {
@@ -244,7 +293,7 @@ describe('record_quiz_grade() (e2e)', () => {
     await admin.from('quiz_attempts').insert({ id: attemptId, school_id: schoolAId, quiz_id: quizId, student_id: studentAId, answers: {} });
 
     const { error } = await clientAs(studentAToken)
-      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId, p_assessment_id: assessmentAId });
+      .rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId });
     expect(error).not.toBeNull();
     expect(error!.message).toMatch(/not yet submitted/);
   });

@@ -1,14 +1,17 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { normalizeScore } from '@school-manager/types';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import type { CreateHomeworkInput, GradeHomeworkInput } from '@school-manager/types';
+import { AssessmentsService } from '../assessments/assessments.service';
+import type { CreateHomeworkInput, GradeHomeworkInput, LinkToGradebookInput } from '@school-manager/types';
 
 @Injectable()
 export class HomeworkService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly notifications: NotificationsService,
+    private readonly assessments: AssessmentsService,
   ) {}
 
   async list(accessToken: string) {
@@ -147,6 +150,7 @@ export class HomeworkService {
         title: input.title,
         description: input.description ?? null,
         due_date: input.dueDate,
+        max_score: input.maxScore ?? null,
         updated_at: now,
       })
       .select()
@@ -325,6 +329,28 @@ export class HomeworkService {
       metadata: { homeworkId, studentId: submission.student_id, score: input.score },
     });
 
+    // Bucket 1, PR 2b: if this homework is linked to the gradebook, project
+    // the score onto the linked assessment's scale and cascade it via
+    // write_linked_grade() (the sole gateway grades_block_direct_edit_on_linked
+    // allows to write a linked assessment's grades — see its migration).
+    if (homework.max_score != null) {
+      const { data: linkedAssessment } = await client
+        .from('assessments')
+        .select('id, max_marks')
+        .eq('source_type', 'HOMEWORK')
+        .eq('source_id', homeworkId)
+        .maybeSingle();
+      if (linkedAssessment) {
+        const normalized = normalizeScore(input.score, homework.max_score, linkedAssessment.max_marks);
+        const { error: cascadeError } = await client.rpc('write_linked_grade', {
+          p_assessment_id: linkedAssessment.id,
+          p_student_id: submission.student_id,
+          p_score: normalized,
+        });
+        if (cascadeError) throw new Error(cascadeError.message);
+      }
+    }
+
     const { data: studentRow } = await client
       .from('students').select('user_id').eq('id', submission.student_id).maybeSingle();
     if (studentRow?.user_id) {
@@ -341,5 +367,169 @@ export class HomeworkService {
     }
 
     return updated;
+  }
+
+  // Creates (or, if already linked, updates) an assessment that this
+  // homework's graded scores project onto. Idempotent-as-update: calling
+  // this again on an already-linked homework updates the existing
+  // assessment's metadata rather than creating a second one (the DB's
+  // partial unique index on (source_type, source_id) would reject a second
+  // one anyway, but this avoids ever attempting it).
+  async linkToGradebook(accessToken: string, homeworkId: string, input: LinkToGradebookInput) {
+    const client = this.supabase.forUser(accessToken);
+
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
+    if (!userRow || !['ADMIN', 'TEACHER'].includes(userRow.role)) {
+      throw new ForbiddenException('Teacher or Admin role required');
+    }
+
+    const { data: homework } = await client
+      .from('homework_assignments')
+      .select('id, title, class_id, teacher_id, max_score, school_id')
+      .eq('id', homeworkId)
+      .maybeSingle();
+    if (!homework) throw new NotFoundException('Homework not found');
+
+    if (userRow.role !== 'ADMIN') {
+      const { data: teacherRow } = await client
+        .from('teachers').select('id').eq('user_id', userRow.id).maybeSingle();
+      if (teacherRow?.id !== homework.teacher_id) {
+        throw new ForbiddenException('Only the homework creator or an admin can link it to the gradebook');
+      }
+    }
+
+    if (homework.max_score == null) {
+      throw new BadRequestException('Set a max score on this homework before linking it to the gradebook');
+    }
+
+    const { data: existing } = await client
+      .from('assessments')
+      .select('id, max_marks')
+      .eq('source_type', 'HOMEWORK')
+      .eq('source_id', homeworkId)
+      .maybeSingle();
+
+    type GradedRow = { id: string; student_id: string; score: number; student: { user: { full_name: string } } | null };
+    const { data: gradedRows } = await client
+      .from('homework_completions')
+      .select('id, student_id, score, student:students!inner(user:users!inner(full_name))')
+      .eq('homework_id', homeworkId)
+      .not('score', 'is', null) as { data: GradedRow[] | null };
+    const { count: totalCount } = await client
+      .from('homework_completions')
+      .select('id', { count: 'exact', head: true })
+      .eq('homework_id', homeworkId);
+
+    const gradedCount = gradedRows?.length ?? 0;
+    const ungradedCount = (totalCount ?? 0) - gradedCount;
+
+    const needsRetroactiveConfirm = !existing && gradedCount > 0;
+    const needsRecomputeConfirm = !!existing && existing.max_marks !== input.maxMarks && gradedCount > 0;
+
+    if ((needsRetroactiveConfirm || needsRecomputeConfirm) && !input.confirmed) {
+      const sampleGrades = (gradedRows ?? []).slice(0, 5).map((r) => ({
+        studentName: r.student?.user?.full_name ?? 'Unknown',
+        normalizedScore: normalizeScore(r.score, homework.max_score!, input.maxMarks),
+      }));
+      return {
+        preview: true as const,
+        kind: needsRecomputeConfirm ? ('recompute' as const) : ('retroactive_rollup' as const),
+        gradedCount,
+        ungradedCount,
+        sampleGrades,
+      };
+    }
+
+    let assessment: { id: string; name: string; max_marks: number; source_type: string; source_id: string | null };
+    if (existing) {
+      const { data, error } = await client
+        .from('assessments')
+        .update({
+          name: input.name,
+          subject_id: input.subjectId,
+          class_id: input.classId,
+          term_id: input.termId,
+          max_marks: input.maxMarks,
+        })
+        .eq('id', existing.id)
+        .select('id, name, max_marks, source_type, source_id')
+        .single();
+      if (error) throw new BadRequestException(error.message);
+      assessment = data;
+    } else {
+      assessment = await this.assessments.create(
+        accessToken,
+        userRow.id,
+        { name: input.name, subjectId: input.subjectId, classId: input.classId, termId: input.termId, maxMarks: input.maxMarks },
+        { sourceType: 'HOMEWORK', sourceId: homeworkId },
+      ) as typeof assessment;
+    }
+
+    if (gradedCount > 0) {
+      await Promise.all((gradedRows ?? []).map((r) =>
+        client.rpc('write_linked_grade', {
+          p_assessment_id: assessment.id,
+          p_student_id: r.student_id,
+          p_score: normalizeScore(r.score, homework.max_score!, input.maxMarks),
+        }),
+      ));
+    }
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: homework.school_id,
+      user_id: userRow.id,
+      action: !existing && gradedCount > 0 ? 'homework.retroactive_rollup'
+        : needsRecomputeConfirm ? 'homework.retroactive_rollup'
+        : 'homework.link_to_gradebook',
+      entity_type: 'assessment',
+      entity_id: assessment.id,
+      metadata: { homeworkId, gradedCount, ungradedCount },
+    });
+
+    return assessment;
+  }
+
+  // Sets the linked assessment back to DIRECT — the assessment and its
+  // existing grades are kept; future homework grading no longer cascades to it.
+  async unlinkFromGradebook(accessToken: string, homeworkId: string) {
+    const client = this.supabase.forUser(accessToken);
+
+    const userRow = await this.supabase.currentUserRow(accessToken, 'id, role') as { id: string; role: string } | null;
+    if (!userRow || !['ADMIN', 'TEACHER'].includes(userRow.role)) {
+      throw new ForbiddenException('Teacher or Admin role required');
+    }
+
+    const { data: homework } = await client
+      .from('homework_assignments').select('id, teacher_id, school_id').eq('id', homeworkId).maybeSingle();
+    if (!homework) throw new NotFoundException('Homework not found');
+
+    if (userRow.role !== 'ADMIN') {
+      const { data: teacherRow } = await client
+        .from('teachers').select('id').eq('user_id', userRow.id).maybeSingle();
+      if (teacherRow?.id !== homework.teacher_id) {
+        throw new ForbiddenException('Only the homework creator or an admin can unlink it');
+      }
+    }
+
+    const { data: existing } = await client
+      .from('assessments').select('id').eq('source_type', 'HOMEWORK').eq('source_id', homeworkId).maybeSingle();
+    if (!existing) throw new NotFoundException('This homework is not linked to the gradebook');
+
+    const { error } = await client
+      .from('assessments').update({ source_type: 'DIRECT', source_id: null }).eq('id', existing.id);
+    if (error) throw new Error(error.message);
+
+    await client.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: homework.school_id,
+      user_id: userRow.id,
+      action: 'homework.unlink_from_gradebook',
+      entity_type: 'assessment',
+      entity_id: existing.id,
+      metadata: { homeworkId },
+    });
+
+    return { unlinked: true };
   }
 }

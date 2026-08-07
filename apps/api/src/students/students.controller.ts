@@ -2,13 +2,17 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { AuthGuard } from '../auth/auth.guard';
 import { AccessToken, CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { CreateStudentInput, UpdateUserInput, PromoteStudentsInput } from '@school-manager/types';
+import { CreateStudentInput, UpdateUserInput, PromoteStudentsInput, ApprovedAbsencesQuery } from '@school-manager/types';
 import { StudentsService } from './students.service';
+import { AttendanceService } from '../attendance/attendance.service';
 
 @Controller('students')
 @UseGuards(AuthGuard)
 export class StudentsController {
-  constructor(private readonly students: StudentsService) {}
+  constructor(
+    private readonly students: StudentsService,
+    private readonly attendance: AttendanceService,
+  ) {}
 
   @Get()
   list(@AccessToken() token: string) {
@@ -61,5 +65,14 @@ export class StudentsController {
   @Delete(':id')
   remove(@AccessToken() token: string, @Param('id') id: string) {
     return this.students.softDelete(token, id);
+  }
+
+  @Get(':id/approved-absences')
+  approvedAbsences(
+    @AccessToken() token: string,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(ApprovedAbsencesQuery)) query: ApprovedAbsencesQuery,
+  ) {
+    return this.attendance.getApprovedAbsencesForStudent(token, id, query);
   }
 }

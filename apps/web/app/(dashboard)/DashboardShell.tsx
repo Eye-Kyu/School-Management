@@ -57,6 +57,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/teacher/absence-requests', label: 'Absence Requests' },
     { href: '/leaderboard',         label: 'Leaderboard', moduleKey: 'behaviour_tracking' },
     { href: '/teacher/permission-slips', label: 'Permission Slips', moduleKey: 'permission_slips' },
+    { href: '/documents',           label: 'Documents', moduleKey: 'document_library' },
     { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
   STUDENT: [
@@ -69,6 +70,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/student/quizzes',     label: 'Quizzes', moduleKey: 'quizzes' },
     { href: '/student/analytics',   label: 'Analytics' },
     { href: '/leaderboard',         label: 'Leaderboard', moduleKey: 'behaviour_tracking' },
+    { href: '/documents',           label: 'Documents', moduleKey: 'document_library' },
     { href: '/student/tutor',       label: '✨ AI Tutor', moduleKey: 'ai_features' },
   ],
   PARENT: [
@@ -81,6 +83,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/parent/homework',           label: 'Homework', moduleKey: 'homework' },
     { href: '/parent/permission-slips',   label: 'Permission Slips', moduleKey: 'permission_slips' },
     { href: '/leaderboard',               label: 'Leaderboard', moduleKey: 'behaviour_tracking' },
+    { href: '/documents',           label: 'Documents', moduleKey: 'document_library' },
     { href: '/messages',            label: 'Messages', badgeKey: 'messages' },
   ],
   SUPER_ADMIN: [

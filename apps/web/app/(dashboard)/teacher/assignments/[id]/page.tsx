@@ -2,17 +2,24 @@ import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import SubmissionsClient from './SubmissionsClient';
+import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
 
 export default async function AssignmentDetailPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const { data: assignment } = await supabase
     .from('assignments')
-    .select('id, title, description, due_date, max_score, class:classes(id, name), subject:subjects(name), term:terms(name)')
+    .select('id, title, description, due_date, max_score, created_by_id, class:classes(id, name), subject:subjects(name), term:terms(name)')
     .eq('id', params.id)
     .maybeSingle();
 
   if (!assignment) notFound();
+
+  const { data: userRow } = user
+    ? await supabase.from('users').select('id, role').eq('auth_id', user.id).maybeSingle()
+    : { data: null };
+  const canManage = userRow?.role === 'ADMIN' || userRow?.id === assignment.created_by_id;
 
   const classId = (assignment.class as any)?.id;
 
@@ -55,6 +62,8 @@ export default async function AssignmentDetailPage({ params }: { params: { id: s
         students={(students ?? []) as any[]}
         submissions={(submissions ?? []) as any[]}
       />
+
+      <AttachedDocumentsSection scopeSubtype="ONLINE_ASSIGNMENT" scopeId={params.id} canManage={canManage} />
     </div>
   );
 }

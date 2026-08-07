@@ -36,7 +36,7 @@ export default async function StudentGradesPage({
   if (student && currentTermId) {
     const { data: assessments } = await supabase
       .from('assessments')
-      .select('id, name, max_marks, assessment_date, subject:subjects(id, name)')
+      .select('id, name, max_marks, assessment_date, source_type, source_id, subject:subjects(id, name)')
       .eq('class_id', student.current_class_id ?? '')
       .eq('term_id', currentTermId);
 
@@ -51,9 +51,32 @@ export default async function StudentGradesPage({
       const gradeMap = Object.fromEntries(
         (grades ?? []).map((g) => [g.assessment_id, g]),
       );
+
+      const homeworkIds = (assessments ?? [])
+        .filter((a) => a.source_type === 'HOMEWORK' && a.source_id)
+        .map((a) => a.source_id as string);
+      const quizIds = (assessments ?? [])
+        .filter((a) => a.source_type === 'QUIZ' && a.source_id)
+        .map((a) => a.source_id as string);
+
+      const [{ data: homeworkTitles }, { data: quizTitles }] = await Promise.all([
+        homeworkIds.length > 0
+          ? supabase.from('homework_assignments').select('id, title').in('id', homeworkIds)
+          : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+        quizIds.length > 0
+          ? supabase.from('quizzes').select('id, title').in('id', quizIds)
+          : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+      ]);
+      const homeworkTitleMap = Object.fromEntries((homeworkTitles ?? []).map((h) => [h.id, h.title]));
+      const quizTitleMap = Object.fromEntries((quizTitles ?? []).map((q) => [q.id, q.title]));
+
       gradeRows = (assessments ?? []).map((a) => ({
         ...a,
         grade: gradeMap[a.id] ?? null,
+        sourceLabel:
+          a.source_type === 'HOMEWORK' ? homeworkTitleMap[a.source_id as string]
+          : a.source_type === 'QUIZ' ? quizTitleMap[a.source_id as string]
+          : null,
       }));
     }
   }
@@ -149,9 +172,26 @@ export default async function StudentGradesPage({
                         : parseFloat(pct) >= 70 ? 'text-emerald-700 font-semibold'
                         : parseFloat(pct) >= 50 ? 'text-amber-600 font-semibold'
                         : 'text-rose-600 font-semibold';
+                      const sourceHref =
+                        row.source_type === 'HOMEWORK' ? '/student/homework'
+                        : row.source_type === 'QUIZ' && row.source_id ? `/student/quizzes/${row.source_id}`
+                        : null;
                       return (
                         <tr key={row.id} className="border-t border-slate-100">
-                          <td className="px-5 py-2.5 text-slate-800">{row.name}</td>
+                          <td className="px-5 py-2.5 text-slate-800">
+                            {row.name}
+                            {row.source_type !== 'DIRECT' && (
+                              sourceHref ? (
+                                <a href={sourceHref} className="ml-2 inline-block text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 align-middle hover:bg-violet-100">
+                                  {row.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}{row.sourceLabel ? `: ${row.sourceLabel}` : ''}
+                                </a>
+                              ) : (
+                                <span className="ml-2 inline-block text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 align-middle">
+                                  {row.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}{row.sourceLabel ? `: ${row.sourceLabel}` : ''}
+                                </span>
+                              )
+                            )}
+                          </td>
                           <td className="px-4 py-2.5 text-center">
                             {typeof score === 'number' ? `${score} / ${row.max_marks}` : '—'}
                           </td>

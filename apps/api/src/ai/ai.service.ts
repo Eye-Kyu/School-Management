@@ -289,21 +289,25 @@ Output ONLY the feedback text.`, cache_control: { type: 'ephemeral' } }],
   async extractAndChunkDocument(
     documentId: string,
     schoolId: string,
-    fileUrl: string,
+    storagePath: string,
     title: string,
   ): Promise<number> {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (!apiKey) return 0;
 
-    // Fetch the file content
+    // The documents bucket is private (BUG-10 fix) — no public URL exists
+    // to fetch() anymore. Service-role download, same justified `.admin`
+    // use as the chunk insert below (chunks_insert RLS requires
+    // ADMIN/TEACHER, but docs_select also permits STUDENT/PARENT).
     let text = '';
     try {
-      const res = await fetch(fileUrl, { signal: AbortSignal.timeout(15_000) });
-      const contentType = res.headers.get('content-type') ?? '';
+      const { data: blob, error: downloadErr } = await this.supabase.admin.storage
+        .from('documents').download(storagePath);
+      if (downloadErr || !blob) return 0;
 
-      if (contentType.includes('pdf')) {
+      if (blob.type.includes('pdf')) {
         // Send PDF to Claude for text extraction
-        const ab = await res.arrayBuffer();
+        const ab = await blob.arrayBuffer();
         const b64 = Buffer.from(ab).toString('base64');
         const extractRes = await this.anthropic.messages.create({
           model: 'claude-haiku-4-5',
@@ -319,7 +323,7 @@ Output ONLY the feedback text.`, cache_control: { type: 'ephemeral' } }],
         const block = extractRes.content.find((b) => b.type === 'text');
         text = block?.type === 'text' ? block.text : '';
       } else {
-        text = await res.text();
+        text = await blob.text();
       }
     } catch {
       return 0;

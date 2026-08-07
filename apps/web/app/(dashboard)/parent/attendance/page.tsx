@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 const STATUS_STYLE: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
@@ -49,12 +51,26 @@ export default async function ParentAttendancePage() {
       : await attQuery
     : { data: [] };
 
-  const total = (records ?? []).length;
   const present = (records ?? []).filter((r) => r.status === 'PRESENT').length;
   const late = (records ?? []).filter((r) => r.status === 'LATE').length;
-  const absent = (records ?? []).filter((r) => r.status === 'ABSENT').length;
-  const excused = (records ?? []).filter((r) => r.status === 'EXCUSED').length;
-  const rate = total > 0 ? Math.round(((present + late) / total) * 100) : null;
+
+  // Rate + the Excused card both go through the shared calculator, which
+  // applies the approved-absence overlay (fetched via the new
+  // approved-absences endpoint — a non-submitting guardian's own RLS grants
+  // no direct read of absence_requests, see
+  // docs/audits/shared-helpers-call-sites.md §1.3, which is why this page
+  // previously always showed "Excused: 0").
+  const attendanceRange = termCoversToday
+    ? { startDate: currentTerm!.start_date, endDate: currentTerm!.end_date }
+    : { startDate: '2000-01-01', endDate: todayDate };
+  const attendanceInput = firstStudent
+    ? await fetchAttendanceData(supabase, firstStudent.id, attendanceRange)
+    : { records: [], approvedAbsences: [] };
+  const attResult = calculateAttendanceRate(attendanceInput);
+  const total = attResult.total_school_days;
+  const absent = attResult.unapproved_absences;
+  const excused = attResult.approved_absences;
+  const rate = total > 0 ? Math.round(attResult.attendance_rate) : null;
 
   const childName = (firstStudent?.user as any)?.full_name ?? 'Your child';
 

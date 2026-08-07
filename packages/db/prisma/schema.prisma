@@ -352,6 +352,8 @@ model Assessment {
   description    String?
   maxMarks       Int       @map("max_marks")
   assessmentDate DateTime? @map("assessment_date") @db.Date
+  sourceType     String    @default("DIRECT") @map("source_type")
+  sourceId       String?   @map("source_id") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 

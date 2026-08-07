@@ -10,13 +10,31 @@ export default async function GradeEntryPage({ params }: { params: { id: string 
 
   const { data: assessment } = await supabase
     .from('assessments')
-    .select('id, name, max_marks, assessment_date, class:classes(id, name), subject:subjects(name, code), term:terms(name)')
+    .select('id, name, max_marks, assessment_date, source_type, source_id, class:classes(id, name), subject:subjects(name, code), term:terms(name)')
     .eq('id', params.id)
     .maybeSingle();
 
   if (!assessment) return notFound();
 
   const classId = (assessment.class as any)?.id;
+  const sourceType = (assessment.source_type as 'DIRECT' | 'HOMEWORK' | 'QUIZ') ?? 'DIRECT';
+
+  let sourceLabel: string | null = null;
+  if (sourceType === 'HOMEWORK' && assessment.source_id) {
+    const { data: hw } = await supabase
+      .from('homework_assignments')
+      .select('title')
+      .eq('id', assessment.source_id)
+      .maybeSingle();
+    sourceLabel = hw?.title ?? null;
+  } else if (sourceType === 'QUIZ' && assessment.source_id) {
+    const { data: quiz } = await supabase
+      .from('quizzes')
+      .select('title')
+      .eq('id', assessment.source_id)
+      .maybeSingle();
+    sourceLabel = quiz?.title ?? null;
+  }
 
   const [{ data: students }, { data: existingScores }] = await Promise.all([
     supabase
@@ -62,6 +80,8 @@ export default async function GradeEntryPage({ params }: { params: { id: string 
         assessmentId={params.id}
         maxMarks={assessment.max_marks}
         roster={roster}
+        sourceType={sourceType}
+        sourceLabel={sourceLabel}
       />
     </div>
   );

@@ -1,7 +1,8 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { calculateSubjectAverage, assignLetterGrade } from '@school-manager/types';
+import { assignLetterGrade, calculateStudentTermAverage } from '@school-manager/types';
+import { fetchStudentTermAverage } from '@/lib/grading/fetchStudentTermAverage';
 import { PrintButton } from './PrintButton';
 
 export default async function ReportCardPage({
@@ -71,20 +72,26 @@ export default async function ReportCardPage({
 
   const subjectGroups = Object.values(bySubject);
 
-  // Per-subject and overall averages — unweighted mean of each assessment's
-  // own percentage (shared with print/report-card/[studentId]/page.tsx via
-  // @school-manager/types, see packages/types/src/grading.ts for why).
-  const subjectAverages = subjectGroups.map((g) =>
-    calculateSubjectAverage(
-      g.rows
-        .filter((r) => r.marks_obtained != null)
-        .map((r) => ({ score: Number(r.marks_obtained), maxMarks: (r.assessment as any)?.max_marks ?? 0 })),
-    ),
-  );
+  // Per-subject and overall averages — via the shared calculateStudentTermAverage
+  // (packages/types/src/grading.ts), which unions `grades` with any homework/
+  // quiz scores never linked into the gradebook, and averages per-assessment
+  // rather than per-subject-then-averaged. Shared with
+  // print/report-card/[studentId]/page.tsx via @school-manager/types.
+  // subjectGroups (built from `grades` alone, above) still drives the
+  // per-assessment row listing below — only the displayed averages come from
+  // the fuller, shared calculation.
+  const termAverageInput = termId
+    ? await fetchStudentTermAverage(supabase, { studentId, termId })
+    : { gradesFromGradebook: [], homeworkCompletions: [], quizAttempts: [] };
+  const termAverage = calculateStudentTermAverage(termAverageInput);
+  const avgBySubjectId = new Map(termAverage.by_subject.map((s) => [s.subject_id, s.average_percentage]));
+  const subjectAverages = subjectGroups.map((g) => {
+    const a = g.rows[0]?.assessment as any;
+    const subjectId = a?.subject?.id;
+    return subjectId ? avgBySubjectId.get(subjectId) ?? null : null;
+  });
   const scoredSubjectAverages = subjectAverages.filter((a): a is number => a != null);
-  const grandPct = scoredSubjectAverages.length > 0
-    ? scoredSubjectAverages.reduce((s, a) => s + a, 0) / scoredSubjectAverages.length
-    : null;
+  const grandPct = termAverage.overall_average_percentage;
 
   const studentName = (student.user as any)?.full_name ?? '—';
   const className = (student.class as any)?.name ?? '—';

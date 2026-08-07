@@ -5,6 +5,8 @@ import UpcomingEvents from '@/components/UpcomingEvents';
 import RoleBadgeList from '@/components/RoleBadgeList';
 import type { RoleBadge } from '@/lib/roleBadges';
 import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 export default async function ParentHomePage() {
   const supabase = createClient();
@@ -52,20 +54,22 @@ export default async function ParentHomePage() {
   // hasn't been marked current yet) must never filter out today's record.
   const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
 
-  const parentAttQuery = firstStudent
-    ? supabase.from('attendance_records').select('status').eq('student_id', firstStudent.id)
-    : null;
-  const { data: attendanceRecords } = parentAttQuery
-    ? termCoversToday
-      ? await parentAttQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
-      : await parentAttQuery
-    : { data: [] };
+  // A non-submitting guardian has no RLS path to absence_requests directly
+  // (see docs/audits/shared-helpers-call-sites.md §1.3), so the
+  // approved-absence overlay comes from the approved-absences endpoint.
+  const attendanceRange = termCoversToday
+    ? { startDate: currentTerm!.start_date, endDate: currentTerm!.end_date }
+    : { startDate: '2000-01-01', endDate: todayDate };
+  const attendanceInput = firstStudent
+    ? await fetchAttendanceData(supabase, firstStudent.id, attendanceRange)
+    : { records: [], approvedAbsences: [] };
 
-  const attTotal = (attendanceRecords ?? []).length;
-  const attPresent = (attendanceRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attendanceRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attendanceRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attAbsent = attendanceInput.records.filter((r) => r.status === 'ABSENT').length;
+  const attOverall = calculateAttendanceRate(attendanceInput);
+  const attTotal = attOverall.total_school_days;
+  const attRate = attTotal > 0 ? Math.round(attOverall.attendance_rate) : null;
 
   // Fee balances for all linked students
   const studentIds = students.map((s: any) => s.id);

@@ -47,11 +47,40 @@ export default async function ParentGradesPage({
   if (activeStudentId && termId) {
     const { data } = await supabase
       .from('grades')
-      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks, assessment_date, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
+      .select('id, marks_obtained:score, comments:comment, assessment:assessments!inner(id, name, max_marks, assessment_date, source_type, source_id, term:terms(id, name), subject:subjects(id, name, code), class:classes(name))')
       .eq('student_id', activeStudentId)
       .eq('assessments.term_id', termId)
       .order('created_at', { ascending: false });
     scores = data ?? [];
+
+    const homeworkIds = scores
+      .map((r) => r.assessment as any)
+      .filter((a) => a?.source_type === 'HOMEWORK' && a?.source_id)
+      .map((a) => a.source_id as string);
+    const quizIds = scores
+      .map((r) => r.assessment as any)
+      .filter((a) => a?.source_type === 'QUIZ' && a?.source_id)
+      .map((a) => a.source_id as string);
+
+    const [{ data: homeworkTitles }, { data: quizTitles }] = await Promise.all([
+      homeworkIds.length > 0
+        ? supabase.from('homework_assignments').select('id, title').in('id', homeworkIds)
+        : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+      quizIds.length > 0
+        ? supabase.from('quizzes').select('id, title').in('id', quizIds)
+        : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+    ]);
+    const homeworkTitleMap = Object.fromEntries((homeworkTitles ?? []).map((h) => [h.id, h.title]));
+    const quizTitleMap = Object.fromEntries((quizTitles ?? []).map((q) => [q.id, q.title]));
+
+    scores = scores.map((row) => {
+      const a = row.assessment as any;
+      const sourceLabel =
+        a?.source_type === 'HOMEWORK' ? homeworkTitleMap[a.source_id]
+        : a?.source_type === 'QUIZ' ? quizTitleMap[a.source_id]
+        : null;
+      return { ...row, sourceLabel };
+    });
   }
 
   // Group by subject
@@ -186,7 +215,20 @@ export default async function ParentGradesPage({
                             : 'text-rose-600';
                           return (
                             <tr key={row.id} className="hover:bg-slate-50">
-                              <td className="px-5 py-2.5 font-medium text-slate-700">{a.name}</td>
+                              <td className="px-5 py-2.5 font-medium text-slate-700">
+                                {a.name}
+                                {a.source_type !== 'DIRECT' && (
+                                  a.source_type === 'HOMEWORK' ? (
+                                    <Link href="/parent/homework" className="ml-2 inline-block text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 align-middle hover:bg-violet-100">
+                                      Homework{row.sourceLabel ? `: ${row.sourceLabel}` : ''}
+                                    </Link>
+                                  ) : (
+                                    <span className="ml-2 inline-block text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 align-middle">
+                                      Quiz{row.sourceLabel ? `: ${row.sourceLabel}` : ''}
+                                    </span>
+                                  )
+                                )}
+                              </td>
                               <td className="px-5 py-2.5 text-slate-500">
                                 {a.assessment_date ? new Date(a.assessment_date).toLocaleDateString() : '—'}
                               </td>

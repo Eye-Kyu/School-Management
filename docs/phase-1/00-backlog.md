@@ -78,4 +78,34 @@ Items 6-7 below are a different kind of entry: deliberately deferred scope from 
 
 ---
 
+## 8. CLASS/SUBJECT document surfaces (subject and class detail pages)
+
+**What:** B1-3's schema and RLS support all four document scope types (`SCHOOL_WIDE`, `CLASS`, `SUBJECT`, `ASSIGNMENT`) — `user_can_see_document()` correctly resolves visibility for all of them today. Only `SCHOOL_WIDE` and `ASSIGNMENT` shipped a UI surface in B1-3, because neither a subject detail page nor a class detail page exists for any role yet (confirmed in the Phase 1 audit, `docs/audits/documents-current-state.md` §1.4/§1.6 — only admin has flat CRUD list pages for classes/subjects, no per-item `[id]` route anywhere). A teacher can already upload a `CLASS`- or `SUBJECT`-scoped document today (correctly validated, correctly RLS-scoped) — it's just only visible afterward via admin's own filtered documents view, not on any page a student/parent/teacher would naturally look at it from.
+
+**Trigger:** the subject/class detail pages themselves get built (for any reason — this isn't documents-specific scope), at which point adding a "Documents" section to each is a small, contained addition on top of already-shipped schema/RLS/backend.
+
+**Planning docs:** `docs/audits/documents-current-state.md` has the full current-state findings; B1-3's Phase 2 plan has the exact `user_can_see_document()` SQL these pages would query against, unchanged.
+
+---
+
+## 9. Scheduled cleanup job for orphaned Storage objects
+
+**What:** B1-3's soft delete (`documents.deleted_at`) never removes the underlying Storage object — file bytes persist indefinitely after a document is "deleted." A scheduled job (e.g. a nightly cron) to purge Storage objects for documents soft-deleted more than N days ago (30, per the original task spec) was explicitly out of scope for B1-3.
+
+**Trigger:** storage cost becomes material, or a data-retention/compliance requirement is introduced.
+
+**Planning docs:** None yet — would need to decide the retention window (the task's original suggestion was 30 days) and confirm no legal/compliance hold requirement exists first.
+
+---
+
+## 10. Full-text search on document contents
+
+**What:** B1-3's search (Task 5/11) is a plain client-side/`ILIKE` title substring filter — no indexing of document body text for the user-facing documents library. (Note: `document_chunks` + its GIN full-text index already exist, but that infrastructure is for the AI tutor's RAG retrieval, not a user-facing "search inside my documents" feature — reusing it for search would need its own design pass, not a trivial extension.)
+
+**Trigger:** pilot school feedback that title-only search isn't sufficient to find documents in a growing library.
+
+**Planning docs:** None yet — `document_chunks`' existing FTS index (`supabase/migrations/20260602000021_document_chunks_fts_index.sql`) is a relevant technical precedent to evaluate reusing, not a decision already made.
+
+---
+
 When an item's trigger fires, that sub-sprint activates as the next Phase 1 work. Trigger firing is an owner-initiated event, not automatic.

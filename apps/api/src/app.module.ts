@@ -24,6 +24,8 @@ import { BehaviourModule } from './behaviour/behaviour.module';
 import { UsersModule } from './users/users.module';
 import { EventsModule } from './events/events.module';
 import { HomeworkModule } from './homework/homework.module';
+import { QuizzesModule } from './quizzes/quizzes.module';
+import { DocumentsModule } from './documents/documents.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsAggregationModule } from './notifications-aggregation/notifications-aggregation.module';
 import { MessagingModule } from './messaging/messaging.module';
@@ -73,6 +75,8 @@ import { AbsenceRequestsModule } from './absence-requests/absence-requests.modul
     UsersModule,
     EventsModule,
     HomeworkModule,
+    QuizzesModule,
+    DocumentsModule,
     NotificationsModule,
     NotificationsAggregationModule,
     MessagingModule,
