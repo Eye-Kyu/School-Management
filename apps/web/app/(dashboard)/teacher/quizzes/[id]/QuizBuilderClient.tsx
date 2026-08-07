@@ -46,9 +46,12 @@ function ShortAnswerReview({
       .update({ score: newScore })
       .eq('id', attempt.id);
 
-    // Quiz scores live entirely in quiz_attempts (their own score/max_score
-    // columns) — quiz results are never pushed into the gradebook's `grades`
-    // table, which is scoped to real teacher-created `assessments` rows only.
+    // Bucket 1, PR 2b: re-cascades the now-final score if this quiz is
+    // linked. Without this, a linked quiz with short-answer questions would
+    // permanently under-report the gradebook grade at the MCQ-only score
+    // captured at submission — the same recompute this call already does
+    // for a plain re-submission. no-ops if not linked, same as QuizTaker.tsx.
+    await supabase.rpc('record_quiz_grade', { p_quiz_attempt_id: attempt.id }).then(() => {});
 
     onScoreUpdate(attempt.id, newScore);
     setSaving((p) => ({ ...p, [key]: false }));

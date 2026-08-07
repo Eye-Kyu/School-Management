@@ -2,17 +2,24 @@ import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import QuizBuilderClient from './QuizBuilderClient';
+import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
 
 export default async function QuizBuilderPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const { data: quiz } = await supabase
     .from('quizzes')
-    .select('id, title, is_published, time_limit_mins, shuffle_questions, shuffle_options, class:classes(id, name), subject:subjects(name)')
+    .select('id, title, is_published, time_limit_mins, shuffle_questions, shuffle_options, created_by_id, class:classes(id, name), subject:subjects(name)')
     .eq('id', params.id)
     .maybeSingle();
 
   if (!quiz) notFound();
+
+  const { data: userRow } = user
+    ? await supabase.from('users').select('id, role').eq('auth_id', user.id).maybeSingle()
+    : { data: null };
+  const canManage = userRow?.role === 'ADMIN' || userRow?.id === quiz.created_by_id;
 
   const { data: questions } = await supabase
     .from('quiz_questions')
@@ -45,6 +52,8 @@ export default async function QuizBuilderPage({ params }: { params: { id: string
         initialQuestions={(questions ?? []) as any[]}
         attempts={(attempts ?? []) as any[]}
       />
+
+      <AttachedDocumentsSection scopeSubtype="QUIZ" scopeId={params.id} canManage={canManage} />
     </div>
   );
 }

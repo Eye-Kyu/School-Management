@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import HomeworkGradingClient from './HomeworkGradingClient';
+import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
 import { notFound } from 'next/navigation';
 
 export default async function HomeworkGradingPage({ params }: { params: { id: string } }) {
@@ -8,13 +9,21 @@ export default async function HomeworkGradingPage({ params }: { params: { id: st
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const { data: userRow } = await supabase.from('users').select('id, role').eq('auth_id', user.id).maybeSingle();
+
   const { data: homework } = await supabase
     .from('homework_assignments')
-    .select('id, title, max_score, class:classes(name), subject:subjects(name)')
+    .select('id, title, max_score, teacher_id, class:classes(name), subject:subjects(name)')
     .eq('id', params.id)
     .maybeSingle();
 
   if (!homework) return notFound();
+
+  let canManage = userRow?.role === 'ADMIN';
+  if (!canManage && userRow?.role === 'TEACHER') {
+    const { data: teacherRow } = await supabase.from('teachers').select('id').eq('user_id', userRow.id).maybeSingle();
+    canManage = teacherRow?.id === homework.teacher_id;
+  }
 
   const { data: completions } = await supabase
     .from('homework_completions')
@@ -49,6 +58,8 @@ export default async function HomeworkGradingPage({ params }: { params: { id: st
         maxScore={homework.max_score}
         submissions={submissions}
       />
+
+      <AttachedDocumentsSection scopeSubtype="HOMEWORK" scopeId={params.id} canManage={canManage} />
     </div>
   );
 }

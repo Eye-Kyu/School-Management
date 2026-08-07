@@ -8,9 +8,10 @@ export default async function TeacherHomeworkPage() {
   // Get current user's teacher record to find their classes
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [{ data: userRow }, { data: subjects }] = await Promise.all([
+  const [{ data: userRow }, { data: subjects }, { data: terms }] = await Promise.all([
     supabase.from('users').select('id').eq('auth_id', user?.id ?? '').maybeSingle(),
     supabase.from('subjects').select('id, name').order('name'),
+    supabase.from('terms').select('id, name, is_current, start_date, end_date').order('start_date', { ascending: false }),
   ]);
 
   const [{ data: teacherRow }, { data: assignments }] = await Promise.all([
@@ -19,9 +20,16 @@ export default async function TeacherHomeworkPage() {
       : Promise.resolve({ data: null }),
     supabase
       .from('homework_assignments')
-      .select('id, title, description, due_date, class_id, subject_id, class:classes(name), subject:subjects(name)')
+      .select('id, title, description, due_date, class_id, subject_id, max_score, class:classes(name), subject:subjects(name)')
       .order('due_date', { ascending: true }),
   ]);
+
+  // Which of these homework assignments are already linked to the gradebook.
+  const homeworkIds = (assignments ?? []).map((a) => a.id);
+  const { data: links } = homeworkIds.length > 0
+    ? await supabase.from('assessments').select('id, source_id').eq('source_type', 'HOMEWORK').in('source_id', homeworkIds)
+    : { data: [] };
+  const linkedByHomeworkId = Object.fromEntries((links ?? []).map((l) => [l.source_id, l.id]));
 
   // Classes this teacher is assigned to
   const { data: assignedClasses } = teacherRow
@@ -49,9 +57,10 @@ export default async function TeacherHomeworkPage() {
         </div>
       </div>
       <HomeworkClient
-        assignments={(assignments ?? []) as any[]}
+        assignments={(assignments ?? []).map((a) => ({ ...a, linkedAssessmentId: linkedByHomeworkId[a.id] ?? null })) as any[]}
         classes={uniqueClasses}
         subjects={(subjects ?? []) as any[]}
+        terms={(terms ?? []) as any[]}
       />
     </div>
   );

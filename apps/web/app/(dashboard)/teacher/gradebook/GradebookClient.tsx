@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 import { createClient } from '@/lib/supabase/client';
+import { calculateSubjectAverage } from '@school-manager/types';
 
 type ClassItem  = { id: string; name: string; grade_level: number };
 type Subject    = { id: string; name: string };
 type Term       = { id: string; name: string; is_current: boolean };
-type Assessment = { id: string; name: string; max_marks: number; assessment_date: string | null };
+type Assessment = { id: string; name: string; max_marks: number; assessment_date: string | null; source_type: 'DIRECT' | 'HOMEWORK' | 'QUIZ'; source_id: string | null };
 type Student    = { id: string; user: { full_name: string } };
 type Grade      = { student_id: string; score: number | null; comment: string | null };
 
@@ -46,7 +47,7 @@ export default function GradebookClient({
     setLoading(true);
     const [{ data: aData }, { data: sData }] = await Promise.all([
       supabase.from('assessments')
-        .select('id, name, max_marks, assessment_date')
+        .select('id, name, max_marks, assessment_date, source_type, source_id')
         .eq('class_id', classId).eq('subject_id', subjectId).eq('term_id', termId)
         .order('assessment_date', { ascending: true }),
       supabase.from('students')
@@ -139,14 +140,10 @@ export default function GradebookClient({
 
   function studentAvg(studentId: string): string {
     const scored = assessments
-      .map((a) => ({
-        score: grades[a.id]?.[studentId],
-        max: a.max_marks,
-      }))
-      .filter((x) => typeof x.score === 'number');
-    if (!scored.length) return '—';
-    const avgPct = scored.reduce((s, x) => s + (x.score! / x.max) * 100, 0) / scored.length;
-    return `${avgPct.toFixed(1)}%`;
+      .map((a) => ({ score: grades[a.id]?.[studentId] ?? null, maxMarks: a.max_marks }))
+      .filter((x): x is { score: number; maxMarks: number } => typeof x.score === 'number');
+    const avgPct = calculateSubjectAverage(scored);
+    return avgPct != null ? `${avgPct.toFixed(1)}%` : '—';
   }
 
   const filteredSubjects = subjects; // all subjects (teacher can enter grades for any)
@@ -271,6 +268,14 @@ export default function GradebookClient({
                         <div>{a.name}</div>
                         <div className="text-xs font-normal text-slate-500">/{a.max_marks}</div>
                         {a.assessment_date && <div className="text-xs font-normal text-slate-500">{new Date(a.assessment_date).toLocaleDateString('en-KE', { day:'numeric', month:'short' })}</div>}
+                        {a.source_type !== 'DIRECT' && (
+                          <div
+                            className="mt-1 inline-block text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5"
+                            title={`Derived from a ${a.source_type.toLowerCase()} — grades are read-only here. Update the source instead.`}
+                          >
+                            🔒 {a.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}
+                          </div>
+                        )}
                       </th>
                     ))}
                     <th className="px-4 py-3 text-center font-medium text-slate-600 min-w-[80px]">Avg</th>
@@ -286,6 +291,18 @@ export default function GradebookClient({
                         const score = grades[a.id]?.[s.id];
                         const pct = typeof score === 'number' ? (score / a.max_marks) * 100 : null;
                         const color = pct === null ? '' : pct >= 70 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-600' : 'text-rose-600';
+                        if (a.source_type !== 'DIRECT') {
+                          return (
+                            <td key={a.id} className="px-2 py-1.5 text-center">
+                              <span
+                                className={`inline-block w-16 rounded-lg border border-dashed border-slate-200 px-2 py-1 text-center text-sm bg-slate-50 ${color}`}
+                                title={`Derived from a ${a.source_type.toLowerCase()} — read-only. Update the source instead.`}
+                              >
+                                {typeof score === 'number' ? score : '—'}
+                              </span>
+                            </td>
+                          );
+                        }
                         return (
                           <td key={a.id} className="px-2 py-1.5 text-center">
                             <input

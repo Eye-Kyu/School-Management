@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
 
 type Assignment = {
   id: string; title: string; description: string | null; due_date: string;
@@ -25,6 +26,7 @@ export default function StudentAssignmentsClient({
   const [subMap, setSubMap] = useState(initialMap);
   const [open, setOpen] = useState<string | null>(null);
   const [viewOpen, setViewOpen] = useState<string | null>(null);
+  const [docsOpen, setDocsOpen] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -128,6 +130,10 @@ export default function StudentAssignmentsClient({
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.color}`}>
                   {status.label}
                 </span>
+                <button onClick={() => setDocsOpen(docsOpen === a.id ? null : a.id)}
+                  className="text-xs font-medium text-slate-400 hover:text-slate-700">
+                  📎 {docsOpen === a.id ? 'Hide docs' : 'Docs'}
+                </button>
                 {sub ? (
                   <div className="flex flex-col items-end gap-1">
                     <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
@@ -154,6 +160,12 @@ export default function StudentAssignmentsClient({
                 )}
               </div>
             </div>
+
+            {docsOpen === a.id && (
+              <div className="border-t border-slate-100 px-5 py-4">
+                <AttachedDocumentsSection scopeSubtype="ONLINE_ASSIGNMENT" scopeId={a.id} canManage={false} />
+              </div>
+            )}
 
             {/* Grade feedback */}
             {sub?.grade_comment && (

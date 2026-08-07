@@ -61,7 +61,15 @@ export class AssessmentsService {
     return data ?? [];
   }
 
-  async create(accessToken: string, _authUserId: string, input: CreateAssessmentInput) {
+  // `link` is deliberately not part of the public CreateAssessmentInput Zod
+  // schema — only internal callers (HomeworkService, QuizzesService) can set
+  // source_type/source_id, never an arbitrary POST /assessments client.
+  async create(
+    accessToken: string,
+    _authUserId: string,
+    input: CreateAssessmentInput,
+    link?: { sourceType: 'HOMEWORK' | 'QUIZ'; sourceId: string },
+  ) {
     const client = this.supabase.forUser(accessToken);
 
     const { data: school } = await client.from('schools').select('id').single();
@@ -115,8 +123,10 @@ export class AssessmentsService {
         description: input.description ?? null,
         max_marks: input.maxMarks,
         assessment_date: input.assessmentDate ?? null,
+        source_type: link?.sourceType ?? 'DIRECT',
+        source_id: link?.sourceId ?? null,
       })
-      .select('id, name, max_marks, assessment_date, term:terms(name), class:classes(name), subject:subjects(name, code)')
+      .select('id, name, max_marks, assessment_date, source_type, source_id, term:terms(name), class:classes(name), subject:subjects(name, code)')
       .single();
     if (error) throw new BadRequestException(error.message);
     return data;
@@ -145,10 +155,17 @@ export class AssessmentsService {
 
     const { data: assessment } = await client
       .from('assessments')
-      .select('id, school_id')
+      .select('id, school_id, source_type')
       .eq('id', assessmentId)
       .maybeSingle();
     if (!assessment) throw new NotFoundException('Assessment not found');
+
+    // Grades on a linked assessment are derived — this is the API-layer half
+    // of read-only enforcement; the DB trigger (write_linked_grade's
+    // migration) is the real backstop against a direct-Supabase bypass.
+    if (assessment.source_type !== 'DIRECT') {
+      throw new ForbiddenException(`This grade is derived from ${assessment.source_type}. Update the source instead.`);
+    }
 
     const now = new Date().toISOString();
     const rows = input.scores.map((s) => ({
