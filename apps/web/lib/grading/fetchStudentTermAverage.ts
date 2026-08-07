@@ -16,10 +16,13 @@ export async function fetchStudentTermAverage(
   client: SupabaseClient,
   params: { studentId: string; termId?: string },
 ): Promise<StudentTermAverageInput> {
+  // source_type/source_id live on `assessments`, not `grades` — selected
+  // off the joined `assessment` embed below, matching the corrected shape
+  // in apps/api/src/attendance/fetchers.ts' fetchStudentTermAverageInputs.
   let gradesQuery = client
     .from('grades')
     .select(
-      'score, source_type, source_id, assessment:assessments!inner(id, subject_id, max_marks, term_id, subject:subjects!inner(name))',
+      'score, assessment:assessments!inner(id, subject_id, max_marks, term_id, source_type, source_id, subject:subjects!inner(name))',
     )
     .eq('student_id', params.studentId);
   if (params.termId) gradesQuery = gradesQuery.eq('assessment.term_id', params.termId);
@@ -28,15 +31,18 @@ export async function fetchStudentTermAverage(
   const gradesFromGradebook: GradeRow[] = (gradeRows ?? [])
     .filter((g: any) => g.score != null && g.assessment)
     .map((g: any) => {
-      const assessment = g.assessment as { id: string; subject_id: string; max_marks: number; subject: { name: string } | null };
+      const assessment = g.assessment as {
+        id: string; subject_id: string; max_marks: number; subject: { name: string } | null;
+        source_type?: string | null; source_id?: string | null;
+      };
       return {
         assessment_id: assessment.id,
         subject_id: assessment.subject_id,
         subject_name: assessment.subject?.name ?? '',
         score: Number(g.score),
         max_marks: assessment.max_marks,
-        source_type: (g.source_type as GradeRow['source_type']) ?? 'DIRECT',
-        source_id: g.source_id,
+        source_type: (assessment.source_type as GradeRow['source_type']) ?? 'DIRECT',
+        source_id: assessment.source_id ?? null,
       };
     });
 

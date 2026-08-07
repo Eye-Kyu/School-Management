@@ -97,10 +97,14 @@ export async function fetchStudentTermAverageInputs(
   client: SupabaseClient,
   params: { studentId: string; termId?: string },
 ): Promise<StudentTermAverageInput> {
+  // source_type/source_id live on `assessments`, not `grades` (confirmed
+  // live — grades has never had those columns, only assessments does, per
+  // 20260728000081_assessments_source_link.sql) — selected off the joined
+  // `assessment` embed below, not off the top-level grades row.
   let gradesQuery = client
     .from('grades')
     .select(
-      'score, source_type, source_id, assessment:assessments!inner(id, subject_id, max_marks, term_id, subject:subjects!inner(name))',
+      'score, assessment:assessments!inner(id, subject_id, max_marks, term_id, source_type, source_id, subject:subjects!inner(name))',
     )
     .eq('student_id', params.studentId);
   if (params.termId) gradesQuery = gradesQuery.eq('assessment.term_id', params.termId);
@@ -112,6 +116,7 @@ export async function fetchStudentTermAverageInputs(
     .map((g) => {
       const assessment = g.assessment as unknown as {
         id: string; subject_id: string; max_marks: number; subject: { name: string } | null;
+        source_type?: string | null; source_id?: string | null;
       };
       return {
         assessment_id: assessment.id,
@@ -119,8 +124,8 @@ export async function fetchStudentTermAverageInputs(
         subject_name: assessment.subject?.name ?? '',
         score: Number(g.score),
         max_marks: assessment.max_marks,
-        source_type: (g.source_type as GradeRow['source_type']) ?? 'DIRECT',
-        source_id: g.source_id,
+        source_type: (assessment.source_type as GradeRow['source_type']) ?? 'DIRECT',
+        source_id: assessment.source_id ?? null,
       };
     });
 
