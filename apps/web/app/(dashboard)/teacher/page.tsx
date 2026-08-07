@@ -6,8 +6,13 @@ import RoleBadgeList from '@/components/RoleBadgeList';
 import { getMyRoleBadges } from '@/lib/roleBadges';
 import TodaysChecklist from './TodaysChecklist';
 import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import DeniedBanner from '@/components/DeniedBanner';
 
-export default async function TeacherHomePage() {
+export default async function TeacherHomePage({
+  searchParams,
+}: {
+  searchParams: { denied?: string };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
@@ -71,6 +76,7 @@ export default async function TeacherHomePage() {
 
   return (
     <div className="space-y-8">
+      <DeniedBanner reason={searchParams.denied} />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold">Good {greeting()}, {firstName}</h1>

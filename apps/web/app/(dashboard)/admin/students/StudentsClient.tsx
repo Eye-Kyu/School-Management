@@ -366,6 +366,12 @@ export default function StudentsClient({
               </div>
               <div className="flex items-center gap-3">
                 <Link
+                  href={`/students/${s.id}/360`}
+                  className="text-xs text-violet-600 hover:text-violet-800 transition-colors"
+                >
+                  View 360
+                </Link>
+                <Link
                   href={`/report-card/${s.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
