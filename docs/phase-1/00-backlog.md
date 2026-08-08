@@ -108,4 +108,44 @@ Items 6-7 below are a different kind of entry: deliberately deferred scope from 
 
 ---
 
+## 11. Department Head access to Student 360
+
+**What:** Student 360 (B1-4a) is ADMIN + Class Teacher only. `subjects` has no relationship to `departments` at all — only `teachers.department_id` exists (confirmed via a repo-wide grep for `department_id`, `docs/audits/student-360-data-sources.md` §1.8) — so a Department Head's access would need a genuinely new two-hop join (department → member teachers → those teachers' `is_class_teacher_of`/`subject_assignments` rows → classes → students) with no existing precedent to mirror. The building blocks all exist; the composition doesn't yet.
+
+**Trigger:** a specific Department Head access request from the project owner or a pilot school, not built speculatively.
+
+**Planning docs:** `docs/audits/student-360-data-sources.md` §1.8 has the join shape this would need.
+
+---
+
+## 12. Student health / injury log module
+
+**What:** Confirmed does not exist anywhere in this codebase — no table, no module, no UI (`docs/audits/student-360-data-sources.md` §1.5). No prior audit or backlog document traceably flags it as a known gap either; Student 360 (B1-4a) explicitly excludes health data since there is none to include.
+
+**Trigger:** a specific product decision to build this module — schema, RLS, and access model all need their own design pass first.
+
+**Planning docs:** None yet.
+
+---
+
+## 13. Student 360 pattern-alert notifications
+
+**What:** e.g. "flag if attendance drops and grades drop simultaneously" — a proactive alerting layer on top of Student 360's (B1-4a) read-only aggregation, which today only surfaces data when a Class Teacher or Admin actively opens the page.
+
+**Trigger:** pilot school feedback that the reactive, view-on-demand model isn't enough to catch struggling students early.
+
+**Planning docs:** None yet — would need to decide alert thresholds, delivery channel (existing notification feed vs. something new), and false-positive tolerance before scoping.
+
+---
+
+## 14. Student 360 PDF export
+
+**What:** Export Student 360's aggregation as a PDF, for handouts at parent-teacher meetings. Explicitly deferred in B1-4a's own task spec ("do NOT export data").
+
+**Trigger:** a specific request, likely from pilot-school pastoral staff during a parent-teacher meeting cycle.
+
+**Planning docs:** None yet — `apps/api/src/receipt-pdf` (payment receipts) is the one existing PDF-generation precedent in this codebase, worth evaluating for reuse.
+
+---
+
 When an item's trigger fires, that sub-sprint activates as the next Phase 1 work. Trigger firing is an owner-initiated event, not automatic.

@@ -1552,14 +1552,21 @@ describe('Cross-tenant isolation (e2e)', () => {
   });
 
   it('Pagination returns disjoint pages and a consistent total', async () => {
+    // Scoped to schoolAId — Jest runs e2e spec files in parallel workers
+    // (no runInBand/maxWorkers:1 in jest-e2e.json), and every other spec
+    // file writes its own audit_logs rows during the same CI run. An
+    // unscoped total (the platform-wide count /super-admin/audit-logs
+    // returns with no schoolId filter, intentionally) can grow between the
+    // two requests below from that unrelated concurrent activity — not a
+    // cross-tenant leak, just the wrong count to assert stability on here.
     const page1 = await request(app.getHttpServer())
       .get('/super-admin/audit-logs')
-      .query({ pageSize: 5, page: 1 })
+      .query({ schoolId: schoolAId, pageSize: 5, page: 1 })
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .expect(200);
     const page2 = await request(app.getHttpServer())
       .get('/super-admin/audit-logs')
-      .query({ pageSize: 5, page: 2 })
+      .query({ schoolId: schoolAId, pageSize: 5, page: 2 })
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .expect(200);
 

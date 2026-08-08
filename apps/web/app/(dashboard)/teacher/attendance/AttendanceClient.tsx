@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
@@ -397,6 +398,14 @@ export default function AttendanceClient({
                         )}
                         {locked && (
                           <Badge variant="secondary" className="ml-2">Approved absence</Badge>
+                        )}
+                        {isClassTeacher && (
+                          <Link
+                            href={`/students/${student.id}/360`}
+                            className="ml-2 text-xs text-violet-600 hover:text-violet-800 transition-colors"
+                          >
+                            View 360
+                          </Link>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-slate-500 text-xs">{student.admissionNo}</td>

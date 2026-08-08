@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CreateStudentInput, UpdateUserInput, PromoteStudentsInput, ApprovedAbsencesQuery } from '@school-manager/types';
 import { StudentsService } from './students.service';
 import { AttendanceService } from '../attendance/attendance.service';
+import { Student360Service } from './student-360.service';
 
 @Controller('students')
 @UseGuards(AuthGuard)
@@ -12,6 +13,7 @@ export class StudentsController {
   constructor(
     private readonly students: StudentsService,
     private readonly attendance: AttendanceService,
+    private readonly student360Service: Student360Service,
   ) {}
 
   @Get()
@@ -74,5 +76,10 @@ export class StudentsController {
     @Query(new ZodValidationPipe(ApprovedAbsencesQuery)) query: ApprovedAbsencesQuery,
   ) {
     return this.attendance.getApprovedAbsencesForStudent(token, id, query);
+  }
+
+  @Get(':id/student-360')
+  student360(@AccessToken() token: string, @Param('id') id: string) {
+    return this.student360Service.getStudent360(token, id);
   }
 }

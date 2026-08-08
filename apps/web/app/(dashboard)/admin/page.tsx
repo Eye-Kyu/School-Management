@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import UpcomingEvents from '@/components/UpcomingEvents';
 import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import DeniedBanner from '@/components/DeniedBanner';
 
 type StatCard = {
   label: string;
@@ -11,7 +12,11 @@ type StatCard = {
   gradient: string;
 };
 
-export default async function AdminHomePage() {
+export default async function AdminHomePage({
+  searchParams,
+}: {
+  searchParams: { denied?: string };
+}) {
   const supabase = createClient();
 
   const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -97,6 +102,7 @@ export default async function AdminHomePage() {
 
   return (
     <div className="space-y-8">
+      <DeniedBanner reason={searchParams.denied} />
       <div>
         <h1 className="text-2xl font-semibold">Admin dashboard</h1>
         <p className="text-sm text-slate-500 mt-1">Manage your school setup and users.</p>
