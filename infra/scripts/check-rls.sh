@@ -10,6 +10,11 @@
 # `?pgbouncer=true` query parameter outright. Use DIRECT_URL, not
 # DATABASE_URL, when running this locally.
 #
+# Example (the script itself still reads the env var named DATABASE_URL —
+# "DIRECT_URL" above refers to which connection-string *value* to put in
+# it, not to a literal DIRECT_URL variable this script recognizes):
+#   DATABASE_URL="<your DIRECT_URL value>" bash infra/scripts/check-rls.sh
+#
 # Usage:  DATABASE_URL=... ./check-rls.sh
 # =============================================================================
 

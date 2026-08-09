@@ -9,6 +9,12 @@
 # DATABASE_URL, when running this locally. (Found the hard way during the
 # BUG-5 follow-up PR — noted here so the next person doesn't lose an hour.)
 #
+# Example (the script itself still reads the env var named DATABASE_URL —
+# "DIRECT_URL" above refers to which connection-string *value* to put in
+# it, i.e. the direct/non-pooled one from RENDER_DEPLOYMENT.md/.env, not to
+# a literal DIRECT_URL variable this script recognizes):
+#   DATABASE_URL="<your DIRECT_URL value>" bash infra/scripts/check-migrations.sh
+#
 # Prompted by a real incident (Phase 0 sub-sprint 2, 2026-07-27):
 # 20260529000019_payments.sql was checked off in EXECUTION_PLAN.md but had
 # never actually been applied to production — a checkbox that says "this
