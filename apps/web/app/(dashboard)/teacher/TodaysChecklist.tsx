@@ -140,7 +140,7 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
       <h2 className="text-base font-semibold text-slate-700">Today's Checklist</h2>
 
       {isLoading ? (
-        <p className="text-sm text-slate-400">Loading…</p>
+        <p className="text-sm text-slate-500">Loading…</p>
       ) : !hasClassesToday ? (
         <p className="text-sm text-slate-500">No classes scheduled today. Enjoy your day.</p>
       ) : (
@@ -148,10 +148,10 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
           <ChecklistGroup title="Today's classes">
             {data!.slots.map((s) => (
               <li key={s.id} className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="text-slate-400 text-xs w-24 shrink-0">{formatTime(s.startTime)}–{formatTime(s.endTime)}</span>
+                <span className="text-slate-500 text-xs w-24 shrink-0">{formatTime(s.startTime)}–{formatTime(s.endTime)}</span>
                 <span className="font-medium text-slate-700">{s.subjectName}</span>
-                <span className="text-slate-400">· {s.className}</span>
-                <span className="text-slate-400">· {s.room ?? 'Room not set'}</span>
+                <span className="text-slate-500">· {s.className}</span>
+                <span className="text-slate-500">· {s.room ?? 'Room not set'}</span>
               </li>
             ))}
           </ChecklistGroup>
@@ -188,13 +188,13 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
 
       {/* Manual items — personal, in-memory only (see comment above). */}
       <div className="pt-2 border-t border-slate-100">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Personal notes</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Personal notes</p>
         <ul className="space-y-1.5 mb-2">
           {manualItems.map((item) => (
             <li key={item.id} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={item.done} onChange={() => toggleManualItem(item.id)} className="accent-slate-700" />
-              <span className={item.done ? 'line-through text-slate-400' : 'text-slate-600'}>{item.label}</span>
-              <button type="button" onClick={() => removeManualItem(item.id)} className="ml-auto text-xs text-slate-300 hover:text-slate-500">✕</button>
+              <input type="checkbox" checked={item.done} onChange={() => toggleManualItem(item.id)} aria-label={item.label} className="accent-slate-700" />
+              <span className={item.done ? 'line-through text-slate-500' : 'text-slate-600'}>{item.label}</span>
+              <button type="button" onClick={() => removeManualItem(item.id)} aria-label={`Remove "${item.label}"`} className="ml-auto text-xs text-slate-300 hover:text-slate-500">✕</button>
             </li>
           ))}
         </ul>
@@ -203,6 +203,7 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
             type="text" value={manualDraft} onChange={(e) => setManualDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManualItem(); } }}
             placeholder="Add a reminder for yourself…"
+            aria-label="Add a personal reminder"
             className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           />
           <button type="button" onClick={addManualItem} className="text-xs font-medium border border-slate-300 px-3 py-1.5 rounded-md hover:bg-slate-50">Add</button>
@@ -215,7 +216,7 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
 function ChecklistGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">{title}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">{title}</p>
       <ul className="space-y-1.5">{children}</ul>
     </div>
   );
@@ -224,8 +225,9 @@ function ChecklistGroup({ title, children }: { title: string; children: React.Re
 function ChecklistRow({ done, href, children }: { done: boolean; href: string; children: React.ReactNode }) {
   return (
     <li className="flex items-center gap-2 text-sm">
-      <input type="checkbox" checked={done} readOnly className="accent-emerald-600" />
-      <Link href={href} className={`hover:underline ${done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+      {/* Decorative — mirrors the link's own strikethrough state; the link is the real interactive control. */}
+      <input type="checkbox" checked={done} readOnly aria-hidden="true" tabIndex={-1} className="accent-emerald-600" />
+      <Link href={href} className={`hover:underline ${done ? 'text-slate-500 line-through' : 'text-slate-700'}`}>
         {children}
       </Link>
     </li>

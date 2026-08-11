@@ -79,3 +79,11 @@ export const ReviewAbsenceRequestInput = z.object({
   denialReason: z.string().min(1).max(500).optional(),
 });
 export type ReviewAbsenceRequestInput = z.infer<typeof ReviewAbsenceRequestInput>;
+
+// GET /students/:id/approved-absences — self-service approved-absence view,
+// see AttendanceService.getApprovedAbsencesForStudent().
+export const ApprovedAbsencesQuery = z.object({
+  startDate: IsoDate,
+  endDate: IsoDate,
+});
+export type ApprovedAbsencesQuery = z.infer<typeof ApprovedAbsencesQuery>;

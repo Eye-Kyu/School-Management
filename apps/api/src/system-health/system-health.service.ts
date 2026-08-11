@@ -1,11 +1,31 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 
 const STALE_AFTER_MS = 5 * 60 * 1000; // 5x the dispatch cron's own 1-minute cadence
 
 @Injectable()
 export class SystemHealthService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /**
+   * Read-only — these are deployment env vars, not database rows. Changing
+   * them means changing the deploy config, not saving a form here. The one
+   * secret (webhook HMAC) is reported as a boolean, never its value.
+   * Moved verbatim from the now-deleted platform-settings module (Bucket 1,
+   * PR 1 — Platform Settings merged into System Health's Configuration tab).
+   */
+  getConfiguration() {
+    return {
+      notificationSenderEmail: this.config.get<string>('BREVO_SENDER_EMAIL') ?? 'noreply@schoolmanager.app',
+      notificationSenderName: this.config.get<string>('BREVO_SENDER_NAME') ?? 'School Manager',
+      appUrl: this.config.get<string>('NEXT_PUBLIC_APP_URL') ?? 'http://localhost:3000',
+      webhookSecretConfigured: !!this.config.get<string>('NOTIFICATION_HMAC_SECRET'),
+    };
+  }
 
   private getApiStatus() {
     return {

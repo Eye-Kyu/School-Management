@@ -128,25 +128,25 @@ export default function SubmissionsClient({
       <div className="flex gap-4 flex-wrap">
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 text-center">
           <p className="text-2xl font-bold text-slate-800">{submitted.length}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Submitted</p>
+          <p className="text-xs text-slate-500 mt-0.5">Submitted</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 text-center">
           <p className="text-2xl font-bold text-slate-800">{pending.length}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Pending</p>
+          <p className="text-xs text-slate-500 mt-0.5">Pending</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 text-center">
           <p className="text-2xl font-bold text-amber-600">{submitted.filter((s) => submissions[s.id]?.is_late).length}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Late</p>
+          <p className="text-xs text-slate-500 mt-0.5">Late</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 text-center">
           <p className="text-2xl font-bold text-emerald-600">{submitted.filter((s) => submissions[s.id]?.grade_score != null).length}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Graded</p>
+          <p className="text-xs text-slate-500 mt-0.5">Graded</p>
         </div>
       </div>
 
       {/* Submissions list */}
       {submitted.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
           No submissions yet.
         </div>
       ) : (
@@ -160,7 +160,7 @@ export default function SubmissionsClient({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-medium text-slate-800">{(s.user as any)?.full_name}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-500 mt-0.5">
                       {new Date(sub.submitted_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
                       {sub.is_late && <span className="ml-2 text-amber-600 font-medium">Late</span>}
                     </p>
@@ -196,7 +196,7 @@ export default function SubmissionsClient({
                       <button
                         onClick={() => checkPlagiarism(s.id, sub.content)}
                         disabled={checkingPlagiarism[s.id]}
-                        className="text-xs text-slate-400 hover:text-violet-600 transition-colors disabled:opacity-50"
+                        className="text-xs text-slate-500 hover:text-violet-600 transition-colors disabled:opacity-50"
                       >
                         {checkingPlagiarism[s.id] ? '🔍 Checking…' : '🔍 Check with AI'}
                       </button>
@@ -220,15 +220,17 @@ export default function SubmissionsClient({
                   {g ? (
                     <div className="flex items-end gap-2 flex-wrap">
                       <div>
-                        <label className="block text-xs text-slate-500 mb-1">Score{maxScore ? ` (max ${maxScore})` : ''}</label>
-                        <input type="number" min={0} max={maxScore ?? undefined} step="0.5"
+                        <label htmlFor={`submission-score-${s.id}`} className="block text-xs text-slate-500 mb-1">Score{maxScore ? ` (max ${maxScore})` : ''}</label>
+                        <input id={`submission-score-${s.id}`} type="number" min={0} max={maxScore ?? undefined} step="0.5"
                           value={g.score} onChange={(e) => setGrading((p) => ({ ...p, [s.id]: { ...p[s.id]!, score: e.target.value } }))}
+                          aria-label={`Score for ${(s.user as any)?.full_name ?? 'student'}`}
                           className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-center" />
                       </div>
                       <div className="flex-1 min-w-[160px]">
-                        <label className="block text-xs text-slate-500 mb-1">Comment</label>
-                        <input value={g.comment} onChange={(e) => setGrading((p) => ({ ...p, [s.id]: { ...p[s.id]!, comment: e.target.value } }))}
+                        <label htmlFor={`submission-comment-${s.id}`} className="block text-xs text-slate-500 mb-1">Comment</label>
+                        <input id={`submission-comment-${s.id}`} value={g.comment} onChange={(e) => setGrading((p) => ({ ...p, [s.id]: { ...p[s.id]!, comment: e.target.value } }))}
                           placeholder="Optional feedback…"
+                          aria-label={`Comment for ${(s.user as any)?.full_name ?? 'student'}`}
                           className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
                       </div>
                       <button onClick={() => saveGrade(s.id)} disabled={saving[s.id]}
@@ -257,8 +259,9 @@ export default function SubmissionsClient({
                     <textarea rows={2} placeholder="Reason for reset (required, min 10 characters)…"
                       value={resetReason[s.id] ?? ''}
                       onChange={(e) => setResetReason((p) => ({ ...p, [s.id]: e.target.value }))}
+                      aria-label="Reason for reset"
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
-                    {resetError[s.id] && <p className="text-xs text-rose-600">{resetError[s.id]}</p>}
+                    {resetError[s.id] && <p role="alert" className="text-xs text-rose-600">{resetError[s.id]}</p>}
                     <div className="flex justify-end gap-2">
                       <button onClick={() => setResetOpen(null)}
                         className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:bg-slate-50">

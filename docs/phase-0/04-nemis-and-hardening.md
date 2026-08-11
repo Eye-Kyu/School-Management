@@ -4,6 +4,8 @@
 
 **Status.** Planning only. No code, migrations, or tests in this doc's own PR. (The pentest scope document itself is a separate, standalone deliverable — `docs/phase-0/pentest-scope.md` — and, being pure documentation with no code dependency, is written now rather than deferred; see that file.)
 
+**Implemented, 2026-07-28 (sub-sprint 4 PR, alongside four additional folded-in tasks — see `EXECUTION_PLAN.md`'s sub-sprint 4 entry for the full list).** Shipped close to this plan's own recommendations, with a few confirmed departures: XLSX support was added (via `exceljs`, a new dependency) alongside CSV, rather than CSV-only, since the implementation task explicitly asked for a format toggle. The NEMIS field-spec question this doc correctly flagged as unresolved (§4, "Current NEMIS export format specification") remains unresolved — no official spec was independently discoverable this pass either; `docs/audits/nemis-format-verified.md` carries the same `verified: false` caveat this doc anticipated. The accessibility "execution gap" this doc named up front — *"someone with actual browser access must physically run axe DevTools... no browser-automation capability has been available in any planning session so far"* — was still true at implementation time; see `docs/audits/accessibility-follow-ups.md` for exactly what static analysis could and couldn't cover instead. The minimal real `GET /health` DB-ping this doc recommended (§3) shipped as planned, reusing `SystemHealthService`'s existing technique rather than inventing a new one.
+
 ---
 
 ## 1. Current state audit

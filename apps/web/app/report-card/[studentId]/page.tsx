@@ -1,15 +1,9 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { assignLetterGrade, calculateStudentTermAverage } from '@school-manager/types';
+import { fetchStudentTermAverage } from '@/lib/grading/fetchStudentTermAverage';
 import { PrintButton } from './PrintButton';
-
-function gradeLetter(pct: number): string {
-  if (pct >= 75) return 'A';
-  if (pct >= 60) return 'B';
-  if (pct >= 50) return 'C';
-  if (pct >= 40) return 'D';
-  return 'E';
-}
 
 export default async function ReportCardPage({
   params,
@@ -78,12 +72,26 @@ export default async function ReportCardPage({
 
   const subjectGroups = Object.values(bySubject);
 
-  // Overall totals
-  const grandTotalMarks = subjectGroups.reduce((s, g) =>
-    s + g.rows.reduce((ss, r) => ss + Number(r.marks_obtained ?? 0), 0), 0);
-  const grandTotalMax = subjectGroups.reduce((s, g) =>
-    s + g.rows.reduce((ss, r) => ss + ((r.assessment as any)?.max_marks ?? 0), 0), 0);
-  const grandPct = grandTotalMax > 0 ? Math.round((grandTotalMarks / grandTotalMax) * 100) : null;
+  // Per-subject and overall averages — via the shared calculateStudentTermAverage
+  // (packages/types/src/grading.ts), which unions `grades` with any homework/
+  // quiz scores never linked into the gradebook, and averages per-assessment
+  // rather than per-subject-then-averaged. Shared with
+  // print/report-card/[studentId]/page.tsx via @school-manager/types.
+  // subjectGroups (built from `grades` alone, above) still drives the
+  // per-assessment row listing below — only the displayed averages come from
+  // the fuller, shared calculation.
+  const termAverageInput = termId
+    ? await fetchStudentTermAverage(supabase, { studentId, termId })
+    : { gradesFromGradebook: [], homeworkCompletions: [], quizAttempts: [] };
+  const termAverage = calculateStudentTermAverage(termAverageInput);
+  const avgBySubjectId = new Map(termAverage.by_subject.map((s) => [s.subject_id, s.average_percentage]));
+  const subjectAverages = subjectGroups.map((g) => {
+    const a = g.rows[0]?.assessment as any;
+    const subjectId = a?.subject?.id;
+    return subjectId ? avgBySubjectId.get(subjectId) ?? null : null;
+  });
+  const scoredSubjectAverages = subjectAverages.filter((a): a is number => a != null);
+  const grandPct = termAverage.overall_average_percentage;
 
   const studentName = (student.user as any)?.full_name ?? '—';
   const className = (student.class as any)?.name ?? '—';
@@ -141,11 +149,16 @@ export default async function ReportCardPage({
               No assessment results recorded for this term.
             </p>
           ) : (
-            subjectGroups.map((group) => {
+            subjectGroups.map((group, i) => {
+              // Marks/Out of are raw informational sums — the % and grade
+              // columns are driven by the shared unweighted-mean formula
+              // (subjectAverages[i]), not by these sums, since the two no
+              // longer compute the same thing (see the module comment above).
               const subjectMarks = group.rows.reduce((s, r) => s + Number(r.marks_obtained ?? 0), 0);
               const subjectMax = group.rows.reduce((s, r) => s + ((r.assessment as any)?.max_marks ?? 0), 0);
-              const subjectPct = subjectMax > 0 ? Math.round((subjectMarks / subjectMax) * 100) : null;
-              const grade = subjectPct != null ? gradeLetter(subjectPct) : '—';
+              const subjectAvg = subjectAverages[i] ?? null;
+              const subjectPct = subjectAvg != null ? Math.round(subjectAvg) : null;
+              const grade = subjectAvg != null ? assignLetterGrade(subjectAvg) : '—';
 
               return (
                 <div key={group.subjectCode} className="border border-slate-200 rounded-lg overflow-hidden">
@@ -200,7 +213,7 @@ export default async function ReportCardPage({
                         <td className="px-4 py-2 text-right">
                           {subjectPct != null ? (
                             <span className={
-                              subjectPct >= 75 ? 'text-emerald-700' :
+                              subjectPct >= 70 ? 'text-emerald-700' :
                               subjectPct >= 50 ? 'text-amber-700' :
                               'text-rose-700'
                             }>
@@ -222,12 +235,12 @@ export default async function ReportCardPage({
               <div>
                 <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Overall Performance</p>
                 <p className="text-2xl font-bold text-slate-800 mt-0.5">
-                  {grandTotalMarks} / {grandTotalMax}
+                  {scoredSubjectAverages.length} subject{scoredSubjectAverages.length === 1 ? '' : 's'} averaged
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-4xl font-bold text-slate-800">{grandPct}%</p>
-                <p className="text-lg font-semibold text-slate-500">Grade {gradeLetter(grandPct)}</p>
+                <p className="text-4xl font-bold text-slate-800">{Math.round(grandPct)}%</p>
+                <p className="text-lg font-semibold text-slate-500">Grade {assignLetterGrade(grandPct)}</p>
               </div>
             </div>
           )}
@@ -235,11 +248,11 @@ export default async function ReportCardPage({
           {/* Grade scale legend */}
           <div className="flex flex-wrap gap-3 text-xs text-slate-500">
             {[
-              { label: 'A', range: '75–100%' },
-              { label: 'B', range: '60–74%' },
-              { label: 'C', range: '50–59%' },
-              { label: 'D', range: '40–49%' },
-              { label: 'E', range: 'Below 40%' },
+              { label: 'A', range: '80–100%' },
+              { label: 'B', range: '70–79%' },
+              { label: 'C', range: '60–69%' },
+              { label: 'D', range: '50–59%' },
+              { label: 'E', range: 'Below 50%' },
             ].map(({ label, range }) => (
               <span key={label} className="bg-slate-50 border border-slate-200 rounded px-2 py-0.5">
                 <strong>{label}</strong> = {range}

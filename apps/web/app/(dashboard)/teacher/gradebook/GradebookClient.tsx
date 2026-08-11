@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 import { createClient } from '@/lib/supabase/client';
+import { calculateSubjectAverage } from '@school-manager/types';
 
 type ClassItem  = { id: string; name: string; grade_level: number };
 type Subject    = { id: string; name: string };
 type Term       = { id: string; name: string; is_current: boolean };
-type Assessment = { id: string; name: string; max_marks: number; assessment_date: string | null };
+type Assessment = { id: string; name: string; max_marks: number; assessment_date: string | null; source_type: 'DIRECT' | 'HOMEWORK' | 'QUIZ'; source_id: string | null };
 type Student    = { id: string; user: { full_name: string } };
 type Grade      = { student_id: string; score: number | null; comment: string | null };
 
@@ -37,6 +38,7 @@ export default function GradebookClient({
   const [aMax, setAMax]           = useState('100');
   const [aDate, setADate]         = useState('');
   const [creating, setCreating]   = useState(false);
+  const [formError, setFormError] = useState('');
 
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -45,7 +47,7 @@ export default function GradebookClient({
     setLoading(true);
     const [{ data: aData }, { data: sData }] = await Promise.all([
       supabase.from('assessments')
-        .select('id, name, max_marks, assessment_date')
+        .select('id, name, max_marks, assessment_date, source_type, source_id')
         .eq('class_id', classId).eq('subject_id', subjectId).eq('term_id', termId)
         .order('assessment_date', { ascending: true }),
       supabase.from('students')
@@ -79,6 +81,16 @@ export default function GradebookClient({
   async function createAssessment(e: React.FormEvent) {
     e.preventDefault();
     if (!classId || !subjectId) return;
+
+    // BUG-9: parseFloat(aMax) || 100 only catches falsy results (0/NaN/'') —
+    // a genuinely negative value like "-5" is truthy and would slip through.
+    const maxMarks = aMax.trim() === '' ? 100 : parseFloat(aMax);
+    if (isNaN(maxMarks) || maxMarks <= 0) {
+      setFormError('Max score must be a positive number.');
+      return;
+    }
+    setFormError('');
+
     setCreating(true);
     const userRow = await getCurrentUserRow('id, school_id');
     await supabase.from('assessments').insert({
@@ -88,7 +100,7 @@ export default function GradebookClient({
       term_id: termId || null,
       teacher_id: teacherId,
       name: aName.trim(),
-      max_marks: parseFloat(aMax) || 100,
+      max_marks: maxMarks,
       assessment_date: aDate || null,
     });
     setAName(''); setADate(''); setShowForm(false); setCreating(false);
@@ -128,14 +140,10 @@ export default function GradebookClient({
 
   function studentAvg(studentId: string): string {
     const scored = assessments
-      .map((a) => ({
-        score: grades[a.id]?.[studentId],
-        max: a.max_marks,
-      }))
-      .filter((x) => typeof x.score === 'number');
-    if (!scored.length) return '—';
-    const avgPct = scored.reduce((s, x) => s + (x.score! / x.max) * 100, 0) / scored.length;
-    return `${avgPct.toFixed(1)}%`;
+      .map((a) => ({ score: grades[a.id]?.[studentId] ?? null, maxMarks: a.max_marks }))
+      .filter((x): x is { score: number; maxMarks: number } => typeof x.score === 'number');
+    const avgPct = calculateSubjectAverage(scored);
+    return avgPct != null ? `${avgPct.toFixed(1)}%` : '—';
   }
 
   const filteredSubjects = subjects; // all subjects (teacher can enter grades for any)
@@ -145,23 +153,23 @@ export default function GradebookClient({
       {/* Filters */}
       <div className="flex flex-wrap gap-3 bg-white border border-slate-200 rounded-xl p-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Class</label>
-          <select value={classId} onChange={(e) => setClassId(e.target.value)}
+          <label htmlFor="gradebook-class" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Class</label>
+          <select id="gradebook-class" value={classId} onChange={(e) => setClassId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             {myClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Subject</label>
-          <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)}
+          <label htmlFor="gradebook-subject" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Subject</label>
+          <select id="gradebook-subject" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             <option value="">Select subject…</option>
             {filteredSubjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Term</label>
-          <select value={termId} onChange={(e) => setTermId(e.target.value)}
+          <label htmlFor="gradebook-term" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Term</label>
+          <select id="gradebook-term" value={termId} onChange={(e) => setTermId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current ? ' (current)' : ''}</option>)}
           </select>
@@ -210,20 +218,25 @@ export default function GradebookClient({
           {showForm && (
             <form onSubmit={createAssessment}
               className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {formError && (
+                <p className="col-span-2 sm:col-span-3 text-sm text-red-600" role="alert">{formError}</p>
+              )}
               <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
-                <input value={aName} onChange={(e) => setAName(e.target.value)} required
-                  placeholder="e.g. Mid-term Exam"
+                <label htmlFor="assessment-name" className="block text-xs font-medium text-slate-500 mb-1">Name</label>
+                <input id="assessment-name" value={aName} onChange={(e) => setAName(e.target.value)} required
+                  placeholder="e.g. Mid-term Exam" aria-label="Assessment name"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Max score</label>
-                <input type="number" min="1" value={aMax} onChange={(e) => setAMax(e.target.value)}
+                <label htmlFor="assessment-max-score" className="block text-xs font-medium text-slate-500 mb-1">Max score</label>
+                <input id="assessment-max-score" type="number" min="1" value={aMax} onChange={(e) => setAMax(e.target.value)}
+                  aria-label="Max score"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
-                <input type="date" value={aDate} onChange={(e) => setADate(e.target.value)}
+                <label htmlFor="assessment-date" className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                <input id="assessment-date" type="date" value={aDate} onChange={(e) => setADate(e.target.value)}
+                  aria-label="Assessment date"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
               <div className="flex items-end">
@@ -236,9 +249,9 @@ export default function GradebookClient({
           )}
 
           {loading ? (
-            <div className="text-center py-10 text-sm text-slate-400">Loading…</div>
+            <div className="text-center py-10 text-sm text-slate-500">Loading…</div>
           ) : assessments.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
+            <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
               No assessments yet. Add one above.
             </div>
           ) : (
@@ -253,8 +266,16 @@ export default function GradebookClient({
                     {assessments.map((a) => (
                       <th key={a.id} className="px-3 py-3 text-center font-medium text-slate-600 min-w-[100px]">
                         <div>{a.name}</div>
-                        <div className="text-xs font-normal text-slate-400">/{a.max_marks}</div>
-                        {a.assessment_date && <div className="text-xs font-normal text-slate-400">{new Date(a.assessment_date).toLocaleDateString('en-KE', { day:'numeric', month:'short' })}</div>}
+                        <div className="text-xs font-normal text-slate-500">/{a.max_marks}</div>
+                        {a.assessment_date && <div className="text-xs font-normal text-slate-500">{new Date(a.assessment_date).toLocaleDateString('en-KE', { day:'numeric', month:'short' })}</div>}
+                        {a.source_type !== 'DIRECT' && (
+                          <div
+                            className="mt-1 inline-block text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5"
+                            title={`Derived from a ${a.source_type.toLowerCase()} — grades are read-only here. Update the source instead.`}
+                          >
+                            🔒 {a.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}
+                          </div>
+                        )}
                       </th>
                     ))}
                     <th className="px-4 py-3 text-center font-medium text-slate-600 min-w-[80px]">Avg</th>
@@ -270,6 +291,18 @@ export default function GradebookClient({
                         const score = grades[a.id]?.[s.id];
                         const pct = typeof score === 'number' ? (score / a.max_marks) * 100 : null;
                         const color = pct === null ? '' : pct >= 70 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-600' : 'text-rose-600';
+                        if (a.source_type !== 'DIRECT') {
+                          return (
+                            <td key={a.id} className="px-2 py-1.5 text-center">
+                              <span
+                                className={`inline-block w-16 rounded-lg border border-dashed border-slate-200 px-2 py-1 text-center text-sm bg-slate-50 ${color}`}
+                                title={`Derived from a ${a.source_type.toLowerCase()} — read-only. Update the source instead.`}
+                              >
+                                {typeof score === 'number' ? score : '—'}
+                              </span>
+                            </td>
+                          );
+                        }
                         return (
                           <td key={a.id} className="px-2 py-1.5 text-center">
                             <input
@@ -279,6 +312,7 @@ export default function GradebookClient({
                               step="0.5"
                               value={typeof score === 'number' ? score : ''}
                               onChange={(e) => handleScoreChange(a.id, s.id, e.target.value)}
+                              aria-label={`${(s.user as any)?.full_name ?? 'Student'} — ${a.name}`}
                               className={`w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${color}`}
                               placeholder="—"
                             />
@@ -309,7 +343,7 @@ export default function GradebookClient({
       )}
 
       {!subjectId && (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
           Select a class and subject above to open the gradebook.
         </div>
       )}

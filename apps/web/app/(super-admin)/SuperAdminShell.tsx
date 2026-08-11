@@ -57,8 +57,6 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const SETTINGS_ITEM: NavItem = { href: '/super-admin/settings', label: 'Settings', permissionKey: 'MANAGE_PLATFORM_SETTINGS' };
-
 function NavLink({ href, label, active, onClick }: NavItem & { active: boolean; onClick?: () => void }) {
   return (
     <Link
@@ -139,7 +137,6 @@ export default function SuperAdminShell({
     ...group,
     items: group.items.filter((item) => !item.permissionKey || hasPermission(item.permissionKey)),
   })).filter((group) => group.items.length > 0);
-  const showSettings = !SETTINGS_ITEM.permissionKey || hasPermission(SETTINGS_ITEM.permissionKey);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -220,14 +217,6 @@ export default function SuperAdminShell({
           </nav>
 
           <div className="border-t border-slate-100 px-3 py-3 space-y-0.5">
-            {showSettings && (
-              <NavLink
-                href={SETTINGS_ITEM.href}
-                label={SETTINGS_ITEM.label}
-                active={pathname === SETTINGS_ITEM.href}
-                onClick={close}
-              />
-            )}
             <NavLink href="/profile" label="My Profile" active={pathname === '/profile'} onClick={close} />
             <div className="px-3 py-2">
               <LogoutButton />

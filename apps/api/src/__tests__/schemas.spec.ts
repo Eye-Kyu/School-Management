@@ -10,6 +10,7 @@ const { CreateStudentInput } = require('../../../../packages/types/src/schemas/u
 const { MarkAttendanceInput } = require('../../../../packages/types/src/schemas/attendance');
 const { CreateAnnouncementInput } = require('../../../../packages/types/src/schemas/announcement');
 const { CreateConversationInput, SendMessageInput } = require('../../../../packages/types/src/schemas/messaging');
+const { UploadDocumentInput } = require('../../../../packages/types/src/schemas/document');
 /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 
 const UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
@@ -226,5 +227,54 @@ describe('Profile schema (UpdateProfileInput equivalent)', () => {
 
   it('rejects invalid avatarUrl', () => {
     expect(ProfileSchema.safeParse({ fullName: 'John', avatarUrl: 'not-a-url' }).success).toBe(false);
+  });
+});
+
+// ── Documents ────────────────────────────────────────────────
+// UploadDocumentInput's refine() mirrors the DB's documents_scope_check
+// CHECK constraint exactly — every case here has a 1:1 counterpart in that
+// constraint (supabase/migrations/20260728000085_documents_scope_schema.sql).
+
+describe('UploadDocumentInput', () => {
+  it('accepts SCHOOL_WIDE with no scopeId/scopeSubtype', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Handbook', scopeType: 'SCHOOL_WIDE' }).success).toBe(true);
+  });
+
+  it('rejects SCHOOL_WIDE with a scopeId set', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Handbook', scopeType: 'SCHOOL_WIDE', scopeId: UUID }).success).toBe(false);
+  });
+
+  it('accepts CLASS with a scopeId and no scopeSubtype', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Handout', scopeType: 'CLASS', scopeId: UUID }).success).toBe(true);
+  });
+
+  it('rejects CLASS with no scopeId', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Handout', scopeType: 'CLASS' }).success).toBe(false);
+  });
+
+  it('rejects CLASS with a scopeSubtype set (only ASSIGNMENT should ever have one)', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Handout', scopeType: 'CLASS', scopeId: UUID, scopeSubtype: 'HOMEWORK' }).success).toBe(false);
+  });
+
+  it('accepts SUBJECT with a scopeId and no scopeSubtype', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Notes', scopeType: 'SUBJECT', scopeId: UUID }).success).toBe(true);
+  });
+
+  it('accepts ASSIGNMENT with both scopeId and scopeSubtype', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Reading', scopeType: 'ASSIGNMENT', scopeId: UUID, scopeSubtype: 'HOMEWORK' }).success).toBe(true);
+  });
+
+  it('rejects ASSIGNMENT with a scopeId but no scopeSubtype', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Reading', scopeType: 'ASSIGNMENT', scopeId: UUID }).success).toBe(false);
+  });
+
+  it('rejects a scopeSubtype value outside the enum (the third table\'s subtype is "ONLINE_ASSIGNMENT", not "ASSIGNMENT" — deliberately, to avoid colliding with scopeType)', () => {
+    expect(UploadDocumentInput.safeParse({ title: 'Reading', scopeType: 'ASSIGNMENT', scopeId: UUID, scopeSubtype: 'ASSIGNMENT' }).success).toBe(false);
+  });
+
+  it('splits comma-separated tags and trims whitespace', () => {
+    const result = UploadDocumentInput.safeParse({ title: 'Syllabus', scopeType: 'SCHOOL_WIDE', tags: 'maths, term1 ,  syllabus' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.tags).toEqual(['maths', 'term1', 'syllabus']);
   });
 });

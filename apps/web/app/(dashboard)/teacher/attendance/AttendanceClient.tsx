@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@school-manager/ui';
 import { apiFetch } from '@/lib/api';
@@ -244,8 +245,9 @@ export default function AttendanceClient({
       {/* Class + date selectors */}
       <div className="flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Class</label>
+          <label htmlFor="attendance-class" className="block text-xs font-medium text-slate-600 mb-1">Class</label>
           <select
+            id="attendance-class"
             value={classId}
             onChange={handleClassChange}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm min-w-44"
@@ -257,11 +259,13 @@ export default function AttendanceClient({
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
+          <label htmlFor="attendance-date" className="block text-xs font-medium text-slate-600 mb-1">Date</label>
           <input
+            id="attendance-date"
             type="date"
             value={date}
             onChange={handleDateChange}
+            aria-label="Date"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
@@ -269,7 +273,8 @@ export default function AttendanceClient({
 
       {isClassTeacher && classId && initialRoster.length > 0 && (
         <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex-wrap">
-          <label className="text-sm font-medium text-slate-700 shrink-0">Class Prefect</label>
+          {/* A section caption, not a form-control label — several conditionally-rendered controls follow, not one fixed control to point `htmlFor` at. */}
+          <span className="text-sm font-medium text-slate-700 shrink-0">Class Prefect</span>
           {!showPrefectPicker ? (
             currentPrefect ? (
               <>
@@ -303,7 +308,7 @@ export default function AttendanceClient({
                 {settingPrefect ? 'Saving…' : 'Confirm'}
               </button>
               <button type="button" onClick={() => { setShowPrefectPicker(false); setPrefectStudentId(''); }}
-                className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+                className="text-xs text-slate-500 hover:text-slate-600">Cancel</button>
             </>
           )}
         </div>
@@ -311,7 +316,7 @@ export default function AttendanceClient({
 
       {isClassTeacher && classId && (
         <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
-          <label className="text-sm font-medium text-slate-700 shrink-0">Class reports</label>
+          <span className="text-sm font-medium text-slate-700 shrink-0">Class reports</span>
           <button
             type="button"
             onClick={handleExportGrades}
@@ -320,24 +325,24 @@ export default function AttendanceClient({
           >
             {exportingGrades ? 'Exporting…' : 'Export grades (all subjects)'}
           </button>
-          <span className="text-xs text-slate-400">Use "↓ Export CSV" below for attendance.</span>
+          <span className="text-xs text-slate-500">Use "↓ Export CSV" below for attendance.</span>
         </div>
       )}
 
       {!classId ? (
-        <div className="bg-white border border-slate-200 rounded-lg px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-lg px-5 py-10 text-center text-sm text-slate-500">
           Select a class above to load the student roster.
         </div>
       ) : isPending ? (
-        <div className="text-sm text-slate-400 py-6 text-center">Loading roster…</div>
+        <div className="text-sm text-slate-500 py-6 text-center">Loading roster…</div>
       ) : roster.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-lg px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-lg px-5 py-10 text-center text-sm text-slate-500">
           No students in this class.
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-3">
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>
+            <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>
           )}
           {saved && (
             <p className="text-sm text-green-700 bg-green-50 rounded px-3 py-2">
@@ -357,13 +362,14 @@ export default function AttendanceClient({
                 Requesting to change {changedStudents.length} student{changedStudents.length !== 1 ? 's' : ''}. Reason (at least 20 characters):
               </p>
               <textarea value={remarkReason} onChange={(e) => setRemarkReason(e.target.value)} rows={2} minLength={20}
+                aria-label="Reason for re-marking request"
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none" />
               <div className="flex gap-2">
                 <button type="button" onClick={submitRemarkRequest} disabled={saving || remarkReason.trim().length < 20}
                   className="text-xs font-medium bg-slate-900 text-white px-3 py-1.5 rounded-md disabled:opacity-50">
                   {saving ? 'Submitting…' : 'Submit request'}
                 </button>
-                <button type="button" onClick={() => setShowRemarkReason(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+                <button type="button" onClick={() => setShowRemarkReason(false)} className="text-xs text-slate-500 hover:text-slate-600">Cancel</button>
               </div>
             </div>
           )}
@@ -376,7 +382,7 @@ export default function AttendanceClient({
                   <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Student</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Adm No</th>
                   {STATUSES.map((s) => (
-                    <th key={s} className="px-3 py-2 text-center text-xs font-medium text-slate-500">
+                    <th key={s} scope="col" className="px-3 py-2 text-center text-xs font-medium text-slate-500">
                       {STATUS_LABEL[s]}
                     </th>
                   ))}
@@ -387,7 +393,7 @@ export default function AttendanceClient({
                   const current = statuses[student.id] ?? 'PRESENT';
                   const locked = student.excusedByAbsenceRequest;
                   return (
-                    <tr key={student.id} className={locked ? 'bg-slate-50 text-slate-400' : 'hover:bg-slate-50'}>
+                    <tr key={student.id} className={locked ? 'bg-slate-50 text-slate-500' : 'hover:bg-slate-50'}>
                       <td className="px-4 py-2.5 font-medium">
                         {student.fullName}
                         {currentPrefect?.studentId === student.id && (
@@ -395,6 +401,14 @@ export default function AttendanceClient({
                         )}
                         {locked && (
                           <Badge variant="secondary" className="ml-2">Approved absence</Badge>
+                        )}
+                        {isClassTeacher && (
+                          <Link
+                            href={`/students/${student.id}/360`}
+                            className="ml-2 text-xs text-violet-600 hover:text-violet-800 transition-colors"
+                          >
+                            View 360
+                          </Link>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-slate-500 text-xs">{student.admissionNo}</td>
@@ -407,6 +421,7 @@ export default function AttendanceClient({
                             checked={current === s}
                             disabled={locked}
                             onChange={() => setStatus(student.id, s)}
+                            aria-label={`${student.fullName} — ${STATUS_LABEL[s]}`}
                             className="accent-slate-700 disabled:opacity-40"
                           />
                         </td>
@@ -451,7 +466,7 @@ export default function AttendanceClient({
             >
               {exporting ? 'Exporting…' : '↓ Export CSV'}
             </button>
-            <span className="text-xs text-slate-400">{roster.length} student{roster.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-slate-500">{roster.length} student{roster.length !== 1 ? 's' : ''}</span>
           </div>
         </form>
       )}

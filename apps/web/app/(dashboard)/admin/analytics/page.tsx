@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import BackButton from '@/components/BackButton';
 import AnalyticsExport from './AnalyticsExport';
+import { fetchAttendanceRateInputs } from '@/lib/attendance/fetchAttendanceRateInputs';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 function StatCard({ label, value, sub, color = 'text-slate-800' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
@@ -51,23 +53,26 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
 
   // Attendance per class this term
   const { data: allStudents } = await supabase.from('students').select('id, current_class_id').eq('is_active', true);
-  const { data: attRecords } = term
-    ? await supabase.from('attendance_records')
-        .select('student_id, status')
-        .in('student_id', (allStudents ?? []).map((s) => s.id))
-        .gte('date', term.start_date).lte('date', term.end_date)
-    : { data: [] };
+  const attendanceInput = term
+    ? await fetchAttendanceRateInputs(supabase, {
+        studentIds: (allStudents ?? []).map((s) => s.id),
+        startDate: term.start_date,
+        endDate: term.end_date,
+      })
+    : { records: [], approvedAbsences: [] };
 
   const attByClass = (classes ?? []).map((c) => {
     const classStudentIds = new Set((allStudents ?? []).filter((s) => s.current_class_id === c.id).map((s) => s.id));
-    const classAtt = (attRecords ?? []).filter((r) => classStudentIds.has(r.student_id));
-    const present = classAtt.filter((r) => r.status === 'PRESENT' || r.status === 'LATE').length;
-    const rate = classAtt.length ? (present / classAtt.length) * 100 : null;
+    const classResult = calculateAttendanceRate({
+      records: attendanceInput.records.filter((r) => classStudentIds.has(r.student_id)),
+      approvedAbsences: attendanceInput.approvedAbsences.filter((a) => classStudentIds.has(a.student_id)),
+    });
+    const rate = classResult.total_school_days > 0 ? classResult.attendance_rate : null;
     return { id: c.id, name: c.name, rate };
   }).filter((c) => c.rate != null).sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0));
 
-  const overallAttPresent = (attRecords ?? []).filter((r) => r.status === 'PRESENT' || r.status === 'LATE').length;
-  const overallAttRate = (attRecords ?? []).length ? (overallAttPresent / (attRecords ?? []).length) * 100 : null;
+  const overallAttResult = calculateAttendanceRate(attendanceInput);
+  const overallAttRate = overallAttResult.total_school_days > 0 ? overallAttResult.attendance_rate : null;
 
   // Exam pass rates per subject (grades ≥50%)
   const { data: assessments } = termId

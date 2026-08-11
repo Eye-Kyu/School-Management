@@ -53,10 +53,17 @@ school_manager/
 
 ## Documentation
 
-- [CLAUDE.md](./CLAUDE.md) - Context and conventions for AI-assisted development
 - [EXECUTION_PLAN.md](./EXECUTION_PLAN.md) - Phased development plan starting from v0.1
 - [docs/adr/](./docs/adr/) - Architecture decision records
 - [docs/runbooks/](./docs/runbooks/) - Operational runbooks
+
+## Status page
+
+`docs/runbooks/incident-response.md` already assumes a public Better Stack (or equivalent) status page exists — as of Phase 0 sub-sprint 4 it doesn't yet. Setup is an owner action (a paid third-party account, not something committed to this repo):
+
+1. Create a Better Stack (or Uptime Robot / Statuspage.io) account.
+2. Add two monitors: the API's `GET /health` (now a real DB + notifications-dispatcher check, not hardcoded — see `apps/api/src/app.controller.ts`) and the web frontend's root `/`, both on a 60-second interval, email-only alerts to the project owner.
+3. Once the public status page URL exists, add it to the commented placeholder in `apps/web/app/(marketing)/pricing/page.tsx`'s footer and update this section with the real link.
 
 ## License
 

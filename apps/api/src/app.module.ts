@@ -24,7 +24,10 @@ import { BehaviourModule } from './behaviour/behaviour.module';
 import { UsersModule } from './users/users.module';
 import { EventsModule } from './events/events.module';
 import { HomeworkModule } from './homework/homework.module';
+import { QuizzesModule } from './quizzes/quizzes.module';
+import { DocumentsModule } from './documents/documents.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationsAggregationModule } from './notifications-aggregation/notifications-aggregation.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AiModule } from './ai/ai.module';
@@ -34,7 +37,6 @@ import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { BillingModule } from './billing/billing.module';
 import { SystemHealthModule } from './system-health/system-health.module';
 import { PlatformUsersModule } from './platform-users/platform-users.module';
-import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { PlatformMessagesModule } from './platform-messages/platform-messages.module';
 import { PrefectsModule } from './prefects/prefects.module';
 import { AbsenceRequestsModule } from './absence-requests/absence-requests.module';
@@ -73,7 +75,10 @@ import { AbsenceRequestsModule } from './absence-requests/absence-requests.modul
     UsersModule,
     EventsModule,
     HomeworkModule,
+    QuizzesModule,
+    DocumentsModule,
     NotificationsModule,
+    NotificationsAggregationModule,
     MessagingModule,
     PaymentsModule,
     AiModule,
@@ -83,7 +88,6 @@ import { AbsenceRequestsModule } from './absence-requests/absence-requests.modul
     BillingModule,
     SystemHealthModule,
     PlatformUsersModule,
-    PlatformSettingsModule,
     PlatformMessagesModule,
     PrefectsModule,
     AbsenceRequestsModule,

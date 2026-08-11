@@ -20,6 +20,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # Throwaway Postgres for infra/scripts/tests/check-migrations.test.sh
+    # (BUG-5 follow-up, docs/bug-triage.md) — the migration-parity checker
+    # itself now has regression tests, and they must never run against the
+    # real DATABASE_URL secret below. This service is separate from that.
+    services:
+      test_postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: check_migrations_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d check_migrations_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +71,25 @@ jobs:
 
       - name: RLS check
         run: bash infra/scripts/check-rls.sh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # Tests the checker itself, against the throwaway service container
+      # above — never against production. Added after BUG-5 (docs/bug-triage.md)
+      # found the checker had a false-negative blind spot with zero test
+      # coverage of its own. Runs before the real check below on purpose:
+      # no point trusting this build's parity verdict if the tool producing
+      # it might be broken.
+      - name: Migration parity check self-test
+        run: bash infra/scripts/tests/check-migrations.test.sh
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:dev@localhost:5432/check_migrations_test
+
+      # Runs on every CI build, not just PRs touching supabase/migrations/ —
+      # matches the RLS check's own always-on precedent above rather than
+      # adding a new path-filtering action dependency for a check this cheap.
+      - name: Migration parity check
+        run: bash infra/scripts/check-migrations.sh
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 

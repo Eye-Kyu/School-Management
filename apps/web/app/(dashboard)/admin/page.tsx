@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { Badge } from '@school-manager/ui';
 import UpcomingEvents from '@/components/UpcomingEvents';
+import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import DeniedBanner from '@/components/DeniedBanner';
 
 type StatCard = {
   label: string;
@@ -11,8 +12,15 @@ type StatCard = {
   gradient: string;
 };
 
-export default async function AdminHomePage() {
+export default async function AdminHomePage({
+  searchParams,
+}: {
+  searchParams: { denied?: string };
+}) {
   const supabase = createClient();
+
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const { data: userRow } = await supabase.from('users').select('id').eq('auth_id', authUser!.id).maybeSingle();
 
   const now = new Date().toISOString();
   const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -23,8 +31,6 @@ export default async function AdminHomePage() {
     { count: studentCount },
     { count: parentCount },
     { data: feeData },
-    { data: announcements },
-    { data: platformMessageRows },
     { data: events },
   ] = await Promise.all([
     supabase.from('classes').select('*', { count: 'exact', head: true }).eq('is_active', true),
@@ -33,19 +39,6 @@ export default async function AdminHomePage() {
     supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'PARENT').eq('is_active', true),
     supabase.from('fee_balances').select('amount_due, amount_paid'),
     supabase
-      .from('announcements')
-      .select('id, title, published_at, author:users!inner(full_name)')
-      .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
-      .order('published_at', { ascending: false })
-      .limit(3),
-    // Broadcasts from the platform team (SuperAdmin) — same read shape as
-    // notifications/page.tsx's Alerts merge, RLS-scoped to this admin's own
-    // recipient rows (pmr_select_own + pm_select_recipient).
-    supabase
-      .from('platform_message_recipients')
-      .select('id, read_at, message:platform_messages(subject, body, sent_at)')
-      .is('dismissed_at', null),
-    supabase
       .from('events')
       .select('id, title, starts_at, ends_at, all_day, event_type')
       .gte('starts_at', now)
@@ -53,12 +46,6 @@ export default async function AdminHomePage() {
       .order('starts_at')
       .limit(10),
   ]);
-
-  const platformMessages = (platformMessageRows ?? [])
-    .map((r: any) => ({ id: r.id as string, readAt: r.read_at as string | null, ...(r.message ?? {}) }))
-    .filter((m: any) => m.subject)
-    .sort((a: any, b: any) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
-    .slice(0, 3);
 
   const totalOutstanding = (feeData ?? []).reduce(
     (s, b) => s + Number(b.amount_due) - Number(b.amount_paid),
@@ -115,6 +102,7 @@ export default async function AdminHomePage() {
 
   return (
     <div className="space-y-8">
+      <DeniedBanner reason={searchParams.denied} />
       <div>
         <h1 className="text-2xl font-semibold">Admin dashboard</h1>
         <p className="text-sm text-slate-500 mt-1">Manage your school setup and users.</p>
@@ -131,7 +119,7 @@ export default async function AdminHomePage() {
                 {card.sub && <p className="text-white/60 text-xs mt-0.5">{card.sub}</p>}
               </div>
               <div className="bg-white px-5 py-2.5 flex justify-end">
-                <span className="text-xs text-slate-400 group-hover:text-slate-700 transition-colors">
+                <span className="text-xs text-slate-500 group-hover:text-slate-700 transition-colors">
                   View details →
                 </span>
               </div>
@@ -140,55 +128,12 @@ export default async function AdminHomePage() {
         ))}
       </div>
 
-      {/* Latest announcements */}
-      {(announcements ?? []).length > 0 && (
+      {/* What's new for you — replaces the old separate announcements +
+          platform-messages widgets with one unified feed. */}
+      {userRow && (
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-slate-700">Recent announcements</h2>
-            <Link href="/admin/announcements" className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
-              View all →
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {(announcements ?? []).map((a: any) => (
-              <div key={a.id}
-                className="bg-white border border-slate-100 border-l-4 border-l-rose-400
-                           rounded-r-xl px-5 py-3 shadow-sm flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-sm">{a.title}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {new Date(a.published_at).toLocaleDateString()} · {a.author?.full_name}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Platform messages — broadcasts from the platform team */}
-      {platformMessages.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-slate-700">Platform messages</h2>
-            <Link href="/notifications/platform" className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
-              View all →
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {platformMessages.map((m: any) => (
-              <Link key={m.id} href="/notifications/platform" className="block">
-                <div className={`bg-white border border-slate-100 border-l-4 rounded-r-xl px-5 py-3 shadow-sm hover:shadow-md transition-shadow ${m.readAt ? 'border-l-violet-200' : 'border-l-violet-500'}`}>
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <Badge variant="platformMessage">From platform team</Badge>
-                    {!m.readAt && <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />}
-                  </div>
-                  <p className="font-medium text-sm">{m.subject}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{new Date(m.sent_at).toLocaleDateString()}</p>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <h2 className="text-base font-semibold text-slate-700 mb-3">What&apos;s new for you</h2>
+          <DashboardFeed userId={userRow.id} role="ADMIN" />
         </div>
       )}
 

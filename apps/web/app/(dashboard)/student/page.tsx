@@ -5,6 +5,9 @@ import UpcomingEvents from '@/components/UpcomingEvents';
 import RoleBadgeList from '@/components/RoleBadgeList';
 import { getMyRoleBadges } from '@/lib/roleBadges';
 import PrefectPanel from './PrefectPanel';
+import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 export default async function StudentHomePage() {
   const supabase = createClient();
@@ -49,20 +52,22 @@ export default async function StudentHomePage() {
   // the filter would silently exclude attendance marked today, making a
   // freshly-marked record look like it never reflected on the dashboard.
   const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
-  const attQuery = studentId
-    ? supabase.from('attendance_records').select('status').eq('student_id', studentId)
-    : null;
-  const { data: attendanceRecords } = attQuery
-    ? termCoversToday
-      ? await attQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
-      : await attQuery
-    : { data: [] };
+  // No reliable current term covering today — widen to "all time up to
+  // today" rather than leaving the range unbounded (the approved-absences
+  // endpoint requires explicit start/end dates).
+  const attendanceRange = termCoversToday
+    ? { startDate: currentTerm!.start_date, endDate: currentTerm!.end_date }
+    : { startDate: '2000-01-01', endDate: todayDate };
 
-  const attTotal = (attendanceRecords ?? []).length;
-  const attPresent = (attendanceRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attendanceRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attendanceRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+  const attendanceInput = studentId
+    ? await fetchAttendanceData(supabase, studentId, attendanceRange)
+    : { records: [], approvedAbsences: [] };
+
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attAbsent = attendanceInput.records.filter((r) => r.status === 'ABSENT').length;
+  const attOverall = calculateAttendanceRate(attendanceInput);
+  const attRate = attOverall.total_school_days > 0 ? Math.round(attOverall.attendance_rate) : null;
 
   // Today's status — always queried by exact date, never term-range filtered,
   // so it can never be silently excluded by term-boundary staleness.
@@ -74,14 +79,6 @@ export default async function StudentHomePage() {
         .eq('date', todayDate)
         .maybeSingle()
     : { data: null };
-
-  // Announcements
-  const { data: announcements } = await supabase
-    .from('announcements')
-    .select('id, title, body, published_at')
-    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
-    .order('published_at', { ascending: false })
-    .limit(3);
 
   const now = new Date().toISOString();
   const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -139,17 +136,17 @@ export default async function StudentHomePage() {
             </div>
             <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
               {(todaySlots ?? []).length === 0 ? (
-                <p className="text-sm text-slate-400">No classes scheduled today.</p>
+                <p className="text-sm text-slate-500">No classes scheduled today.</p>
               ) : (
                 (todaySlots ?? []).slice(0, 3).map((s: any) => (
                   <div key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="text-slate-400 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
+                    <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
                     <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
                   </div>
                 ))
               )}
               {(todaySlots ?? []).length > 3 && (
-                <p className="text-xs text-slate-400">+{(todaySlots ?? []).length - 3} more</p>
+                <p className="text-xs text-slate-500">+{(todaySlots ?? []).length - 3} more</p>
               )}
             </div>
           </div>
@@ -203,15 +200,15 @@ export default async function StudentHomePage() {
                   }`}>
                     {todayAttendance.status.charAt(0) + todayAttendance.status.slice(1).toLowerCase()} today
                   </span>
-                  <span className="text-slate-400 text-xs ml-2">
+                  <span className="text-slate-500 text-xs ml-2">
                     updated {new Date(todayAttendance.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </p>
               ) : (
-                <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+                <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
               )}
-              {attTotal === 0 ? (
-                <p className="text-sm text-slate-400">No attendance recorded yet.</p>
+              {attOverall.total_school_days === 0 ? (
+                <p className="text-sm text-slate-500">No attendance recorded yet.</p>
               ) : (
                 <div className="flex gap-4 text-sm">
                   <span className="text-emerald-600 font-medium">{attPresent} present</span>
@@ -224,21 +221,11 @@ export default async function StudentHomePage() {
         </Link>
       </div>
 
-      {/* Announcements */}
-      {(announcements ?? []).length > 0 && (
+      {/* What's new for you */}
+      {_uRow && (
         <section>
-          <h2 className="text-base font-medium mb-3">Announcements</h2>
-          <div className="space-y-2">
-            {(announcements ?? []).map((a: any) => (
-              <div key={a.id}
-                className="bg-white border border-slate-100 border-l-4 border-l-violet-500
-                           rounded-r-xl px-5 py-3 shadow-sm">
-                <p className="font-medium text-sm">{a.title}</p>
-                <p className="text-sm text-slate-600 mt-0.5 line-clamp-2">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{new Date(a.published_at).toLocaleDateString()}</p>
-              </div>
-            ))}
-          </div>
+          <h2 className="text-base font-medium mb-3">What&apos;s new for you</h2>
+          <DashboardFeed userId={_uRow.id} role="STUDENT" />
         </section>
       )}
 

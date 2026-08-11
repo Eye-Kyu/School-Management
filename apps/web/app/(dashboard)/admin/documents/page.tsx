@@ -1,112 +1,141 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiUpload, ApiError } from '@/lib/api';
 import BackButton from '@/components/BackButton';
+import ScopePicker, { ScopeValue } from '@/components/documents/ScopePicker';
+import DownloadButton from '@/components/documents/DownloadButton';
+import RetagModal from '@/components/documents/RetagModal';
+import { fileSize, fileIcon, scopeLabel, type DocumentRow } from '@/components/documents/documentUtils';
 
-type Doc = {
-  id: string; title: string; file_url: string; file_name: string;
-  file_size: number | null; mime_type: string | null; audience: string;
-  target_grade_level: number | null; tags: string[]; created_at: string;
-  uploader: { full_name: string } | null;
-};
+type ListResponse = { rows: DocumentRow[]; total: number; page: number; pageSize: number };
+type DownloadCount = { document_id: string; download_count: number; unique_user_count: number };
 
-function fileSize(bytes: number | null) {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+const SCOPE_FILTERS = ['ALL', 'SCHOOL_WIDE', 'CLASS', 'SUBJECT', 'ASSIGNMENT'] as const;
 
-function fileIcon(mime: string | null) {
-  if (!mime) return '📄';
-  if (mime.includes('pdf')) return '📕';
-  if (mime.includes('word') || mime.includes('document')) return '📝';
-  if (mime.includes('sheet') || mime.includes('excel')) return '📊';
-  if (mime.startsWith('image')) return '🖼';
-  return '📄';
-}
-
-export default function DocumentsPage() {
+function DocumentsPageInner() {
   const supabase = createClient();
-  const [docs, setDocs] = useState<Doc[]>([]);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [docs, setDocs] = useState<DocumentRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
+  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [uploaders, setUploaders] = useState<{ id: string; name: string }[]>([]);
+  const [downloadCounts, setDownloadCounts] = useState<Record<string, DownloadCount>>({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
   const [showUpload, setShowUpload] = useState(false);
+  const [retagging, setRetagging] = useState<DocumentRow | null>(null);
+
+  // Filter state lives in URL query params — shareable/bookmarkable.
+  const scopeFilter = (searchParams.get('scope') as (typeof SCOPE_FILTERS)[number]) ?? 'ALL';
+  const uploaderFilter = searchParams.get('uploader') ?? '';
+  const dateFrom = searchParams.get('from') ?? '';
+  const dateTo = searchParams.get('to') ?? '';
+  const q = searchParams.get('q') ?? '';
+
+  function setParam(key: string, value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set(key, value); else params.delete(key);
+    router.push(`?${params.toString()}`);
+  }
 
   // Form state
   const [title, setTitle] = useState('');
-  const [audience, setAudience] = useState('SCHOOL_WIDE');
-  const [gradeLevel, setGradeLevel] = useState('');
-  const [classId, setClassId] = useState('');
+  const [scope, setScope] = useState<ScopeValue>({ scopeType: 'SCHOOL_WIDE' });
   const [tags, setTags] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => {
-    supabase.from('documents')
-      .select('id, title, file_url, file_name, file_size, mime_type, audience, target_grade_level, tags, created_at, uploader:users!uploaded_by_id(full_name)')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => { setDocs((data ?? []) as any[]); setLoading(false); });
+  const load = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (scopeFilter !== 'ALL') params.set('scopeType', scopeFilter);
+    if (uploaderFilter) params.set('uploaderId', uploaderFilter);
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    if (q) params.set('q', q);
+    params.set('pageSize', '100');
 
+    try {
+      const res = await apiFetch<ListResponse>(`/documents?${params.toString()}`);
+      setDocs(res.rows);
+      setTotal(res.total);
+
+      if (res.rows.length > 0) {
+        const ids = res.rows.map((d) => d.id).join(',');
+        const counts = await apiFetch<DownloadCount[]>(`/documents/download-counts?ids=${ids}`);
+        setDownloadCounts(Object.fromEntries(counts.map((c) => [c.document_id, c])));
+      } else {
+        setDownloadCounts({});
+      }
+    } catch {
+      setDocs([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [scopeFilter, uploaderFilter, dateFrom, dateTo, q]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
     supabase.from('classes').select('id, name').eq('is_active', true).order('name')
       .then(({ data }) => setClasses(data ?? []));
+    supabase.from('subjects').select('id, name').order('name')
+      .then(({ data }) => setSubjects(data ?? []));
+    supabase.from('users').select('id, full_name').in('role', ['ADMIN', 'TEACHER']).order('full_name')
+      .then(({ data }) => setUploaders((data ?? []).map((u) => ({ id: u.id, name: u.full_name }))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file || !title.trim()) return;
+    if (scope.scopeType !== 'SCHOOL_WIDE' && !scope.scopeId) { setErr('Select a target for this scope'); return; }
     setUploading(true); setErr('');
 
-    const { data: userRow } = await supabase.from('users').select('id, school_id').maybeSingle();
-    const path = `documents/${userRow?.school_id}/${Date.now()}_${file.name}`;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', title.trim());
+      formData.append('tags', tags);
+      formData.append('scopeType', scope.scopeType);
+      if (scope.scopeSubtype) formData.append('scopeSubtype', scope.scopeSubtype);
+      if (scope.scopeId) formData.append('scopeId', scope.scopeId);
 
-    const { error: uploadErr } = await supabase.storage
-      .from('documents').upload(path, file, { upsert: false, contentType: file.type });
-    if (uploadErr) { setErr(uploadErr.message); setUploading(false); return; }
+      const created = await apiUpload<DocumentRow>('/documents', formData);
+      setDocs((p) => [created, ...p]);
+      setTotal((t) => t + 1);
+      setShowUpload(false); setTitle(''); setTags(''); setFile(null); setScope({ scopeType: 'SCHOOL_WIDE' });
 
-    const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
-
-    const { data, error } = await supabase.from('documents').insert({
-      school_id: userRow?.school_id,
-      uploaded_by_id: userRow?.id,
-      title: title.trim(),
-      file_url: publicUrl,
-      file_name: file.name,
-      file_size: file.size,
-      mime_type: file.type,
-      audience,
-      target_grade_level: gradeLevel ? parseInt(gradeLevel) : null,
-      target_class_id: classId || null,
-      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-    }).select('id, title, file_url, file_name, file_size, mime_type, audience, target_grade_level, tags, created_at, uploader:users!uploaded_by_id(full_name)').single();
-
-    if (error) { setErr(error.message); } else {
-      setDocs((p) => [data as any, ...p]);
-      setShowUpload(false); setTitle(''); setAudience('SCHOOL_WIDE'); setTags(''); setFile(null); setGradeLevel(''); setClassId('');
       // Extract + chunk the document text in the background so the AI tutor
       // can retrieve real content instead of just the title.
       apiFetch('/ai/process-document', {
         method: 'POST',
-        body: JSON.stringify({ documentId: (data as any).id }),
+        body: JSON.stringify({ documentId: created.id }),
       }).catch(() => {});
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Upload failed');
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   }
 
   async function deleteDoc(id: string) {
     if (!confirm('Delete this document?')) return;
-    await supabase.from('documents').delete().eq('id', id);
-    setDocs((p) => p.filter((d) => d.id !== id));
+    try {
+      await apiFetch(`/documents/${id}`, { method: 'DELETE' });
+      setDocs((p) => p.filter((d) => d.id !== id));
+      setTotal((t) => t - 1);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : 'Delete failed');
+    }
   }
-
-  const filtered = docs.filter((d) =>
-    d.title.toLowerCase().includes(search.toLowerCase()) ||
-    d.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))
-  );
 
   return (
     <div className="space-y-6">
@@ -118,63 +147,88 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      <div className="flex gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by title or tag…"
-          className="flex-1 min-w-[200px] rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-        <button onClick={() => setShowUpload((v) => !v)}
-          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700">
-          {showUpload ? 'Cancel' : '+ Upload document'}
-        </button>
+      {/* Filters */}
+      <div className="space-y-3">
+        <div className="flex gap-3 flex-wrap items-center">
+          <input
+            value={q}
+            onChange={(e) => setParam('q', e.target.value)}
+            placeholder="Search by title…"
+            className="flex-1 min-w-[200px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+          <input type="date" value={dateFrom} onChange={(e) => setParam('from', e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm" title="From date" />
+          <input type="date" value={dateTo} onChange={(e) => setParam('to', e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm" title="To date" />
+          <select value={uploaderFilter} onChange={(e) => setParam('uploader', e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <option value="">All uploaders</option>
+            {uploaders.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <button onClick={() => setShowUpload((v) => !v)}
+            className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700">
+            {showUpload ? 'Cancel' : '+ Upload document'}
+          </button>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {SCOPE_FILTERS.map((s) => (
+            <button key={s} onClick={() => setParam('scope', s === 'ALL' ? '' : s)}
+              className={`text-sm rounded-full px-3 py-1 font-medium transition-colors ${
+                scopeFilter === s ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}>
+              {s === 'ALL' ? 'All' : s === 'SCHOOL_WIDE' ? 'School-wide' : s.charAt(0) + s.slice(1).toLowerCase()}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {!loading && docs.length > 0 && Object.values(downloadCounts).some((c) => c.download_count > 0) && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-800 text-sm">Most-downloaded documents</h2>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-slate-100">
+              {docs
+                .map((d) => ({ doc: d, count: downloadCounts[d.id]?.download_count ?? 0 }))
+                .filter((r) => r.count > 0)
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 10)
+                .map(({ doc, count }) => (
+                  <tr key={doc.id}>
+                    <td className="px-5 py-2 text-slate-700 truncate">{doc.title}</td>
+                    <td className="px-5 py-2 text-slate-400 text-xs">{doc.uploader?.full_name ?? ''}</td>
+                    <td className="px-5 py-2 text-right font-medium text-slate-800">{count}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {showUpload && (
         <form onSubmit={handleUpload} className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
           {err && <p className="text-sm text-red-600">{err}</p>}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Audience</label>
-              <select value={audience} onChange={(e) => setAudience(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                <option value="SCHOOL_WIDE">School-wide</option>
-                <option value="GRADE">Specific grade</option>
-                <option value="CLASS">Specific class</option>
-              </select>
-            </div>
-            {audience === 'GRADE' && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Grade level</label>
-                <input type="number" min="1" value={gradeLevel} onChange={(e) => setGradeLevel(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </div>
-            )}
-            {audience === 'CLASS' && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Class</label>
-                <select value={classId} onChange={(e) => setClassId(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  <option value="">Select…</option>
-                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            )}
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Tags (comma-separated)</label>
-              <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="syllabus, maths, term1"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-            </div>
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">File</label>
-              <input type="file" required onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.png"
-                className="text-sm text-slate-600" />
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} required
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </div>
+
+          <ScopePicker value={scope} onChange={setScope} classes={classes} subjects={subjects} isAdmin />
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Tags (comma-separated)</label>
+            <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="syllabus, maths, term1"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">File</label>
+            <input type="file" required onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.png"
+              className="text-sm text-slate-600" />
+          </div>
+
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowUpload(false)}
               className="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
@@ -188,29 +242,58 @@ export default function DocumentsPage() {
 
       {loading ? (
         <p className="text-sm text-slate-400 text-center py-10">Loading…</p>
-      ) : filtered.length === 0 ? (
+      ) : docs.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
-          {search ? 'No documents match your search.' : 'No documents uploaded yet.'}
+          No documents match these filters.
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((d) => (
-            <div key={d.id} className="flex items-center gap-4 bg-white border border-slate-100 rounded-xl px-5 py-3">
-              <span className="text-2xl shrink-0">{fileIcon(d.mime_type)}</span>
-              <div className="flex-1 min-w-0">
-                <a href={d.file_url} target="_blank" rel="noopener noreferrer"
-                  className="font-medium text-slate-800 hover:underline truncate block">{d.title}</a>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {d.file_name}{d.file_size ? ` · ${fileSize(d.file_size)}` : ''}
-                  {d.audience !== 'SCHOOL_WIDE' ? ` · ${d.audience.toLowerCase()}` : ''}
-                  {d.tags.length > 0 ? ` · ${d.tags.join(', ')}` : ''}
-                </p>
+          <p className="text-xs text-slate-400">{total} document{total === 1 ? '' : 's'}</p>
+          {docs.map((d) => {
+            const dl = downloadCounts[d.id];
+            return (
+              <div key={d.id} className="flex items-center gap-4 bg-white border border-slate-100 rounded-xl px-5 py-3">
+                <span className="text-2xl shrink-0">{fileIcon(d.mime_type)}</span>
+                <div className="flex-1 min-w-0">
+                  <DownloadButton documentId={d.id} title={d.title} className="font-medium text-slate-800 hover:underline truncate block text-left">
+                    {d.title}
+                  </DownloadButton>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {d.file_name}{d.file_size ? ` · ${fileSize(d.file_size)}` : ''}
+                    {` · ${scopeLabel(d)}`}
+                    {d.uploader ? ` · ${d.uploader.full_name}` : ''}
+                    {d.tags.length > 0 ? ` · ${d.tags.join(', ')}` : ''}
+                    {dl ? ` · ${dl.download_count} download${dl.download_count === 1 ? '' : 's'}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => setRetagging(d)} className="text-xs font-medium text-slate-500 hover:text-slate-800 shrink-0">
+                  Change scope
+                </button>
+                <button onClick={() => deleteDoc(d.id)} className="text-slate-300 hover:text-rose-500 transition-colors text-lg leading-none shrink-0">×</button>
               </div>
-              <button onClick={() => deleteDoc(d.id)} className="text-slate-300 hover:text-rose-500 transition-colors text-lg leading-none shrink-0">×</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {retagging && (
+        <RetagModal
+          doc={retagging}
+          classes={classes}
+          subjects={subjects}
+          isAdmin
+          onClose={() => setRetagging(null)}
+          onSaved={(updated) => setDocs((p) => p.map((d) => (d.id === updated.id ? updated : d)))}
+        />
+      )}
     </div>
+  );
+}
+
+export default function DocumentsPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-400 text-center py-10">Loading…</p>}>
+      <DocumentsPageInner />
+    </Suspense>
   );
 }

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import QuizTaker from './QuizTaker';
 import QuizReview from './QuizReview';
+import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
 
 export default async function TakeQuizPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
@@ -37,11 +38,14 @@ export default async function TakeQuizPage({ params }: { params: { id: string } 
       .order('position');
 
     return (
-      <QuizReview
-        quizTitle={quiz.title}
-        questions={(reviewQuestions ?? []) as any[]}
-        attempt={existing as any}
-      />
+      <div className="space-y-6">
+        <QuizReview
+          quizTitle={quiz.title}
+          questions={(reviewQuestions ?? []) as any[]}
+          attempt={existing as any}
+        />
+        <AttachedDocumentsSection scopeSubtype="QUIZ" scopeId={params.id} canManage={false} />
+      </div>
     );
   }
 

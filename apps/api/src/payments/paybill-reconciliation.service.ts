@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from './payments.service';
+import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
 
 const TOLERANCE_KES = 1;
 
@@ -272,6 +273,8 @@ export class PaybillReconciliationService {
         .update({ reconciliation_notes: combinedNotes, updated_at: new Date().toISOString() })
         .eq('id', transactionId);
     }
+
+    invalidateUserFeedCache(me.id);
   }
 
   /** Task 5.1 — the admin's unmatched-transaction review queue. RLS-scoped via forUser, so already school-isolated. */
@@ -310,6 +313,8 @@ export class PaybillReconciliationService {
       reconciliation_notes: `${txn.reconciliation_notes} — Resolved: ${resolution}`,
       updated_at: new Date().toISOString(),
     }).eq('id', transactionId);
+
+    invalidateUserFeedCache(me.id);
   }
 
   private async auditTransition(schoolId: string, userId: string | null, transactionId: string, newStatus: string, metadata: unknown): Promise<void> {

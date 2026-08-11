@@ -5,10 +5,26 @@ import { NotificationsService } from '../notifications/notifications.service';
 import type {
   AttendanceQuery,
   AttendanceRosterQuery,
+  ApprovedAbsencesQuery,
   MarkAttendanceInput,
   RequestRemarkInput,
   ReviewRemarkRequestInput,
 } from '@school-manager/types';
+
+// Inclusive list of ISO YYYY-MM-DD dates from start to end. Used to expand
+// an absence_requests date range into the per-day shape
+// getApprovedAbsencesForStudent()'s callers (and calculateAttendanceRate)
+// expect.
+function datesBetween(start: string, end: string): string[] {
+  const dates: string[] = [];
+  let cursor = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  while (cursor <= endDate) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor = new Date(cursor.getTime() + 86_400_000);
+  }
+  return dates;
+}
 
 @Injectable()
 export class AttendanceService {
@@ -91,6 +107,114 @@ export class AttendanceService {
       .lte('start_date', date)
       .gte('end_date', date);
     return new Set((data ?? []).map((r) => r.student_id));
+  }
+
+  // Self-service approved-absence view (Foundation PR, shared-helpers) — a
+  // separate, narrower access surface from roster()/mark()'s own internal
+  // overlay check above. Exists because absence_requests_select RLS grants
+  // ADMIN, the requesting parent, and the student's Class Teacher (plus a
+  // subject teacher of the class) — but no branch at all for the student
+  // themselves or for a non-submitting guardian, so those two roles have had
+  // no working path to see approved absences until now.
+  async getApprovedAbsencesForStudent(accessToken: string, studentId: string, query: ApprovedAbsencesQuery) {
+    const userRow = (await this.supabase.currentUserRow(accessToken, 'id, role, school_id')) as
+      { id: string; role: string; school_id: string } | null;
+    if (!userRow) throw new ForbiddenException('User not found');
+
+    const { data: student } = await this.supabase.admin
+      .from('students')
+      .select('id, school_id, current_class_id, user_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    // Hide existence from a cross-tenant caller (404, not 403) — same
+    // convention as MessagingService.markRead().
+    if (!student || student.school_id !== userRow.school_id) {
+      throw new NotFoundException('Student not found');
+    }
+
+    let reasonVisibility: 'ALL' | 'OWN_ONLY' | 'NONE';
+    if (userRow.role === 'ADMIN') {
+      reasonVisibility = 'ALL';
+    } else if (userRow.role === 'TEACHER') {
+      const { data: teacherRow } = await this.supabase.admin
+        .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
+      if (teacherRow?.is_class_teacher_of !== student.current_class_id) {
+        throw new ForbiddenException('You are not the class teacher of this student');
+      }
+      reasonVisibility = 'ALL';
+    } else if (userRow.role === 'STUDENT') {
+      if (student.user_id !== userRow.id) {
+        throw new ForbiddenException('You may only view your own attendance');
+      }
+      reasonVisibility = 'NONE';
+    } else if (userRow.role === 'PARENT') {
+      const { data: guardianRow } = await this.supabase.admin
+        .from('guardians').select('id').eq('user_id', userRow.id).eq('student_id', studentId).maybeSingle();
+      if (!guardianRow) throw new ForbiddenException('You are not a guardian of this student');
+      reasonVisibility = 'OWN_ONLY';
+    } else {
+      throw new ForbiddenException("Not authorized to view this student's attendance");
+    }
+
+    const { data: requests } = await this.supabase.admin
+      .from('absence_requests')
+      .select('id, start_date, end_date, reason, requested_by_user_id, reviewed_by_user_id, reviewed_at')
+      .eq('student_id', studentId)
+      .eq('status', 'APPROVED')
+      .lte('start_date', query.endDate)
+      .gte('end_date', query.startDate);
+
+    const reviewerIds = [
+      ...new Set((requests ?? []).map((r) => r.reviewed_by_user_id).filter((id): id is string => !!id)),
+    ];
+    const { data: reviewers } = reviewerIds.length > 0
+      ? await this.supabase.admin.from('users').select('id, role').in('id', reviewerIds)
+      : { data: [] as Array<{ id: string; role: string }> };
+    const reviewerRoleById = new Map((reviewers ?? []).map((r) => [r.id, r.role]));
+
+    const approved_absences: Array<{
+      id: string;
+      absence_date: string;
+      approved_at: string | null;
+      approved_by_role: 'ADMIN' | 'TEACHER' | null;
+      submitted_by_current_user: boolean;
+      reason?: string;
+    }> = [];
+
+    for (const req of requests ?? []) {
+      const submittedByCurrentUser = req.requested_by_user_id === userRow.id;
+      const showReason = reasonVisibility === 'ALL' || (reasonVisibility === 'OWN_ONLY' && submittedByCurrentUser);
+      const reviewerRole = req.reviewed_by_user_id ? reviewerRoleById.get(req.reviewed_by_user_id) : undefined;
+      const approvedByRole: 'ADMIN' | 'TEACHER' | null =
+        reviewerRole === 'ADMIN' || reviewerRole === 'TEACHER' ? reviewerRole : null;
+
+      // absence_requests stores a date range; the response is per-day, and
+      // must only cover the overlap with the caller's requested window.
+      const rangeStart = req.start_date > query.startDate ? req.start_date : query.startDate;
+      const rangeEnd = req.end_date < query.endDate ? req.end_date : query.endDate;
+      for (const date of datesBetween(rangeStart, rangeEnd)) {
+        approved_absences.push({
+          id: req.id,
+          absence_date: date,
+          approved_at: req.reviewed_at,
+          approved_by_role: approvedByRole,
+          submitted_by_current_user: submittedByCurrentUser,
+          ...(showReason ? { reason: req.reason } : {}),
+        });
+      }
+    }
+
+    await this.supabase.admin.from('audit_logs').insert({
+      id: randomUUID(),
+      school_id: userRow.school_id,
+      user_id: userRow.id,
+      action: 'absence_requests.list',
+      entity_type: 'student',
+      entity_id: studentId,
+      metadata: { target_student_id: studentId, requester_role: userRow.role },
+    });
+
+    return { approved_absences };
   }
 
   async exportCsv(accessToken: string, query: { classId?: string; dateFrom?: string; dateTo?: string }) {

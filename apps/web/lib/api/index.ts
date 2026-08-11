@@ -43,6 +43,26 @@ export class ApiError extends Error {
   }
 }
 
+async function handleResponse<T>(res: Response): Promise<T> {
+  // Read the body as text once, then try to parse as JSON.
+  // This avoids "body stream already read" errors that occur when
+  // res.json() throws and we then try res.text() on the same response.
+  const text = await res.text();
+
+  if (!res.ok) {
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch { /* keep as plain text */ }
+    const msg = (body as Record<string, unknown>)?.message;
+    const message = typeof msg === 'string' ? msg : Array.isArray(msg) ? (msg as string[]).join('; ') : text || `${res.status}: ${res.statusText}`;
+    throw new ApiError(res.status, message, body);
+  }
+
+  if (!text) return undefined as unknown as T;
+  return JSON.parse(text) as T;
+}
+
 export async function apiFetch<T>(
   path: string,
   init: RequestInit = {},
@@ -62,21 +82,30 @@ export async function apiFetch<T>(
     },
   });
 
-  // Read the body as text once, then try to parse as JSON.
-  // This avoids "body stream already read" errors that occur when
-  // res.json() throws and we then try res.text() on the same response.
-  const text = await res.text();
+  return handleResponse<T>(res);
+}
 
-  if (!res.ok) {
-    let body: unknown = text;
-    try {
-      body = JSON.parse(text);
-    } catch { /* keep as plain text */ }
-    const msg = (body as Record<string, unknown>)?.message;
-    const message = typeof msg === 'string' ? msg : Array.isArray(msg) ? (msg as string[]).join('; ') : text || `${res.status}: ${res.statusText}`;
-    throw new ApiError(res.status, message, body);
-  }
+// For multipart/form-data bodies (file uploads) — apiFetch() always sets
+// Content-Type: application/json, which stomps the browser-generated
+// `multipart/form-data; boundary=...` header a FormData body needs. No
+// Content-Type is set here at all; fetch() derives the correct one (with
+// boundary) automatically whenever the body is a FormData instance.
+export async function apiUpload<T>(path: string, formData: FormData, init: RequestInit = {}): Promise<T> {
+  const supabase = createClient();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const assistToken = getAssistToken();
 
-  if (!text) return undefined as unknown as T;
-  return JSON.parse(text) as T;
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    method: init.method ?? 'POST',
+    body: formData,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(assistToken ? { 'X-Assist-Token': assistToken } : {}),
+      ...init.headers,
+    },
+  });
+
+  return handleResponse<T>(res);
 }

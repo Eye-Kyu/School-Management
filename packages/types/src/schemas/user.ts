@@ -22,12 +22,26 @@ export const CreateTeacherInput = BaseUser.extend({
 });
 export type CreateTeacherInput = z.infer<typeof CreateTeacherInput>;
 
+// NEMIS/KEMIS export fields (Phase 0 sub-sprint 4) — all optional, since none
+// of this data has ever been collected before and most existing students
+// won't have it until an admin backfills it. See
+// docs/audits/nemis-format-verified.md for sourcing (verified: false — no
+// official field-by-field spec is publicly discoverable).
+const NemisFields = z.object({
+  birthCertificateNo: z.string().max(50).optional(),
+  upiNumber: z.string().max(20).optional(),
+  nationality: z.string().max(100).optional(),
+  county: z.string().max(100).optional(),
+  subCounty: z.string().max(100).optional(),
+  specialNeedsNotes: z.string().max(500).optional(),
+});
+
 export const CreateStudentInput = BaseUser.extend({
   admissionNo: z.string().min(1).max(50),
   dateOfBirth: IsoDate.optional(),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
   classId: Uuid.optional(),
-});
+}).merge(NemisFields);
 export type CreateStudentInput = z.infer<typeof CreateStudentInput>;
 
 export const CreateParentInput = BaseUser.extend({
@@ -54,13 +68,14 @@ export const UpdateProfileInput = z.object({
 });
 export type UpdateProfileInput = z.infer<typeof UpdateProfileInput>;
 
-// Used by the admin's "edit user" form. Most fields optional.
+// Used by the admin's "edit user" form (students only, in practice — see
+// UpdateTeacherInput below for the teacher equivalent). Most fields optional.
 export const UpdateUserInput = z.object({
   fullName: z.string().min(2).max(200).optional(),
   email: z.string().email().optional(),
   phone: PhoneNumber.optional(),
   isActive: z.boolean().optional(),
-});
+}).merge(NemisFields);
 export type UpdateUserInput = z.infer<typeof UpdateUserInput>;
 
 // Used by admin when updating a teacher (includes teacher-row fields like department).

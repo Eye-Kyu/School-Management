@@ -188,6 +188,14 @@ describe('Cross-tenant isolation (e2e)', () => {
       const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
       if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
 
+      // Mirror the real login page's fire-and-forget audit call
+      // (apps/web/app/(auth)/login/page.tsx) so fixtures produce genuine
+      // auth.login audit_logs rows, same as a real sign-in would.
+      await request(app.getHttpServer())
+        .post('/auth/events')
+        .set('Authorization', `Bearer ${session.session!.access_token}`)
+        .send({ action: 'auth.login' });
+
       return { authId, userId: actualUserId, token: session.session!.access_token };
     }
 
@@ -277,8 +285,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     documentAId = randomUUID();
     documentBId = randomUUID();
     const { error: docErr } = await admin.from('documents').insert([
-      { id: documentAId, school_id: schoolAId, uploaded_by_id: adminA.userId, title: 'Alpha Doc', file_url: 'https://example.com/a.pdf', file_name: 'a.pdf' },
-      { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  file_url: 'https://example.com/b.pdf', file_name: 'b.pdf' },
+      { id: documentAId, school_id: schoolAId, uploaded_by_id: adminA.userId, title: 'Alpha Doc', storage_path: `${schoolAId}/a.pdf`, file_name: 'a.pdf' },
+      { id: documentBId, school_id: schoolBId, uploaded_by_id: adminB.userId, title: 'Beta Doc',  storage_path: `${schoolBId}/b.pdf`, file_name: 'b.pdf' },
     ]);
     if (docErr) throw new Error(`Document insert failed: ${docErr.message}`);
 
@@ -1544,14 +1552,21 @@ describe('Cross-tenant isolation (e2e)', () => {
   });
 
   it('Pagination returns disjoint pages and a consistent total', async () => {
+    // Scoped to schoolAId — Jest runs e2e spec files in parallel workers
+    // (no runInBand/maxWorkers:1 in jest-e2e.json), and every other spec
+    // file writes its own audit_logs rows during the same CI run. An
+    // unscoped total (the platform-wide count /super-admin/audit-logs
+    // returns with no schoolId filter, intentionally) can grow between the
+    // two requests below from that unrelated concurrent activity — not a
+    // cross-tenant leak, just the wrong count to assert stability on here.
     const page1 = await request(app.getHttpServer())
       .get('/super-admin/audit-logs')
-      .query({ pageSize: 5, page: 1 })
+      .query({ schoolId: schoolAId, pageSize: 5, page: 1 })
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .expect(200);
     const page2 = await request(app.getHttpServer())
       .get('/super-admin/audit-logs')
-      .query({ pageSize: 5, page: 2 })
+      .query({ schoolId: schoolAId, pageSize: 5, page: 2 })
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .expect(200);
 
@@ -1721,9 +1736,45 @@ describe('Cross-tenant isolation (e2e)', () => {
     expect(res.body.payments.webhookDeliveries.failedLast24h).toBeGreaterThanOrEqual(0);
   });
 
+  it('BUG-3 regression: signing in through the fixture writes a real auth.login audit_logs row', async () => {
+    const { userId } = await createExtraUser(schoolAId, 'PARENT', 'auth-login-audit');
+
+    const { data: rows } = await admin
+      .from('audit_logs')
+      .select('id, action, user_id')
+      .eq('user_id', userId)
+      .eq('action', 'auth.login');
+
+    expect(rows).toHaveLength(1);
+  });
+
   it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view system health', async () => {
     await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
     await request(app.getHttpServer()).get('/super-admin/system-health/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Configuration tab (Bucket 1, PR 1) — Platform Settings merged into System
+  // Health. Deliberately gated by MANAGE_PLATFORM_SETTINGS, narrower than the
+  // page's own VIEW_SYSTEM_HEALTH route guard, preserving the old standalone
+  // Platform Settings page's exact permission boundary for this content.
+  // ---------------------------------------------------------------------------
+
+  it('System health Configuration returns real deployment config for a fully-permissioned SUPER_ADMIN', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/super-admin/system-health/configuration')
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .expect(200);
+
+    expect(typeof res.body.notificationSenderEmail).toBe('string');
+    expect(typeof res.body.notificationSenderName).toBe('string');
+    expect(typeof res.body.appUrl).toBe('string');
+    expect(typeof res.body.webhookSecretConfigured).toBe('boolean');
+  });
+
+  it('A regular ADMIN and a zero-permission SUPER_ADMIN cannot view system health configuration', async () => {
+    await request(app.getHttpServer()).get('/super-admin/system-health/configuration').set('Authorization', `Bearer ${tokenA}`).expect(403);
+    await request(app.getHttpServer()).get('/super-admin/system-health/configuration').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
   });
 
   // ---------------------------------------------------------------------------
@@ -1909,22 +1960,11 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(403);
   });
 
-  // ---------------------------------------------------------------------------
-  // Platform Settings (deferred item) — read-only deployment config viewer.
-  // ---------------------------------------------------------------------------
-
-  it('Settings overview returns real deployment config and is permission-gated', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/super-admin/settings/overview')
-      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
-      .expect(200);
-    expect(typeof res.body.notificationSenderEmail).toBe('string');
-    expect(typeof res.body.appUrl).toBe('string');
-    expect(typeof res.body.webhookSecretConfigured).toBe('boolean');
-
-    await request(app.getHttpServer()).get('/super-admin/settings/overview').set('Authorization', `Bearer ${tokenA}`).expect(403);
-    await request(app.getHttpServer()).get('/super-admin/settings/overview').set('Authorization', `Bearer ${tokenReducedSuperAdmin}`).expect(403);
-  });
+  // Platform Settings — moved into System Health's Configuration tab
+  // (Bucket 1, PR 1); the old /super-admin/settings/overview route is gone.
+  // Coverage now lives under the "Configuration tab" describe block near
+  // the System Health tests ("System health Configuration returns real
+  // deployment config..." / "...cannot view system health configuration").
 
   it('School A teacher can see their quiz before it is disabled', async () => {
     const { data } = await clientAs(tokenTeacherA).from('quizzes').select('id').eq('id', quizAId);
@@ -2032,6 +2072,10 @@ describe('Cross-tenant isolation (e2e)', () => {
     });
     const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
     if (signInErr) throw new Error(`Sign-in failed (${label}): ${signInErr.message}`);
+    await request(app.getHttpServer())
+      .post('/auth/events')
+      .set('Authorization', `Bearer ${session.session!.access_token}`)
+      .send({ action: 'auth.login' });
     return { authId: authData.user.id, userId: row?.id ?? userId, token: session.session!.access_token };
   }
 
@@ -2953,24 +2997,57 @@ describe('Cross-tenant isolation (e2e)', () => {
   // ---------------------------------------------------------------------------
 
   it('Task 7: unread-count includes unread conversations, and drops after marking read', async () => {
-    const baseline = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
-      .set('Authorization', `Bearer ${tokenTeacherA}`)
-      .expect(200);
-
-    await admin.from('conversations').update({ teacher_unread_count: 2 }).eq('id', conversationAId);
-    const withUnread = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
-      .set('Authorization', `Bearer ${tokenTeacherA}`)
-      .expect(200);
-    expect(withUnread.body.count).toBe(baseline.body.count + 1);
-
+    // tokenTeacherA is reused across ~50 other tests in this file, so its
+    // feed cache (60s TTL, Bucket 1 PR 1) may already be warm from an
+    // unrelated earlier test. Marking this conversation read first is a
+    // real, cheap, idempotent no-op (nothing unread yet) that also
+    // invalidates tokenTeacherA's cache as a side effect, so the baseline
+    // read right after it is guaranteed fresh rather than possibly stale.
     await request(app.getHttpServer())
       .patch(`/messaging/conversations/${conversationAId}/read`)
       .set('Authorization', `Bearer ${tokenTeacherA}`)
       .expect(200);
+
+    const baseline = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+
+    // A real message via the API (not a raw counter write) — MessagingService
+    // invalidates the recipient's feed cache as part of sending (Bucket 1,
+    // PR 1), which a direct DB write has no way to trigger.
+    const freshParent = await createExtraUser(schoolAId, 'PARENT', 'task7-conv-parent');
+    const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
+    const convRes = await request(app.getHttpServer())
+      .post('/messaging/conversations')
+      .set('Authorization', `Bearer ${freshParent.token}`)
+      .send({ recipientUserId: teacherARow!.user_id, firstMessage: 'Task 7 conversation reminder check' })
+      .expect(201);
+    const newConversationId = convRes.body.id;
+
+    // A fresh message adds 2 to the badge, not 1: MessagingService's
+    // _insertMessage() both bumps the conversation's own unread counter
+    // (counted here) AND queues a plain NEW_MESSAGE row in `notifications`
+    // (also counted, since buildAlerts() has no type filter) — two
+    // independent signals for the same event. This is intentional (Option B,
+    // BUG-6): the unified feed needs the NEW_MESSAGE row to show the message
+    // as a feed item, so it isn't removed — instead the two signals'
+    // read-state is cascaded together (see message-read-cascade.ts).
+    const withUnread = await request(app.getHttpServer())
+      .get('/dashboard-feed/unread-count')
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
+    expect(withUnread.body.count).toBe(baseline.body.count + 2);
+
+    // Marking the conversation read cascades to the paired NEW_MESSAGE
+    // notification row too (BUG-6 fix) — back to baseline exactly, not
+    // stuck 1 above it.
+    await request(app.getHttpServer())
+      .patch(`/messaging/conversations/${newConversationId}/read`)
+      .set('Authorization', `Bearer ${tokenTeacherA}`)
+      .expect(200);
     const afterRead = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
+      .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${tokenTeacherA}`)
       .expect(200);
     expect(afterRead.body.count).toBe(baseline.body.count);
@@ -2979,12 +3056,12 @@ describe('Cross-tenant isolation (e2e)', () => {
   it('Task 7: unread-count includes platform messages for ADMIN only, isolated per school', async () => {
     const parent = await createExtraUser(schoolAId, 'PARENT', 'task7-parent');
     const nonAdminBaseline = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
 
     const adminABaseline = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
     const adminBBaseline = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
 
     const sendRes = await request(app.getHttpServer())
       .post('/super-admin/platform-messages')
@@ -2993,17 +3070,17 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(201);
 
     const adminAAfter = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
     expect(adminAAfter.body.count).toBe(adminABaseline.body.count + 1);
 
     // School B's admin is unaffected (cross-tenant isolation).
     const adminBAfter = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${tokenB}`).expect(200);
     expect(adminBAfter.body.count).toBe(adminBBaseline.body.count);
 
     // A non-admin in the same school never sees platform messages counted.
     const nonAdminAfter = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${parent.token}`).expect(200);
     expect(nonAdminAfter.body.count).toBe(nonAdminBaseline.body.count);
 
     await admin.from('platform_message_recipients').delete().eq('platform_message_id', sendRes.body.id);
@@ -3011,10 +3088,16 @@ describe('Cross-tenant isolation (e2e)', () => {
     await admin.from('audit_logs').delete().eq('entity_id', sendRes.body.id);
   });
 
-  it('Task 7: unread-count includes a student\'s unsubmitted assignment due soon, and drops after submitting', async () => {
-    const baseline = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
-
+  it('Task 7: unread-count includes a student\'s unsubmitted assignment due soon, but not once they have submitted', async () => {
+    // The dashboard feed now caches per-user for 60s (Bucket 1, PR 1), and
+    // these writes (direct table inserts, matching how this whole file
+    // seeds fixtures) have no service-layer hook to invalidate through —
+    // unlike mark-read, there's no "submit an assignment" API call here to
+    // intercept. So instead of one shared student's before/after sequence
+    // (which would just replay its own first, now-cached read), each check
+    // below uses its OWN dedicated, never-before-fetched student, whose
+    // first-ever fetch is guaranteed fresh and accurately reflects
+    // whatever the real DB state already was before that first call.
     const inThreeDays = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
     const { data: teacherARow } = await admin.from('teachers').select('user_id').eq('id', teacherATeacherId).single();
     const assignmentId = randomUUID();
@@ -3023,21 +3106,31 @@ describe('Cross-tenant isolation (e2e)', () => {
       title: 'Task7 reminder assignment', due_date: inThreeDays,
     });
 
-    const withReminder = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
-    expect(withReminder.body.count).toBe(baseline.body.count + 1);
+    const unsubmittedStudent = await createExtraUser(schoolAId, 'STUDENT', 'task7-unsubmitted');
+    const unsubmittedStudentId = randomUUID();
+    await admin.from('students').insert({
+      id: unsubmittedStudentId, school_id: schoolAId, user_id: unsubmittedStudent.userId, current_class_id: classAId,
+      admission_no: `TASK7A-${suffix}`, updated_at: new Date().toISOString(),
+    });
+    const unsubmittedFeed = await request(app.getHttpServer())
+      .get('/dashboard-feed').set('Authorization', `Bearer ${unsubmittedStudent.token}`).expect(200);
+    expect(unsubmittedFeed.body.reminders.some((r: { id: string }) => r.id === `a:${assignmentId}`)).toBe(true);
 
-    const sub = await clientAs(tokenStudentA).from('submissions')
-      .insert({ id: randomUUID(), school_id: schoolAId, assignment_id: assignmentId, student_id: studentAId, content: 'done' })
-      .select().single();
-    expect(sub.error).toBeNull();
+    const submittedStudent = await createExtraUser(schoolAId, 'STUDENT', 'task7-submitted');
+    const submittedStudentId = randomUUID();
+    await admin.from('students').insert({
+      id: submittedStudentId, school_id: schoolAId, user_id: submittedStudent.userId, current_class_id: classAId,
+      admission_no: `TASK7B-${suffix}`, updated_at: new Date().toISOString(),
+    });
+    const subId = randomUUID();
+    await admin.from('submissions').insert({ id: subId, school_id: schoolAId, assignment_id: assignmentId, student_id: submittedStudentId, content: 'done' });
+    const submittedFeed = await request(app.getHttpServer())
+      .get('/dashboard-feed').set('Authorization', `Bearer ${submittedStudent.token}`).expect(200);
+    expect(submittedFeed.body.reminders.some((r: { id: string }) => r.id === `a:${assignmentId}`)).toBe(false);
 
-    const afterSubmit = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenStudentA}`).expect(200);
-    expect(afterSubmit.body.count).toBe(baseline.body.count);
-
-    await admin.from('submissions').delete().eq('id', sub.data!.id);
+    await admin.from('submissions').delete().eq('id', subId);
     await admin.from('assignments').delete().eq('id', assignmentId);
+    await admin.from('students').delete().in('id', [unsubmittedStudentId, submittedStudentId]);
   });
 
   // ---------------------------------------------------------------------------
@@ -4109,7 +4202,7 @@ describe('Cross-tenant isolation (e2e)', () => {
   // hidden). This repo's frontend test setup (vitest, environment: 'node',
   // no jsdom/testing-library) can't render and inspect that JSX directly, so
   // these tests instead pin the data contract the bubble's conditional
-  // render depends on: /notifications/unread-count must be exactly 0 for a
+  // render depends on: /dashboard-feed/unread-count must be exactly 0 for a
   // genuinely empty inbox, and must accurately track the show/hide
   // transition end-to-end through the real mark-read path.
   // ---------------------------------------------------------------------------
@@ -4117,7 +4210,7 @@ describe('Cross-tenant isolation (e2e)', () => {
   it('Notification bubble: a brand-new user with no activity at all gets an unread count of exactly 0', async () => {
     const freshUser = await createExtraUser(schoolAId, 'PARENT', 'bubble-fresh-parent');
     const res = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
+      .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${freshUser.token}`)
       .expect(200);
     expect(res.body.count).toBe(0);
@@ -4127,7 +4220,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     const freshUser = await createExtraUser(schoolAId, 'TEACHER', 'bubble-cycle-teacher');
 
     const before = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
+      .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${freshUser.token}`)
       .expect(200);
     expect(before.body.count).toBe(0);
@@ -4139,7 +4232,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(201);
 
     const after = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
+      .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${freshUser.token}`)
       .expect(200);
     expect(after.body.count).toBe(1);
@@ -4158,7 +4251,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(200);
 
     const afterRead = await request(app.getHttpServer())
-      .get('/notifications/unread-count')
+      .get('/dashboard-feed/unread-count')
       .set('Authorization', `Bearer ${freshUser.token}`)
       .expect(200);
     expect(afterRead.body.count).toBe(0);
@@ -4175,11 +4268,11 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(201);
 
     const userOneCount = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${userOne.token}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${userOne.token}`).expect(200);
     expect(userOneCount.body.count).toBe(1);
 
     const userTwoCount = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${userTwo.token}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${userTwo.token}`).expect(200);
     expect(userTwoCount.body.count).toBe(0);
   });
 
@@ -4260,8 +4353,16 @@ describe('Cross-tenant isolation (e2e)', () => {
   // ---------------------------------------------------------------------------
 
   it('Bug fix: a broadcast sent to one school resolves via the frontend\'s exact embed query, updates the unread count, persists read/dismiss, and is invisible to another school', async () => {
+    // A dedicated admin rather than the file-wide shared tokenA — tokenA's
+    // feed cache (60s TTL, Bucket 1 PR 1) may already be warm from an
+    // unrelated earlier test, which would make an exact baseline+1
+    // comparison flaky. A fresh admin's first-ever fetch is guaranteed
+    // uncached; RLS correctness below doesn't depend on it being tokenA
+    // specifically, any School A admin demonstrates the same policy.
+    const freshAdmin = await createExtraUser(schoolAId, 'ADMIN', 'broadcast-bugfix-admin');
+
     const baselineA = await request(app.getHttpServer())
-      .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+      .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${freshAdmin.token}`).expect(200);
 
     const sendRes = await request(app.getHttpServer())
       .post('/super-admin/platform-messages')
@@ -4274,7 +4375,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       // The exact embed shape apps/web/app/(dashboard)/admin/page.tsx and
       // notifications/page.tsx both use.
       const embedQuery = () =>
-        clientAs(tokenA)
+        clientAs(freshAdmin.token)
           .from('platform_message_recipients')
           .select('id, read_at, dismissed_at, message:platform_messages(subject, body, sent_at)')
           .eq('platform_message_id', messageId);
@@ -4287,7 +4388,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       // platform_message_recipients.id (the subquery's own PK) instead of
       // correlating to the outer platform_messages.id, so the policy never
       // actually matched any row for any School Admin.
-      const flatCheck = await clientAs(tokenA).from('platform_messages').select('id, subject').eq('id', messageId);
+      const flatCheck = await clientAs(freshAdmin.token).from('platform_messages').select('id, subject').eq('id', messageId);
       expect(flatCheck.error).toBeNull();
       expect(flatCheck.data).toHaveLength(1);
 
@@ -4308,31 +4409,35 @@ describe('Cross-tenant isolation (e2e)', () => {
 
       // Unread count (the header bubble's own endpoint) reflects the send.
       const afterSend = await request(app.getHttpServer())
-        .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+        .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${freshAdmin.token}`).expect(200);
       expect(afterSend.body.count).toBe(baselineA.body.count + 1);
 
-      // Marking read persists and the count drops back down.
-      const { error: readErr } = await clientAs(tokenA)
-        .from('platform_message_recipients')
-        .update({ read_at: new Date().toISOString() })
-        .eq('id', recipientRow.id);
-      expect(readErr).toBeNull();
+      // Marking read persists and the count drops back down. Goes through
+      // PATCH /dashboard-feed/read (pm:-prefixed id) rather than a raw
+      // Supabase write — matches what NotificationsView.tsx actually calls
+      // now (Bucket 1, PR 1), and, unlike a direct write, invalidates this
+      // user's feed cache so the very next read reflects it immediately.
+      await request(app.getHttpServer())
+        .patch('/dashboard-feed/read')
+        .set('Authorization', `Bearer ${freshAdmin.token}`)
+        .send({ ids: [`pm:${recipientRow.id}`] })
+        .expect(200);
 
       const { data: afterReadRow } = await admin.from('platform_message_recipients').select('read_at').eq('id', recipientRow.id).single();
       expect(afterReadRow?.read_at).toBeTruthy();
 
       const afterRead = await request(app.getHttpServer())
-        .get('/notifications/unread-count').set('Authorization', `Bearer ${tokenA}`).expect(200);
+        .get('/dashboard-feed/unread-count').set('Authorization', `Bearer ${freshAdmin.token}`).expect(200);
       expect(afterRead.body.count).toBe(baselineA.body.count);
 
       // Dismissing removes it from the same filtered read both the
       // notifications page and the new dashboard widget use.
-      await clientAs(tokenA)
+      await clientAs(freshAdmin.token)
         .from('platform_message_recipients')
         .update({ dismissed_at: new Date().toISOString() })
         .eq('id', recipientRow.id);
 
-      const { data: afterDismiss } = await clientAs(tokenA)
+      const { data: afterDismiss } = await clientAs(freshAdmin.token)
         .from('platform_message_recipients')
         .select('id')
         .eq('platform_message_id', messageId)

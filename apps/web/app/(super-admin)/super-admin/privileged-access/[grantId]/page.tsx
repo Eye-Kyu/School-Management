@@ -80,7 +80,7 @@ type FinancialRow = {
 type DocumentRow = {
   id: string;
   title: string;
-  file_url: string;
+  storage_path: string;
   file_name: string;
   mime_type: string | null;
   created_at: string;
@@ -390,9 +390,11 @@ export default function PrivilegedAccessViewerPage() {
                       {documents.map((d) => (
                         <tr key={d.id}>
                           <td className="px-4 py-2 text-slate-700">
-                            <a href={d.file_url} target="_blank" rel="noreferrer" className="text-violet-600 hover:underline">
-                              {d.title}
-                            </a>
+                            {/* Metadata-only oversight view — the documents bucket is private
+                                (BUG-10 fix), and issuing a signed URL is a distinct, separately
+                                RLS-checked action this page doesn't need to duplicate to list
+                                what exists. */}
+                            {d.title}
                           </td>
                           <td className="px-4 py-2 text-slate-600">{d.uploader?.full_name ?? '—'}</td>
                           <td className="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{new Date(d.created_at).toLocaleDateString()}</td>

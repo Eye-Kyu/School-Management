@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api';
+import { useDashboardFeedUnreadCount } from '@/lib/hooks/useDashboardFeed';
 import UserAvatar from './UserAvatar';
 
 export default function AvatarDropdown({
@@ -17,17 +18,14 @@ export default function AvatarDropdown({
   role: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
   const router = useRouter();
 
-  // Fetch unread count on mount and route change
-  useEffect(() => {
-    apiFetch<{ count: number }>('/notifications/unread-count')
-      .then((r) => setUnread(r.count))
-      .catch(() => {});
-  }, [pathname]);
+  // Shares its query cache with the dashboard feed — a mark-read mutation
+  // fired from the feed invalidates this too, so the badge updates
+  // immediately without either surface knowing about the other.
+  const { data: unreadData } = useDashboardFeedUnreadCount();
+  const unread = unreadData?.count ?? 0;
 
   // Close on outside click
   useEffect(() => {

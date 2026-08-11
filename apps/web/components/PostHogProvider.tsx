@@ -11,6 +11,9 @@ if (typeof window !== 'undefined') {
   }
   if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
     posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
+      // Routed through the /ingest rewrite next.config.js's withPostHogConfig
+      // sets up automatically, rather than hitting PostHog's host directly —
+      // avoids ad-blockers/ISP-level blocking of third-party analytics domains.
       api_host: '/ingest',
       ui_host: 'https://eu.posthog.com',
       defaults: '2026-01-30',

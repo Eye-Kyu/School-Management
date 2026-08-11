@@ -23,6 +23,8 @@ export type ModuleKey =
   | 'ai_features'
   | 'api_webhooks'
   | 'homework'
-  | 'events';
+  | 'events'
+  | 'quizzes'
+  | 'document_library';
 
 export const RequireModule = (key: ModuleKey) => SetMetadata(REQUIRE_MODULE_KEY, key);

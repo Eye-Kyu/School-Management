@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { SendPlatformMessageInput } from '@school-manager/types';
+import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
 
 @Injectable()
 export class PlatformMessagesService {
@@ -58,6 +59,11 @@ export class PlatformMessagesService {
     }));
     const { error: recErr } = await this.supabase.admin.from('platform_message_recipients').insert(recipientRows);
     if (recErr) throw new Error(recErr.message);
+
+    // Same reasoning as NotificationsService.queue() — a broadcast is new
+    // feed-visible content for every recipient admin, invalidate immediately
+    // rather than waiting out the 60s TTL.
+    for (const a of admins) invalidateUserFeedCache(a.id as string);
 
     await this.supabase.admin.from('audit_logs').insert({
       id: randomUUID(),

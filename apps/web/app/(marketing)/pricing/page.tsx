@@ -143,6 +143,13 @@ export default function PricingPage() {
 
       <footer className="text-center py-8 text-sm text-slate-400">
         © {new Date().getFullYear()} School Manager · Built for Kenyan schools
+        {/*
+          TODO(owner): once the Better Stack (or equivalent) public status
+          page is live, add its real URL here, e.g.:
+          {' · '}<a href="https://status.example.com" className="underline hover:text-slate-600">Status</a>
+          See README.md's "Documentation" section for setup notes — do not
+          fabricate a URL in the meantime.
+        */}
       </footer>
     </div>
   );

@@ -138,12 +138,22 @@ export default function QuizTaker({
       answers,
     }).eq('quiz_id', quiz.id).eq('student_id', studentId);
 
+    // Bucket 1, PR 2b: cascades to the gradebook if (and only if) this quiz
+    // is linked — record_quiz_grade() no-ops otherwise. Called on every
+    // submission regardless of link state, per the task's own design, so a
+    // quiz linked later only needs the retroactive rollup to backfill
+    // students who already submitted before the link existed.
+    if (attemptId.current) {
+      await supabase.rpc('record_quiz_grade', { p_quiz_attempt_id: attemptId.current }).then(() => {});
+    }
+
     posthog.capture('quiz_submitted', {
       score,
       max_score: maxScore,
       question_count: rawQuestions.length,
       answered_count: Object.keys(answers).length,
     });
+
     setResult({ score, max: maxScore });
     setSubmitted(true);
     setSubmitting(false);

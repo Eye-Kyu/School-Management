@@ -4,6 +4,9 @@ import { todayEnum, formatTime, DAY_LABELS, type Day } from '@/lib/utils/days';
 import UpcomingEvents from '@/components/UpcomingEvents';
 import RoleBadgeList from '@/components/RoleBadgeList';
 import type { RoleBadge } from '@/lib/roleBadges';
+import { DashboardFeed } from '@/components/DashboardFeed/DashboardFeed';
+import { fetchAttendanceData } from '@/lib/attendance/fetchAttendanceData';
+import { calculateAttendanceRate } from '@school-manager/types';
 
 export default async function ParentHomePage() {
   const supabase = createClient();
@@ -51,20 +54,22 @@ export default async function ParentHomePage() {
   // hasn't been marked current yet) must never filter out today's record.
   const termCoversToday = !!currentTerm && todayDate >= currentTerm.start_date && todayDate <= currentTerm.end_date;
 
-  const parentAttQuery = firstStudent
-    ? supabase.from('attendance_records').select('status').eq('student_id', firstStudent.id)
-    : null;
-  const { data: attendanceRecords } = parentAttQuery
-    ? termCoversToday
-      ? await parentAttQuery.gte('date', currentTerm!.start_date).lte('date', currentTerm!.end_date)
-      : await parentAttQuery
-    : { data: [] };
+  // A non-submitting guardian has no RLS path to absence_requests directly
+  // (see docs/audits/shared-helpers-call-sites.md §1.3), so the
+  // approved-absence overlay comes from the approved-absences endpoint.
+  const attendanceRange = termCoversToday
+    ? { startDate: currentTerm!.start_date, endDate: currentTerm!.end_date }
+    : { startDate: '2000-01-01', endDate: todayDate };
+  const attendanceInput = firstStudent
+    ? await fetchAttendanceData(supabase, firstStudent.id, attendanceRange)
+    : { records: [], approvedAbsences: [] };
 
-  const attTotal = (attendanceRecords ?? []).length;
-  const attPresent = (attendanceRecords ?? []).filter((r) => r.status === 'PRESENT').length;
-  const attLate = (attendanceRecords ?? []).filter((r) => r.status === 'LATE').length;
-  const attAbsent = (attendanceRecords ?? []).filter((r) => r.status === 'ABSENT').length;
-  const attRate = attTotal > 0 ? Math.round(((attPresent + attLate) / attTotal) * 100) : null;
+  const attPresent = attendanceInput.records.filter((r) => r.status === 'PRESENT').length;
+  const attLate = attendanceInput.records.filter((r) => r.status === 'LATE').length;
+  const attAbsent = attendanceInput.records.filter((r) => r.status === 'ABSENT').length;
+  const attOverall = calculateAttendanceRate(attendanceInput);
+  const attTotal = attOverall.total_school_days;
+  const attRate = attTotal > 0 ? Math.round(attOverall.attendance_rate) : null;
 
   // Fee balances for all linked students
   const studentIds = students.map((s: any) => s.id);
@@ -115,14 +120,6 @@ export default async function ParentHomePage() {
   );
   const currency = (feeBalances ?? [])[0] ? (feeBalances as any[])[0].currency : 'KES';
 
-  // Announcements
-  const { data: announcements } = await supabase
-    .from('announcements')
-    .select('id, title, body, published_at')
-    .or(`expires_at.is.null,expires_at.gte.${new Date().toISOString().slice(0, 10)}`)
-    .order('published_at', { ascending: false })
-    .limit(3);
-
   const now = new Date().toISOString();
   const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data: events } = await supabase
@@ -154,7 +151,7 @@ export default async function ParentHomePage() {
       </div>
 
       {students.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-400">
+        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-500">
           Ask your school admin to link your child's account.
         </div>
       ) : (
@@ -181,12 +178,12 @@ export default async function ParentHomePage() {
                             }`}>
                               {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
                             </span>
-                            <span className="text-slate-400 text-xs ml-2">
+                            <span className="text-slate-500 text-xs ml-2">
                               updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </p>
                         ) : (
-                          <p className="text-sm text-slate-400 mt-1.5">Not yet marked for today.</p>
+                          <p className="text-sm text-slate-500 mt-1.5">Not yet marked for today.</p>
                         )}
                       </Link>
                       {childBadges.length > 0 && <RoleBadgeList badges={childBadges} className="mt-2" />}
@@ -215,11 +212,11 @@ export default async function ParentHomePage() {
                 </div>
                 <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
                   {(todaySlots ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-400">No classes today.</p>
+                    <p className="text-sm text-slate-500">No classes today.</p>
                   ) : (
                     (todaySlots ?? []).slice(0, 3).map((s: any) => (
                       <div key={s.id} className="flex items-center gap-3 text-sm">
-                        <span className="text-slate-400 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
+                        <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
                         <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
                       </div>
                     ))
@@ -261,16 +258,16 @@ export default async function ParentHomePage() {
                           }`}>
                             {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
                           </span>
-                          <span className="text-slate-400 text-xs ml-2">
+                          <span className="text-slate-500 text-xs ml-2">
                             updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </p>
                       ) : (
-                        <p className="text-sm text-slate-400">Attendance not yet marked for today.</p>
+                        <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
                       );
                     })()}
                     {attTotal === 0 ? (
-                      <p className="text-sm text-slate-400">No attendance recorded yet.</p>
+                      <p className="text-sm text-slate-500">No attendance recorded yet.</p>
                     ) : (
                       <div className="flex gap-4 text-sm">
                         <span className="text-emerald-600 font-medium">{attPresent} present</span>
@@ -321,7 +318,7 @@ export default async function ParentHomePage() {
                 </div>
                 <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
                   {(feeBalances ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-400">No fee records yet.</p>
+                    <p className="text-sm text-slate-500">No fee records yet.</p>
                   ) : (
                     <p className="text-sm text-slate-600">
                       {(feeBalances ?? []).length} balance record{(feeBalances ?? []).length !== 1 ? 's' : ''} on file
@@ -331,28 +328,16 @@ export default async function ParentHomePage() {
               </div>
             </Link>
 
-            {/* Announcements card */}
-            {(announcements ?? []).length > 0 && (
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
-                  <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">Announcements</span>
-                  <p className="text-3xl sm:text-4xl font-bold text-white mt-2">{(announcements ?? []).length}</p>
-                  <p className="text-violet-100 text-sm mt-1">recent notices</p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
-                  {(announcements ?? []).slice(0, 2).map((a: any) => (
-                    <div key={a.id}>
-                      <p className="text-sm font-medium text-slate-700 truncate">{a.title}</p>
-                      <p className="text-xs text-slate-400">
-                        {new Date(a.published_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </>
+      )}
+
+      {/* What's new for you */}
+      {userRow && (
+        <section>
+          <h2 className="text-base font-semibold mb-3 text-slate-700">What&apos;s new for you</h2>
+          <DashboardFeed userId={userRow.id} role="PARENT" />
+        </section>
       )}
 
       <UpcomingEvents events={(events ?? []) as any[]} />

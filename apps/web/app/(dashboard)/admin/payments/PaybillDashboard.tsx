@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import posthog from 'posthog-js';
 
@@ -110,7 +110,7 @@ export default function PaybillDashboard() {
         ))}
       </div>
 
-      {loadError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{loadError}</p>}
+      {loadError && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{loadError}</p>}
 
       {loading ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">Loading…</div>
@@ -206,6 +206,24 @@ function MatchModal({
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+
+  // Escape-to-close, initial focus into the dialog, and focus-return to
+  // whatever triggered it on close — the only real overlay modal in this
+  // app, previously missing all of this (Phase 0 sub-sprint 4 a11y pass).
+  useEffect(() => {
+    const triggeredBy = document.activeElement as HTMLElement | null;
+    firstFieldRef.current?.focus();
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      triggeredBy?.focus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -241,21 +259,31 @@ function MatchModal({
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 px-4" onClick={onClose}>
-      <form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4">
+      <form
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="match-modal-title"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4"
+      >
         <div>
-          <h3 className="text-base font-semibold">Match Paybill payment</h3>
+          <h3 id="match-modal-title" className="text-base font-semibold">Match Paybill payment</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             {fmt(txn.amount, txn.currency)} · ref &quot;{txn.bill_reference_number}&quot; · {txn.msisdn}
           </p>
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Student</label>
+          <label htmlFor="match-modal-student" className="block text-xs font-medium text-slate-600 mb-1">Student</label>
           <input
+            id="match-modal-student"
+            ref={firstFieldRef}
             type="text"
             value={studentId ? students.find((s) => s.id === studentId)?.user.full_name ?? '' : query}
             onChange={(e) => { setQuery(e.target.value); setStudentId(''); setFeeBalanceId(''); }}
             placeholder="Search by name or admission no."
+            aria-label="Student"
             className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
             autoComplete="off"
           />
@@ -279,8 +307,9 @@ function MatchModal({
 
         {studentId && balancesForStudent.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Fee balance (optional — auto-picks the largest outstanding if left blank)</label>
+            <label htmlFor="match-modal-fee-balance" className="block text-xs font-medium text-slate-600 mb-1">Fee balance (optional — auto-picks the largest outstanding if left blank)</label>
             <select
+              id="match-modal-fee-balance"
               value={feeBalanceId}
               onChange={(e) => setFeeBalanceId(e.target.value)}
               className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
@@ -296,17 +325,19 @@ function MatchModal({
         )}
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Note (optional)</label>
+          <label htmlFor="match-modal-note" className="block text-xs font-medium text-slate-600 mb-1">Note (optional)</label>
           <input
+            id="match-modal-note"
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. Confirmed with parent by phone"
+            aria-label="Note"
             className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
 
-        {error && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
+        {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50">Cancel</button>
@@ -326,12 +357,29 @@ function OverpaymentQueue({ rows, onChanged }: { rows: OverpaymentTxn[]; onChang
   const [resolution, setResolution] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   function openResolve(txn: OverpaymentTxn) {
+    triggerRef.current = document.activeElement as HTMLElement | null;
     setResolving(txn);
     setResolution('');
     setError('');
   }
+
+  // Escape-to-close, initial focus, and focus-return — same treatment as MatchModal above.
+  useEffect(() => {
+    if (!resolving) return;
+    firstFieldRef.current?.focus();
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setResolving(null);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      triggerRef.current?.focus();
+    };
+  }, [resolving]);
 
   async function submitResolve(e: React.FormEvent) {
     e.preventDefault();
@@ -404,23 +452,33 @@ function OverpaymentQueue({ rows, onChanged }: { rows: OverpaymentTxn[]; onChang
 
       {resolving && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 px-4" onClick={() => setResolving(null)}>
-          <form onSubmit={submitResolve} onClick={(e) => e.stopPropagation()} className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4">
+          <form
+            onSubmit={submitResolve}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resolve-modal-title"
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4"
+          >
             <div>
-              <h3 className="text-base font-semibold">Resolve overpayment</h3>
+              <h3 id="resolve-modal-title" className="text-base font-semibold">Resolve overpayment</h3>
               <p className="text-xs text-slate-500 mt-0.5">{fmt(resolving.amount, resolving.currency)} — {resolving.matched_student?.user.full_name}</p>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">How was this resolved?</label>
+              <label htmlFor="resolve-modal-resolution" className="block text-xs font-medium text-slate-600 mb-1">How was this resolved?</label>
               <input
+                id="resolve-modal-resolution"
+                ref={firstFieldRef}
                 type="text"
                 value={resolution}
                 onChange={(e) => setResolution(e.target.value)}
                 placeholder="e.g. Credited to next term's balance"
+                aria-label="How was this resolved?"
                 required
                 className="block w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            {error && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
+            {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={() => setResolving(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50">Cancel</button>
               <button type="submit" disabled={!resolution.trim() || saving} className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white disabled:opacity-50">
@@ -505,7 +563,7 @@ function UnifiedFeed({ students }: { students: StudentOption[] }) {
         <button type="submit" className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white">Apply</button>
       </form>
 
-      {error && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
+      {error && <p role="alert" className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
 
       {loading ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">Loading…</div>
