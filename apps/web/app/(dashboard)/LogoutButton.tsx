@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api';
+import posthog from 'posthog-js';
 
 export default function LogoutButton() {
   const router = useRouter();
@@ -10,6 +11,8 @@ export default function LogoutButton() {
 
   async function handleLogout() {
     apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.logout' }) }).catch(() => {});
+    posthog.capture('user_signed_out');
+    posthog.reset();
     await supabase.auth.signOut();
     router.refresh();
     router.push('/login');

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import posthog from 'posthog-js';
 
 type Slip = {
   id: string; title: string; description: string | null;
@@ -65,6 +66,7 @@ export default function PermissionSlipSigner({
     if (error) {
       setErrors((p) => ({ ...p, [slip.id]: error.message }));
     } else {
+      posthog.capture('permission_slip_signed', { audience: slip.audience });
       setSigned((p) => new Set([...p, key]));
       setCodeInputs((p) => ({ ...p, [slip.id]: '' }));
     }

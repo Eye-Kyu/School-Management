@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getPostHogClient } from '@/lib/posthog-server';
 
 export async function GET() {
   const supabase = createClient();
@@ -39,6 +40,12 @@ export async function GET() {
     notifications: notifications ?? [],
     academic: student ? { student_record: student, grades, attendance, submissions } : null,
   };
+
+  const posthog = getPostHogClient();
+  if (posthog) {
+    posthog.capture({ distinctId: user.id, event: 'user_data_exported', properties: { role: userRow.role } });
+    await posthog.flush();
+  }
 
   return new NextResponse(JSON.stringify(exportData, null, 2), {
     headers: {

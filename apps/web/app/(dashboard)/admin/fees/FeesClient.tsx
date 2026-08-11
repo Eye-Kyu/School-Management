@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { PAYMENT_METHODS } from '@school-manager/types';
+import posthog from 'posthog-js';
 
 type Balance = {
   id: string;
@@ -72,7 +73,10 @@ export default function FeesClient({ balances }: { balances: Balance[] }) {
         { method: 'POST', body: JSON.stringify({ csv }) },
       );
       setImportResult(res);
-      if (res.imported > 0) { router.refresh(); setCsv(''); }
+      if (res.imported > 0) {
+        posthog.capture('fees_csv_imported', { imported_count: res.imported, failed_count: res.failed });
+        router.refresh(); setCsv('');
+      }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -108,6 +112,7 @@ export default function FeesClient({ balances }: { balances: Balance[] }) {
           notes: paymentNotes || undefined,
         }),
       });
+      posthog.capture('fee_payment_recorded', { payment_method: method });
       setPaymentRow(null);
       router.refresh();
     } catch (err) {

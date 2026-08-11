@@ -4,6 +4,7 @@ import { createRealClient } from '@/lib/supabase/server';
 import { ASSIST_MODE_COOKIE, verifyAssistTokenSync } from '@/lib/assistMode';
 import DashboardShell from './DashboardShell';
 import AssistModeBanner from './AssistModeBanner';
+import PostHogIdentify from '@/components/PostHogIdentify';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Always the real caller's own session — identity/chrome must reflect the
@@ -33,6 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <DashboardShell role={role ?? ''} displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
+      <PostHogIdentify userId={user.id} role={role ?? ''} />
       {assistClaims && (
         <AssistModeBanner
           schoolName={assistSchoolName ?? 'this school'}

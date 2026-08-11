@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import posthog from 'posthog-js';
 
 type UnmatchedTxn = {
   id: string;
@@ -247,6 +248,7 @@ function MatchModal({
         method: 'POST',
         body: JSON.stringify({ studentId, note: note || undefined, feeBalanceId: feeBalanceId || undefined }),
       });
+      posthog.capture('paybill_payment_matched', { amount: txn.amount, currency: txn.currency });
       await onMatched();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to match transaction');
@@ -389,6 +391,7 @@ function OverpaymentQueue({ rows, onChanged }: { rows: OverpaymentTxn[]; onChang
         method: 'POST',
         body: JSON.stringify({ resolution }),
       });
+      posthog.capture('paybill_overpayment_resolved', { amount: resolving.amount, currency: resolving.currency });
       setResolving(null);
       await onChanged();
     } catch (err) {
