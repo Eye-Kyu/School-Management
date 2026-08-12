@@ -8,6 +8,63 @@ as a category master switch. No pricing change in this PR.
 **Status:** Phase 1 (audit) complete. **No code changes in this PR.** Awaiting
 explicit review before Phase 2 implementation starts.
 
+---
+
+## Phase 2 outcome (implementation)
+
+Implemented as planned, all 3 review refinements included. Deviations and
+findings worth recording here:
+
+- **Refinement 1's production check returned both empty arrays** — zero
+  schools have `ai_features` enabled at all today, not just the "expected
+  safe" case. No compensating step was needed. (Documented in the PR
+  description with the exact query results.)
+- **A real deployment bug was caught and fixed by Commit 1's own
+  before/after verification step, before it ever reached this PR**:
+  `CREATE OR REPLACE FUNCTION module_enabled(uuid, text, int)` does not
+  replace `module_enabled(uuid, text)` — Postgres treats a changed argument
+  list as a new overload, which left the 2-arg signature every existing RLS
+  policy and `.rpc()` call depends on ambiguous. Fixed by keeping
+  `module_enabled(uuid, text)`'s signature byte-for-byte unchanged (still a
+  trivial one-line `sql` wrapper) and moving the actual recursive,
+  depth-guarded logic into a new, separately-named function,
+  `module_enabled_at_depth(uuid, text, int)`, with no existing dependents to
+  break. Verified live: single unambiguous overload, zero behavioral drift
+  on the one pre-existing `school_modules` row, and — separately — a real
+  master-switch proof against a temporary row on the one live school
+  (enable parent, enable child, disable parent retroactively, confirm the
+  child's effective state flips to `false` while its own row stays `true`),
+  cleaned up immediately after.
+- **Two pre-existing tests in `cross-tenant.e2e-spec.ts` referenced the old
+  `ai_features → document_library` dependency directly** and needed
+  updating for the dependency's move onto `ai_tutor`: the "explicit override
+  wins" test (its `document_library`-satisfying setup step is no longer
+  needed at all, since `ai_features` now has zero dependencies) and the
+  "unmet dependency is rejected" test (now exercises `ai_tutor`'s
+  dependency on `document_library` instead, with `ai_features` explicitly
+  satisfied first to isolate the check).
+- **Commit 5's admin-UI collapsed/expanded semantics**: implemented as
+  `<details open={parent.enabled}>` — collapsed while the parent is off
+  (children present in the DOM, not visually cluttering the list, per the
+  task's own wording), auto-expanded once the parent is on. Parent/child
+  grouping is computed generically from `ModuleRow.dependencies` (already
+  present in the existing API response — no backend shape change needed),
+  not hardcoded to the AI category, so the same admin-UI code will group any
+  future parent/child module relationship the same way.
+- **Test coverage deliberately avoids live paid Anthropic API calls.**
+  `/ai/generate-quiz` and `/ai/detect-plagiarism` have no pre-AI-call
+  lookup gate (unlike `/ai/tutor`, `/ai/process-document`, and
+  `/ai/report-card-comment`, which 404 on a nonexistent resource before
+  ever reaching the AI service) — so "happy path" coverage for those two
+  specifically is scoped to entitlement-gating (`403` when disabled) rather
+  than a full `200` requiring a real LLM call. This matches the existing
+  test suite's own established pattern (the two pre-existing AI tests both
+  rely on a 404-before-AI-call to prove the guard passed).
+- **New self-contained test school** for the AI-gating e2e cases
+  (`AI Entitlement Test School`) — deliberately not reusing `schoolA`/`schoolB`
+  or `entitlementSchoolId`, since `cross-tenant.e2e-spec.ts` is heavily
+  order-dependent on those fixtures' exact state at each point in the file.
+
 ## Summary
 
 | Finding | |
