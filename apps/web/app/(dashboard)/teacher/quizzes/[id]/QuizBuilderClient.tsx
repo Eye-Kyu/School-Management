@@ -3,6 +3,7 @@
 import { Fragment, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getCurrentUserRow } from '@/lib/supabase/currentUser';
+import { useModuleAccess } from '@/lib/hooks/useModuleAccess';
 import AiQuizGenerator from './AiQuizGenerator';
 
 type Option = { id: string; text: string };
@@ -113,6 +114,7 @@ export default function QuizBuilderClient({
   attempts: Attempt[];
 }) {
   const supabase = createClient();
+  const { isModuleEnabled } = useModuleAccess();
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [attempts, setAttempts] = useState<Attempt[]>(initialAttempts);
   const [resetOpen, setResetOpen] = useState<string | null>(null);
@@ -260,7 +262,9 @@ export default function QuizBuilderClient({
       </div>
 
       {/* AI Generator */}
-      <AiQuizGenerator quizId={quiz.id} onQuestionsAdded={handleAiQuestions} />
+      {isModuleEnabled('ai_quiz_generation') && (
+        <AiQuizGenerator quizId={quiz.id} onQuestionsAdded={handleAiQuestions} />
+      )}
 
       {/* Add question */}
       {!adding ? (

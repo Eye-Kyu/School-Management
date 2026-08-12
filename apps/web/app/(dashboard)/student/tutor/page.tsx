@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import BackButton from '@/components/BackButton';
 import { API_BASE } from '@/lib/api';
+import { useModuleAccess } from '@/lib/hooks/useModuleAccess';
 
 type Message = { role: 'user' | 'assistant'; content: string; loading?: boolean };
 
@@ -19,6 +20,7 @@ export default function AiTutorPage() {
   // One id per page load, groups every turn in this chat into one
   // conversation for the teacher-review log.
   const [conversationId] = useState(() => crypto.randomUUID());
+  const { isModuleEnabled, loading: modulesLoading } = useModuleAccess();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,6 +90,18 @@ export default function AiTutorPage() {
     } finally {
       setSending(false);
     }
+  }
+
+  // Closes the direct-navigation bypass the audit flagged — the sidebar
+  // link is already filtered by moduleKey, but that alone never stopped
+  // someone from just typing /student/tutor into the address bar.
+  if (!modulesLoading && !isModuleEnabled('ai_tutor')) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-3.5rem)] max-w-2xl text-center px-4">
+        <BackButton href="/student" />
+        <p className="mt-6 text-slate-500">AI Tutor isn&apos;t enabled for your school.</p>
+      </div>
+    );
   }
 
   return (

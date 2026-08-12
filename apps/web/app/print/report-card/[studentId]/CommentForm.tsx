@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { useModuleAccess } from '@/lib/hooks/useModuleAccess';
 import AiCommentButton from './AiCommentButton';
 
 export default function CommentForm({
@@ -17,6 +18,7 @@ export default function CommentForm({
 }) {
   const supabase = createClient();
   const router = useRouter();
+  const { isModuleEnabled } = useModuleAccess();
   const [ct, setCt] = useState(existing?.classTeacher ?? '');
   const [ht, setHt] = useState(existing?.headTeacher ?? '');
   const [publish, setPublish] = useState(existing?.isPublished ?? false);
@@ -88,7 +90,7 @@ export default function CommentForm({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <label style={{ fontSize: 11, fontWeight: 'bold' }}>Class Teacher&apos;s Comment</label>
-            {!readOnly && <AiCommentButton studentId={studentId} termId={termId} onDraft={(draft) => setCt(draft)} />}
+            {!readOnly && isModuleEnabled('ai_report_comments') && <AiCommentButton studentId={studentId} termId={termId} onDraft={(draft) => setCt(draft)} />}
           </div>
           <textarea value={ct} onChange={(e) => setCt(e.target.value)} rows={4} maxLength={500} disabled={readOnly}
             style={{ width: '100%', borderRadius: 6, border: '1px solid #cbd5e1', padding: '6px 10px', fontSize: 11, resize: 'vertical', background: readOnly ? '#f8fafc' : 'white' }} />
