@@ -471,6 +471,48 @@ export class SuperAdminService {
       metadata: { module_key: moduleKey, previous_state: !enabled },
     });
 
+    // Activating ai_features seeds the 4 AI sub-modules with the same
+    // defaults the one-time backfill migration (20260728000090) gave
+    // existing schools, so a school adopting AI for the first time lands
+    // in the same state as the backfilled cohort. Select-then-insert, never
+    // upsert — a row that already exists (including one a prior admin
+    // action explicitly set) is left completely untouched.
+    if (enabled && moduleKey === 'ai_features') {
+      const subModuleDefaults: Array<{ moduleKey: string; enabled: boolean }> = [
+        { moduleKey: 'ai_report_comments', enabled: true },
+        { moduleKey: 'ai_tutor', enabled: false },
+        { moduleKey: 'ai_quiz_generation', enabled: false },
+        { moduleKey: 'ai_plagiarism_detection', enabled: false },
+      ];
+      for (const d of subModuleDefaults) {
+        const { data: existing } = await this.supabase.admin
+          .from('school_modules')
+          .select('id')
+          .eq('school_id', schoolId)
+          .eq('module_key', d.moduleKey)
+          .maybeSingle();
+        if (existing) continue;
+
+        await this.supabase.admin.from('school_modules').insert({
+          id: randomUUID(),
+          school_id: schoolId,
+          module_key: d.moduleKey,
+          enabled: d.enabled,
+          enabled_at: d.enabled ? now : null,
+          enabled_by: d.enabled ? (caller?.id ?? null) : null,
+        });
+        await this.supabase.admin.from('audit_logs').insert({
+          id: randomUUID(),
+          school_id: schoolId,
+          user_id: caller?.id ?? null,
+          action: d.enabled ? 'module.enable' : 'module.disable',
+          entity_type: 'school_modules',
+          entity_id: null,
+          metadata: { module_key: d.moduleKey, previous_state: null, reason: 'ai_features_activation_default' },
+        });
+      }
+    }
+
     return { ok: true, warnings };
   }
 
