@@ -40,6 +40,20 @@ const ROLE_HOME: Record<string, string> = {
   SUPER_ADMIN: '/super-admin',
 };
 
+// See docs/audits/posthog-capture-audit.md — identify() must use a hashed
+// distinct ID, but the hash salt is server-only, so the hash is computed by
+// GET /api/analytics/identity (the caller's own verified session, never a
+// client-supplied ID) rather than here. Never blocks login/routing — a
+// failure here just means this session isn't identified in PostHog.
+async function identifyForAnalytics(): Promise<void> {
+  const identity = await fetch('/api/analytics/identity')
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null) as { hashedId: string; role: string; schoolId: string } | null;
+  if (identity) {
+    posthog.identify(identity.hashedId, { role: identity.role, school_id: identity.schoolId });
+  }
+}
+
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -89,7 +103,7 @@ function LoginPageInner() {
 
     const role = userRow?.role as string | undefined;
 
-    posthog.identify(user!.id, { role });
+    await identifyForAnalytics();
     posthog.capture('user_signed_in', { login_method: 'email' });
 
     const next = searchParams.get('next');
@@ -134,7 +148,7 @@ function LoginPageInner() {
 
     const role = userRow?.role as string | undefined;
 
-    posthog.identify(user!.id, { role });
+    await identifyForAnalytics();
     posthog.capture('user_signed_in', { login_method: 'phone_otp' });
 
     const next = searchParams.get('next');

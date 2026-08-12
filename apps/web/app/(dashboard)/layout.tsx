@@ -34,7 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <DashboardShell role={role ?? ''} displayName={displayName} avatarUrl={userRow?.avatar_url ?? null}>
-      <PostHogIdentify userId={user.id} role={role ?? ''} />
+      <PostHogIdentify />
       {assistClaims && (
         <AssistModeBanner
           schoolName={assistSchoolName ?? 'this school'}

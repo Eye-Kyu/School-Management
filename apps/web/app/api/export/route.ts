@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getPostHogClient } from '@/lib/posthog-server';
+import { hashForAnalytics } from '@/lib/analytics/anonymize';
 
 export async function GET() {
   const supabase = createClient();
@@ -43,7 +44,10 @@ export async function GET() {
 
   const posthog = getPostHogClient();
   if (posthog) {
-    posthog.capture({ distinctId: user.id, event: 'user_data_exported', properties: { role: userRow.role } });
+    // distinctId hashed per docs/audits/posthog-capture-audit.md — already
+    // server-side here, so no round-trip needed the way client identify()
+    // calls require.
+    posthog.capture({ distinctId: hashForAnalytics(user.id), event: 'user_data_exported', properties: { role: userRow.role } });
     await posthog.flush();
   }
 
