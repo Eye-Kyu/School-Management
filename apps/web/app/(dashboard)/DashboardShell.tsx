@@ -71,7 +71,7 @@ const NAV: Record<string, NavItem[]> = {
     { href: '/student/analytics',   label: 'Analytics' },
     { href: '/leaderboard',         label: 'Leaderboard', moduleKey: 'behaviour_tracking' },
     { href: '/documents',           label: 'Documents', moduleKey: 'document_library' },
-    { href: '/student/tutor',       label: '✨ AI Tutor', moduleKey: 'ai_features' },
+    { href: '/student/tutor',       label: '✨ AI Tutor', moduleKey: 'ai_tutor' },
   ],
   PARENT: [
     { href: '/parent',              label: 'Dashboard' },

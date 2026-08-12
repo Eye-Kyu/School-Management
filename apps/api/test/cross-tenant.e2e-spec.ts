@@ -67,6 +67,11 @@ describe('Cross-tenant isolation (e2e)', () => {
   // Set by the Phase 12 billing tests — no separate afterAll cleanup needed,
   // platform_invoices.school_id cascades away when schoolAId is deleted below.
   let createdInvoiceId: string | undefined;
+  // Set by the B1-4b AI sub-module entitlement gating tests; cleaned up in
+  // afterAll. Self-contained (its own school + admin), deliberately not
+  // reusing schoolA/B or entitlementSchoolId so it can't disturb their
+  // carefully-sequenced state elsewhere in this file.
+  let aiEntitlementSchoolId: string | undefined;
 
   // JWT access tokens for each school's admin
   let tokenA: string;
@@ -347,6 +352,8 @@ describe('Cross-tenant isolation (e2e)', () => {
     if (entitlementSchoolId) await admin.from('schools').delete().eq('id', entitlementSchoolId);
     // Phase 8 curriculum tests create their own extra curriculum (curriculum_subjects cascades)
     if (createdCurriculumId) await admin.from('curricula').delete().eq('id', createdCurriculumId);
+    // B1-4b AI entitlement tests create their own extra school
+    if (aiEntitlementSchoolId) await admin.from('schools').delete().eq('id', aiEntitlementSchoolId);
     for (const id of authUserIds) {
       await admin.auth.admin.deleteUser(id);
     }
@@ -544,6 +551,156 @@ describe('Cross-tenant isolation (e2e)', () => {
       .set('Authorization', `Bearer ${tokenA}`)
       .send({ documentId: documentBId })
       .expect(404);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AI sub-module entitlement gating (B1-4b) — per-route gates on all 5 AI
+  // routes, plus the recursive master-switch behavior module_enabled() now
+  // provides (20260728000088). Self-contained: its own school + admin user,
+  // deliberately not reusing schoolA/B or entitlementSchoolId so this can't
+  // disturb their carefully-sequenced state used elsewhere in this file.
+  // ---------------------------------------------------------------------------
+
+  let aiSchoolId: string;
+  let tokenAiAdmin: string;
+
+  it('sets up a dedicated school + admin for AI sub-module gating tests', async () => {
+    const { data: school, error } = await admin.from('schools')
+      .insert({ id: randomUUID(), name: `AI Entitlement Test School ${suffix}`, slug: `ai-entitlement-test-${suffix}`, updated_at: new Date().toISOString() })
+      .select('id')
+      .single();
+    expect(error).toBeNull();
+    aiSchoolId = school!.id;
+    aiEntitlementSchoolId = aiSchoolId;
+
+    const email = `ai-entitlement-admin-${suffix}@test-isolation.internal`;
+    const password = `TestPass${suffix}!`;
+    // handle_new_auth_user() (20260522000003_auth_user_trigger.sql) mirrors
+    // a public.users row automatically from user_metadata — no separate
+    // insert needed (and a manual one collides with it on auth_id).
+    const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { school_id: aiSchoolId, role: 'ADMIN', full_name: 'AI Test Admin' },
+    });
+    expect(authErr).toBeNull();
+    authUserIds.push(authData!.user.id);
+
+    const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      realtime: REALTIME_OPTIONS,
+    });
+    const { data: session, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
+    expect(signInErr).toBeNull();
+    tokenAiAdmin = session!.session!.access_token;
+  });
+
+  it('Each AI route is blocked when its own specific sub-module is disabled', async () => {
+    // A fresh school with no explicit school_modules rows and no active
+    // subscription defaults every module to enabled (rule 5) — including
+    // all 4 new AI sub-modules and the ai_features parent.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_quiz_generation`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/ai/generate-quiz')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ content: 'Photosynthesis converts light energy into chemical energy.' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_plagiarism_detection`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/ai/detect-plagiarism')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ text: 'Some submission text to check.' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_report_comments`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/ai/report-card-comment')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ studentId: randomUUID(), termId: randomUUID() })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_tutor`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/ai/tutor')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ question: 'What is photosynthesis?' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/ai/process-document')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ documentId: randomUUID() })
+      .expect(403);
+  });
+
+  it('Disabling one sub-module does not block its siblings — per-route granularity, not one shared gate', async () => {
+    // All 4 sub-modules are disabled from the previous test. Re-enable
+    // exactly one and confirm ONLY its route is unblocked.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_report_comments`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: true })
+      .expect(200);
+
+    // Still blocked — proves the guard checks the specific route's own key,
+    // not "any AI module enabled."
+    await request(app.getHttpServer())
+      .post('/ai/generate-quiz')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ content: 'test' })
+      .expect(403);
+
+    // report-card-comment now clears the guard — reaches the RLS-scoped
+    // student lookup and 404s on a nonexistent studentId. This proves the
+    // guard let the request through without ever invoking the real
+    // Anthropic API (the 404 fires before AiService.generateReportCardComment
+    // is called) — deliberately avoids a live paid LLM call in this suite.
+    await request(app.getHttpServer())
+      .post('/ai/report-card-comment')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ studentId: randomUUID(), termId: randomUUID() })
+      .expect(404);
+  });
+
+  it('Master switch: disabling ai_features retroactively blocks a sub-module that was already explicitly enabled', async () => {
+    // The write-time dependency trigger only fires when the DEPENDENT's own
+    // row changes — it can never catch a dependency being disabled out from
+    // under an already-enabled child. This is exactly the read-time gap
+    // 20260728000088's recursive module_enabled() closes. This is the one
+    // test case that actually exercises the fix, not just documents intent.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${aiSchoolId}/modules/ai_features`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: false })
+      .expect(200);
+
+    // ai_report_comments' own school_modules row is untouched (still
+    // enabled: true, set by the previous test) — only the parent moved.
+    await request(app.getHttpServer())
+      .post('/ai/report-card-comment')
+      .set('Authorization', `Bearer ${tokenAiAdmin}`)
+      .send({ studentId: randomUUID(), termId: randomUUID() })
+      .expect(403);
+
+    const { data: ownRow } = await admin.from('school_modules').select('enabled').eq('school_id', aiSchoolId).eq('module_key', 'ai_report_comments').single();
+    expect(ownRow?.enabled).toBe(true); // confirms the 403 above is the parent's doing, not a reset of the child's own row
+
+    const { data: effectiveState } = await admin.rpc('module_enabled', { p_school_id: aiSchoolId, p_module_key: 'ai_report_comments' });
+    expect(effectiveState).toBe(false);
   });
 
   // ---------------------------------------------------------------------------
@@ -980,21 +1137,11 @@ describe('Cross-tenant isolation (e2e)', () => {
   it('An explicit override wins over package state in both directions', async () => {
     const now = new Date().toISOString();
 
-    // ai_features declares a hard dependency on document_library, enforced by
-    // a BEFORE INSERT/UPDATE trigger on school_modules (school_modules_check)
-    // that runs even for this direct admin-client write — not just the
-    // application-layer check in toggleModule(). Essential (this school's
-    // package) doesn't include document_library, so it must be satisfied with
-    // its own temporary override first, or the trigger rejects the insert
-    // below outright. Removed at the end of this test so later tests (the
-    // upgrade-preview assertions) still see document_library resolved from
-    // the package, not a lingering override.
-    const { error: depErr, data: depOverride } = await admin.from('school_modules')
-      .insert({ id: randomUUID(), school_id: entitlementSchoolId, module_key: 'document_library', enabled: true, updated_at: now })
-      .select('id')
-      .single();
-    expect(depErr).toBeNull();
-
+    // ai_features previously declared a hard dependency on document_library;
+    // B1-4b (AI sub-module entitlement split) moved that dependency onto the
+    // new ai_tutor sub-module specifically — ai_features itself now has zero
+    // dependencies, so no dependency-satisfying override is needed here
+    // anymore (the school_modules_check trigger has nothing to check).
     const { error: aiErr } = await admin.from('school_modules').insert({ id: randomUUID(), school_id: entitlementSchoolId, module_key: 'ai_features', enabled: true, updated_at: now });
     expect(aiErr).toBeNull();
     const { data: aiEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'ai_features' });
@@ -1004,8 +1151,6 @@ describe('Cross-tenant isolation (e2e)', () => {
     expect(hwErr).toBeNull();
     const { data: hwEnabled } = await admin.rpc('module_enabled', { p_school_id: entitlementSchoolId, p_module_key: 'homework' });
     expect(hwEnabled).toBe(false); // override beats "package includes it"
-
-    await admin.from('school_modules').delete().eq('id', depOverride!.id);
   });
 
   it("GET /auth/me's enabledModules reflects real package + override state, not just school_modules", async () => {
@@ -2003,7 +2148,16 @@ describe('Cross-tenant isolation (e2e)', () => {
   });
 
   it('Enabling a module with an unmet dependency is rejected', async () => {
-    // ai_features depends on document_library
+    // ai_tutor depends on both ai_features and document_library (B1-4b moved
+    // the document_library dependency off ai_features onto ai_tutor
+    // specifically) — satisfy ai_features first so this isolates the
+    // document_library dependency check.
+    await request(app.getHttpServer())
+      .patch(`/super-admin/schools/${schoolAId}/modules/ai_features`)
+      .set('Authorization', `Bearer ${tokenSuperAdmin}`)
+      .send({ enabled: true })
+      .expect(200);
+
     await request(app.getHttpServer())
       .patch(`/super-admin/schools/${schoolAId}/modules/document_library`)
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
@@ -2011,7 +2165,7 @@ describe('Cross-tenant isolation (e2e)', () => {
       .expect(200);
 
     const res = await request(app.getHttpServer())
-      .patch(`/super-admin/schools/${schoolAId}/modules/ai_features`)
+      .patch(`/super-admin/schools/${schoolAId}/modules/ai_tutor`)
       .set('Authorization', `Bearer ${tokenSuperAdmin}`)
       .send({ enabled: true })
       .expect(400);

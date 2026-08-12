@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import BackButton from '@/components/BackButton';
+import { Toggle } from '@/components/ui/Toggle';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePlatformPermissions } from '@/lib/hooks/usePlatformPermissions';
 import {
@@ -1043,45 +1044,96 @@ export default function SchoolDetailPage() {
             <h2 className="text-lg font-semibold mb-1">Modules</h2>
             <p className="text-sm text-slate-500 mb-4">Enable or disable features for this school. Disabling never deletes data.</p>
 
-            {Object.entries(byCategory).map(([category, mods]) => (
-              <div key={category} className="space-y-2 mb-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{category}</h3>
-                <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
-                  {mods.map((m) => (
-                    <div key={m.key} className="flex items-center justify-between px-5 py-3">
-                      <div>
-                        <p className="font-medium text-slate-800 flex items-center gap-2">
-                          {m.name}
-                          {m.is_core && (
-                            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Core</span>
+            {Object.entries(byCategory).map(([category, mods]) => {
+              // A row is a "child" of another row in the same category if
+              // it declares that row's key as a dependency — e.g. the AI
+              // sub-modules each depend on ai_features. Cross-category
+              // dependencies (ai_tutor -> document_library) are deliberately
+              // not grouped this way; they'd be a confusing cross-section
+              // link, not a parent/child UI relationship.
+              const childKeys = new Set<string>();
+              const childrenByParent = new Map<string, typeof mods>();
+              for (const m of mods) {
+                for (const dep of m.dependencies) {
+                  if (mods.some((x) => x.key === dep)) {
+                    childKeys.add(m.key);
+                    const list = childrenByParent.get(dep) ?? [];
+                    list.push(m);
+                    childrenByParent.set(dep, list);
+                  }
+                }
+              }
+              const topLevelMods = mods.filter((m) => !childKeys.has(m.key));
+
+              return (
+                <div key={category} className="space-y-2 mb-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{category}</h3>
+                  <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
+                    {topLevelMods.map((m) => {
+                      const children = childrenByParent.get(m.key);
+                      return (
+                        <div key={m.key}>
+                          <div className="flex items-center justify-between px-5 py-3">
+                            <div>
+                              <p className="font-medium text-slate-800 flex items-center gap-2">
+                                {m.name}
+                                {m.is_core && (
+                                  <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Core</span>
+                                )}
+                                {m.status === 'COMING_SOON' && (
+                                  <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-violet-50 text-violet-600">Coming soon</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-400 mt-0.5">{m.description}</p>
+                              {m.dependencies.length > 0 && (
+                                <p className="text-xs text-slate-400 mt-0.5">Requires: {m.dependencies.join(', ')}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="text-xs text-slate-400">{SOURCE_LABELS[m.entitlementSource]}</span>
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${m.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                {m.enabled ? 'Enabled' : 'Disabled'}
+                              </span>
+                              <button
+                                onClick={() => toggle(m)}
+                                disabled={m.is_core || !m.can_disable || busyKey === m.key}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                              >
+                                {busyKey === m.key ? '…' : m.enabled ? 'Disable' : 'Enable'}
+                              </button>
+                            </div>
+                          </div>
+                          {children && children.length > 0 && (
+                            // Collapsed by default while the parent is off — children exist in
+                            // the DOM (an admin can expand to see them) but don't visually
+                            // clutter the list. Auto-expanded once the parent is on.
+                            <details open={m.enabled} className="border-t border-slate-100">
+                              <summary className="px-5 py-2 cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-700">
+                                {children.length} sub-feature{children.length === 1 ? '' : 's'}
+                              </summary>
+                              <div className="divide-y divide-slate-100 bg-slate-50/50">
+                                {children.map((c) => (
+                                  <div key={c.key} className="flex items-center justify-between pl-9 pr-5 py-2.5">
+                                    <div>
+                                      <p className="text-sm font-medium text-slate-700">{c.name}</p>
+                                      <p className="text-xs text-slate-400 mt-0.5">{c.description}</p>
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                      <span className="text-xs text-slate-400">{SOURCE_LABELS[c.entitlementSource]}</span>
+                                      <Toggle checked={c.enabled} onChange={() => toggle(c)} disabled={busyKey === c.key} />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
                           )}
-                          {m.status === 'COMING_SOON' && (
-                            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-violet-50 text-violet-600">Coming soon</span>
-                          )}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-0.5">{m.description}</p>
-                        {m.dependencies.length > 0 && (
-                          <p className="text-xs text-slate-400 mt-0.5">Requires: {m.dependencies.join(', ')}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-slate-400">{SOURCE_LABELS[m.entitlementSource]}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${m.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {m.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                        <button
-                          onClick={() => toggle(m)}
-                          disabled={m.is_core || !m.can_disable || busyKey === m.key}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors"
-                        >
-                          {busyKey === m.key ? '…' : m.enabled ? 'Disable' : 'Enable'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
