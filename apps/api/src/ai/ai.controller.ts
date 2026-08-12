@@ -16,7 +16,6 @@ import { calculateAttendanceRate } from '@school-manager/types';
 @ApiTags('ai')
 @ApiBearerAuth()
 @UseGuards(AuthGuard, FeatureGuard)
-@RequireModule('ai_features')
 @Controller('ai')
 export class AiController {
   constructor(
@@ -27,6 +26,7 @@ export class AiController {
   // ── Quiz generation ──────────────────────────────────────────
 
   @ApiOperation({ summary: 'Generate quiz questions from text or PDF (base64)' })
+  @RequireModule('ai_quiz_generation')
   @Post('generate-quiz')
   async generateQuiz(
     @Body() body: {
@@ -46,6 +46,7 @@ export class AiController {
   // ── Report card comment ──────────────────────────────────────
 
   @ApiOperation({ summary: 'Draft a report-card comment from student data' })
+  @RequireModule('ai_report_comments')
   @Post('report-card-comment')
   async reportCardComment(
     @AccessToken() token: string,
@@ -123,6 +124,7 @@ export class AiController {
   // ── Document processing (extract + chunk for tutor retrieval) ─
 
   @ApiOperation({ summary: 'Extract text from an uploaded document and chunk it for AI tutor retrieval' })
+  @RequireModule('ai_tutor')
   @Post('process-document')
   async processDocument(
     @AccessToken() token: string,
@@ -149,6 +151,7 @@ export class AiController {
   // ── AI Tutor (streaming SSE) ─────────────────────────────────
 
   @ApiOperation({ summary: 'Stream an AI tutor response grounded in school documents' })
+  @RequireModule('ai_tutor')
   @Post('tutor')
   async tutor(
     @CurrentUser() user: { id: string },
@@ -208,6 +211,7 @@ export class AiController {
   // ── Plagiarism detection ─────────────────────────────────────
 
   @ApiOperation({ summary: 'Detect AI-generated content or plagiarism in a submission' })
+  @RequireModule('ai_plagiarism_detection')
   @Post('detect-plagiarism')
   async detectPlagiarism(@Body() body: { text: string }) {
     return this.ai.detectPlagiarism(body.text);
