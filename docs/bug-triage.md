@@ -208,6 +208,61 @@ Neither function calls the other or calls back into either service's `markRead()
 
 ---
 
+### BUG-13: `current_user_id()` was silently redefined — the original migration no longer describes its real behavior
+
+**Found during:** 2026-08-12/13, CLAUDE.md expansion Phase 1 audit
+(`docs/audits/claude-md-expansion-plan.md`) — surfaced while gathering
+evidence for the RLS-helper-functions section and cross-checking the
+original definition against a later migration touching the same function
+name.
+
+**File:** `supabase/migrations/20260522000002_enable_rls.sql:16-18`
+(original definition), `supabase/migrations/20260723000047_fix_current_user_id.sql:28-33`
+(the real, current definition).
+
+**What was wrong:** `current_user_id()` was originally defined to return
+`auth.uid()` directly — the Supabase Auth user id (`users.auth_id`).
+`_047` redefines it to instead return `users.id` (the internal row id) via
+`SELECT id FROM public.users WHERE auth_id = auth.uid() AND deleted_at IS NULL LIMIT 1`.
+Per `_047`'s own header, every RLS policy comparing `current_user_id()`
+against a `users.id`-typed column had been silently non-functional for
+real, non-service-role writes from the moment it was introduced until
+that fix landed — masked because every historical write path used the
+service-role client. This isn't a new bug in application behavior (`_047`
+already fixed the underlying function, before this audit ever ran) — the
+bug this entry tracks is purely a **documentation trap**: anyone reading
+`_002` in isolation (the migration that first defines the function) walks
+away with an incorrect mental model of what `current_user_id()` returns
+today, since nothing in `_002` itself indicates it was later superseded.
+
+**Impact:** No new production impact — `_047` already resolved the
+functional bug for real callers, prior to this audit. The residual risk is
+purely informational: a future developer or Claude Code session tracing
+RLS behavior by reading migration files in numeric order, or grepping for
+`current_user_id` and stopping at the first match, would cite `_002`'s
+`auth.uid()` behavior as current and build incorrect assumptions on top of
+it (e.g., assuming a policy comparison against a `users.id` column is
+broken when it isn't, or vice versa).
+
+**Fix:** No code change needed — the function itself has been correct
+since `_047`. Documented directly in `CLAUDE.md` §3 (Multi-tenancy and RLS
+conventions), which now states the current definition explicitly and
+instructs: "grep for the latest `CREATE OR REPLACE FUNCTION current_user_id`
+occurrence, not the original migration." This is the general mitigation
+for the whole class of issue, not just this one function — §5 and §6 of
+`CLAUDE.md` both also warn that a migration file describes intent at the
+time it was written, not necessarily what's true in production today, and
+point at verifying live (`pg_proc`, `pg_constraint`, `information_schema`)
+when a schema/function question actually matters.
+
+**Verification:** confirmed directly by reading both migration files in
+full and comparing their `CREATE OR REPLACE FUNCTION current_user_id()`
+bodies — `_047`'s own header independently corroborates the same
+conclusion. No test added (nothing to regress against — this is a doc
+accuracy fix, not a behavior change).
+
+---
+
 ## Resolved / re-verified (not bugs)
 
 For traceability — items raised as open questions in a prior PR's follow-up notes, re-examined during the 2026-07-25 audit and confirmed safe, not touched:
