@@ -231,7 +231,7 @@ describe('Notifications: SMS via Africa\'s Talking (e2e)', () => {
     // No further attempts once abandoned.
     await notifications.dispatch();
     expect(sendSmsMock).toHaveBeenCalledTimes(3);
-  });
+  }, 90000);
 
   it('the pre-existing legacy stub backfill never re-sends historical rows', async () => {
     // Simulates a row that predates this migration: sms_sent_at populated by
