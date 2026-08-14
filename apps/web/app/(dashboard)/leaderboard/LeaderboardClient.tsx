@@ -55,8 +55,11 @@ export default function LeaderboardClient({
   }, [win, scope]);
 
   useEffect(() => {
-    if (scope === 'class' && !classId) { setResult(null); return; }
-    if (scope === 'grade' && !gradeLevel) { setResult(null); return; }
+    // Bug 4 fix: clear loading state when scope selection is incomplete,
+    // otherwise users with persisted scope='class'/'grade' prefs but no
+    // selected class/grade get stuck on "Loading..." forever.
+    if (scope === 'class' && !classId) { setResult(null); setLoading(false); return; }
+    if (scope === 'grade' && !gradeLevel) { setResult(null); setLoading(false); return; }
     setLoading(true);
     setError('');
     const params = new URLSearchParams({ window: win, scope });
