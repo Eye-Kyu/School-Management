@@ -110,6 +110,9 @@ function LoginPageInner() {
     const destination = next || (role && ROLE_HOME[role]) || '/';
 
     router.push(destination);
+    // Bug 5 fix: force fresh render to avoid Next.js Router Cache serving
+    // stale shared (dashboard) layout with previous user's name/role.
+    router.refresh();
   }
 
   async function handleSendOtp(e: React.FormEvent) {
@@ -155,6 +158,9 @@ function LoginPageInner() {
     const destination = next || (role && ROLE_HOME[role]) || '/';
 
     router.push(destination);
+    // Bug 5 fix: force fresh render to avoid Next.js Router Cache serving
+    // stale shared (dashboard) layout with previous user's name/role.
+    router.refresh();
   }
 
   return (
