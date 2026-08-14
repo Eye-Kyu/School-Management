@@ -3,6 +3,7 @@ import { Badge } from '@school-manager/ui';
 import { serverApiFetch } from '@/lib/api/server';
 import { ApiError } from '@/lib/api';
 import { timeAgo } from '@/lib/utils/timeAgo';
+import { createRealClient } from '@/lib/supabase/server';
 
 // =============================================================================
 // Student 360 — read-only pastoral-care aggregation (Bucket 1, PR 4a)
@@ -71,7 +72,27 @@ export default async function Student360Page({ params }: { params: { studentId: 
     data = await serverApiFetch<Student360View>(`/students/${params.studentId}/student-360`);
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) {
-      redirect('/dashboard?denied=student-360');
+      // Bug 1 fix (exploration-bugs Phase 1 audit): this used to redirect to
+      // /dashboard, which has never been a route in this app — the ensuing
+      // 404 -> middleware -> role-home bounce silently dropped the
+      // ?denied= param, so DeniedBanner never mounted. DeniedBanner is only
+      // wired at /teacher and /admin (the only two roles that can ever
+      // reach Student 360, per B1-4a), so resolve the caller's own role
+      // here — same auth.getUser() + users-table-by-auth_id lookup pattern
+      // as (dashboard)/layout.tsx uses for identity — and redirect there
+      // directly. Falls back to '/' (middleware still routes to the
+      // correct role home, just without the banner) if the lookup fails or
+      // returns a role other than the two Student 360 ever gates on.
+      const supabase = createRealClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userRow } = user
+        ? await supabase.from('users').select('role').eq('auth_id', user.id).maybeSingle()
+        : { data: null };
+      const role = userRow?.role as string | undefined;
+      if (role === 'ADMIN' || role === 'TEACHER') {
+        redirect(`/${role.toLowerCase()}?denied=student-360`);
+      }
+      redirect('/');
     }
     if (err instanceof ApiError && err.status === 404) {
       notFound();
