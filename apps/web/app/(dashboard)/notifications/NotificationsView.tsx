@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Badge } from '@school-manager/ui';
-import { apiFetch } from '@/lib/api';
 import { timeAgo } from '@/lib/utils/timeAgo';
+import { useMarkFeedItemsRead, useMarkConversationRead, useMarkAllFeedRead } from '@/lib/hooks/useDashboardFeed';
 import AcknowledgeButton from './AcknowledgeButton';
 
 type AlertItem = {
@@ -28,17 +28,29 @@ export default function NotificationsView({
   const [conversations, setConversations] = useState(initialConversations);
   const markedRef = useRef(false);
 
-  async function markAlertRead(item: AlertItem) {
+  // Bug 2 fix (exploration-bugs Phase 1 audit): these used to fire raw
+  // apiFetch calls that never invalidated the shared TanStack Query cache
+  // AvatarDropdown's unread badge reads from — so the badge stayed stale
+  // until an unrelated refetch trigger. Switched to the same mutation
+  // hooks DashboardFeed.tsx already uses correctly (they invalidate both
+  // the feed and unread-count query keys in onSettled). Local
+  // alerts/conversations state below is untouched — it drives this page's
+  // own render and isn't affected by the shared cache either way.
+  const markItemsRead = useMarkFeedItemsRead();
+  const markConversation = useMarkConversationRead();
+  const markAllRead = useMarkAllFeedRead();
+
+  function markAlertRead(item: AlertItem) {
     setAlerts((prev) => prev.map((a) => a.id === item.id ? { ...a, isRead: true } : a));
     // Handles both plain notification ids and `pm:`-prefixed platform-message
     // ids in one call — the backend splits them, so the client no longer
     // needs to know which table each id belongs to.
-    await apiFetch('/dashboard-feed/read', { method: 'PATCH', body: JSON.stringify({ ids: [item.id] }) }).catch(() => {});
+    markItemsRead.mutate([item.id]);
   }
 
-  async function markConversationRead(conv: ConversationItem) {
+  function markConversationRead(conv: ConversationItem) {
     setConversations((prev) => prev.filter((c) => c.id !== conv.id));
-    await apiFetch(`/messaging/conversations/${conv.id}/read`, { method: 'PATCH' }).catch(() => {});
+    markConversation.mutate(conv.id);
   }
 
   // Mark everything currently visible-and-unread as read after 3s of the page being open.
@@ -47,13 +59,10 @@ export default function NotificationsView({
     const t = setTimeout(() => {
       markedRef.current = true;
       const unreadAlerts = initialAlerts.filter((a) => !a.isRead);
-      const allIds = unreadAlerts.map((a) => a.id); // already `pm:`-prefixed where applicable
-      if (allIds.length > 0) apiFetch('/dashboard-feed/read', { method: 'PATCH', body: JSON.stringify({ ids: allIds }) }).catch(() => {});
-      if (unreadAlerts.length > 0) setAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })));
-
-      for (const c of initialConversations) {
-        apiFetch(`/messaging/conversations/${c.id}/read`, { method: 'PATCH' }).catch(() => {});
+      if (unreadAlerts.length > 0 || initialConversations.length > 0) {
+        markAllRead.mutate({ alerts: initialAlerts, conversations: initialConversations });
       }
+      if (unreadAlerts.length > 0) setAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })));
       if (initialConversations.length > 0) setConversations([]);
     }, 3000);
     return () => clearTimeout(t);

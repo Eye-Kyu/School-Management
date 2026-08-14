@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api';
+import { useMarkConversationRead } from '@/lib/hooks/useDashboardFeed';
 import UserAvatar from '@/components/UserAvatar';
 
 type Message = {
@@ -33,6 +34,12 @@ export default function ThreadClient({
   const [error, setError] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+  // Bug 2 fix (exploration-bugs Phase 1 audit): raw apiFetch here never
+  // invalidated the shared TanStack Query cache the unread badge reads
+  // from. Destructuring `mutate` (stable across renders, per TanStack
+  // Query) rather than holding the whole hook result keeps both effects'
+  // dependency arrays accurate without causing extra re-fires.
+  const { mutate: markConversationRead } = useMarkConversationRead();
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -41,8 +48,8 @@ export default function ThreadClient({
 
   // Mark as read on mount
   useEffect(() => {
-    apiFetch(`/messaging/conversations/${conversationId}/read`, { method: 'PATCH' }).catch(() => {});
-  }, [conversationId]);
+    markConversationRead(conversationId);
+  }, [conversationId, markConversationRead]);
 
   // Real-time subscription
   useEffect(() => {
@@ -64,14 +71,14 @@ export default function ThreadClient({
           });
           // Mark read if this is incoming
           if (msg.sender_id !== currentUserId) {
-            apiFetch(`/messaging/conversations/${conversationId}/read`, { method: 'PATCH' }).catch(() => {});
+            markConversationRead(conversationId);
           }
         },
       )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [conversationId, currentUserId, supabase]);
+  }, [conversationId, currentUserId, supabase, markConversationRead]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
