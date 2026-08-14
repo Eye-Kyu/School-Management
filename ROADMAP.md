@@ -71,7 +71,7 @@
 - [ ] Parent account creation UI (admin links parent → student)
 - [ ] Student CSV bulk import (row-level error reporting)
 - [ ] CI pipeline (lint + test + build on every PR)
-- [ ] Deploy `apps/web` to Vercel, `apps/api` to Railway/Fly
+- [x] Deploy `apps/web` to Vercel, `apps/api` to Railway
 - [ ] Sentry error tracking wired on both apps
 - [ ] p95 page load < 2 s on mid-range Android over 3G
 - [ ] Pilot school onboarding session (record it)
