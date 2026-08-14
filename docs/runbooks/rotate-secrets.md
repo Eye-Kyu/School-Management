@@ -15,7 +15,7 @@ service role keys first since they bypass RLS.
 ### 1. `SUPABASE_SERVICE_ROLE_KEY`
 
 - Supabase dashboard -> Project Settings -> API -> Reset service role key.
-- Update in Vercel, Railway/Fly, GitHub Actions secrets.
+- Update in Vercel, Railway, GitHub Actions secrets.
 - Restart API processes.
 
 ### 2. `JWT_SECRET`
