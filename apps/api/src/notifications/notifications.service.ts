@@ -317,7 +317,7 @@ export class NotificationsService {
 
   private async logMessageSend(row: PendingNotif, phone: string, result: { providerMessageId: string | null; cost: string | null }) {
     const { amount, currency } = this.parseSmsCost(result.cost);
-    await this.supabase.admin.from('message_send_log').insert({
+    const { error } = await this.supabase.admin.from('message_send_log').insert({
       id: randomUUID(),
       school_id: row.school_id,
       notification_id: row.id,
@@ -329,10 +329,13 @@ export class NotificationsService {
       cost_currency: currency,
       cost_raw: result.cost,
     });
+    if (error) {
+      console.error('[NotificationsService] message_send_log insert failed:', error.message);
+    }
   }
 
   private async logSmsAbandoned(row: PendingNotif, reason: string) {
-    await this.supabase.admin.from('audit_logs').insert({
+    const { error } = await this.supabase.admin.from('audit_logs').insert({
       id: randomUUID(),
       school_id: row.school_id,
       user_id: row.recipient_id,
@@ -341,6 +344,9 @@ export class NotificationsService {
       entity_id: row.id,
       metadata: { notifType: row.type, reason },
     });
+    if (error) {
+      console.error('[NotificationsService] audit_logs sms_abandoned insert failed:', error.message);
+    }
   }
 
   /** Parses Africa's Talking's raw cost string (e.g. "KES 0.8000") without guessing on an unexpected shape. */
