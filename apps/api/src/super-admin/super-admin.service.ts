@@ -586,6 +586,8 @@ export class SuperAdminService {
         password: tempPassword,
         email_confirm: true,
         user_metadata: { school_id: schoolId, role: 'ADMIN', full_name: input.admin.fullName },
+        // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+        app_metadata: { school_id: schoolId, role: 'ADMIN' },
       });
       if (authError) throw new BadRequestException(authError.message);
       authUserId = authData.user.id;

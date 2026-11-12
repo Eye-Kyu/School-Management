@@ -1,0 +1,213 @@
+# Security audit fix tracker (audit run 1, 2026-11-11)
+
+Source: the source-only security audit at commit `540e4a0`. Full report, traces and validation plans are in `C:\Users\PC\security-audit-skill\Student-Management\run-1\` (`REPORT.md`, `NEEDS-VALIDATION.md`).
+
+Every item began as a **needs-validation lead**. None was confirmed by running code during the audit.
+
+**How boxes are used**
+- A box is ticked only when the fix is implemented **and** has been verified (tests, type check, or a live before/after query for migrations, per CLAUDE.md §6).
+- An item whose fix is written but still needs a migration applied or a live check stays unticked, with status `implemented: pending verification`.
+
+**Progress:** 35 fixed and verified, 4 implemented and pending verification, 8 open (of 47). Updated 2026-11-12 after V2 migrations 097-101 and live e2e.
+
+Priority (order to work in; not a severity):
+- **V1:** cross-tenant, platform-tier, unauthenticated, or money-movement boundary.
+- **V2:** privilege or data boundary inside one school.
+- **V3:** narrower preconditions or limited effect.
+
+## V1
+
+- [x] **SA-01**: Assist-mode token is not bound to the authenticated presenter, so any authenticated account holding it gets service-role ACADEMIC_DATA writes in the target school
+  - Fingerprint: `api-assist-token-not-bound-to-presenter`
+  - Where: `apps/api/src/classes/classes.controller.ts:52` → `apps/api/src/classes/classes.service.ts:171`
+  - Status: fixed: AuthGuard only honours an assist token when the authenticated caller is the minting, active SUPER_ADMIN. AssistScopeGuard and the receipt path also check grant ownership. Verified by `apps/api/src/__tests__/security-audit-v1.spec.ts` (SA-01 cases). Files: `apps/api/src/auth/auth.guard.ts`, `common/guards/assist-scope.guard.ts`, `payments/receipt-pdf.service.ts`.
+- [x] **SA-02**: Assignments Storage bucket is public and has an unscoped SELECT policy, so any submission file in it is readable across schools and by anonymous users
+  - Fingerprint: `assignments-bucket-public-unscoped-read`
+  - Where: `apps/web/app/(dashboard)/student/assignments/StudentAssignmentsClient.tsx:67` → `supabase/migrations/20260527000013_assignments_bucket.sql:8`
+  - Status: fixed and verified. Migration 095 is applied: storage.buckets shows public=false, and the 3 new policies are limited to {authenticated}. In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12): a student can upload into their own auth-uid folder and not into someone else's; the public URL is not served; the class's teacher and the uploading student can sign the file; a same-school teacher who does not teach the class, a teacher of another school, and anon cannot. Component test `apps/web/components/SubmissionFileLink.test.tsx` covers signed-URL opening. Note: teacher access follows the assignments SELECT policy (_054), so it is the class's teachers, not every teacher in the school.
+- [ ] **SA-03**: CI pull_request workflow passes the production DB URL, Supabase service-role key and JWT_SECRET to PR-head code with no approval gate
+  - Fingerprint: `ci-pull-request-production-secrets`
+  - Where: `.github/workflows/ci.yml:10` → `.github/workflows/ci.yml:97`
+  - Status: implemented: pending verification. Done 2026-11-12: the `ci.yml` split (build job gets no secrets; `database-checks` job bound to environment `ci-database`; `permissions: contents: read`), and the `ci-database` environment created via gh API with required reviewer `Eye-Kyu`. Remaining, in order: (1) create a non-production Supabase project and set its 5 values as **environment** secrets (`gh secret set NAME --env ci-database`); (2) merge the workflow change to `main` and confirm a run pauses for approval; (3) only then delete the 5 repository-level secrets (DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET). Deleting them earlier would break CI on main, which still runs the old workflow. Context: the repo is public; Actions default token is already read-only; fork-PR approval is `first_time_contributors` (consider `all_external_contributors`).
+- [x] **SA-04**: Daraja C2B confirm callback accepts forged payments from any source unless MPESA_DARAJA_MODE is exactly 'production'
+  - Fingerprint: `daraja-ip-check-default-sandbox-fail-open`
+  - Where: `apps/api/src/payments/payments.controller.ts:75` → `apps/api/src/payments/payments.service.ts:231`
+  - Status: fixed: the IP allowlist is enforced unless `MPESA_DARAJA_MODE` is exactly `sandbox`, and never skipped when `NODE_ENV=production`; an empty allowlist rejects everything. Verified by the SA-04 unit tests. Owner: make sure Railway has `MPESA_ALLOWED_IPS` set to the Safaricom ranges, or Paybill callbacks will be rejected.
+- [x] **SA-05**: Hardcoded 'default-secret' fallback for NOTIFICATION_HMAC_SECRET allows forgery of unauthenticated receipt-download and unsubscribe tokens
+  - Fingerprint: `notification-hmac-default-secret-token-forgery`
+  - Where: `apps/api/src/payments/payments.controller.ts:86` → `apps/api/src/payments/receipt-pdf.service.ts:70`
+  - Status: fixed: the `default-secret` fallback is removed (`common/notification-secret.ts`). Without a real secret, receipt and unsubscribe tokens are rejected and links are not issued. Verified by the SA-05 unit tests. Owner: set `NOTIFICATION_HMAC_SECRET` (`openssl rand -hex 32`) in Railway.
+- [x] **SA-06**: Paystack reconciliation credits the caller-supplied amount instead of the amount Paystack charged
+  - Fingerprint: `paystack-reconcile-unverified-amount`
+  - Where: `apps/api/src/payments/payments.controller.ts:33` → `apps/api/src/payments/payments.service.ts:183`
+  - Status: fixed: initialize validates a positive amount and stores the actually-charged (clamped) amount. Reconcile credits only when the Paystack-reported amount and currency match, otherwise it marks FAILED and logs `amount_or_currency_mismatch`. Verified by the SA-06 unit tests.
+- [x] **SA-07**: Paystack webhook verifies HMAC with an empty key when PAYSTACK_SECRET_KEY is unset or empty, so anyone can forge charge.success
+  - Fingerprint: `paystack-webhook-empty-secret-fallback`
+  - Where: `apps/api/src/payments/payments.controller.ts:49` → `apps/api/src/payments/payments.service.ts:183`
+  - Status: fixed: the webhook and verify paths refuse to run without `PAYSTACK_SECRET_KEY`. Verified by the SA-07 unit test (a signature forged with an empty key is ignored).
+- [x] **SA-08**: Platform-table RLS write policies check only the SUPER_ADMIN role and ignore platform_permissions, so a permission-restricted SuperAdmin can write grants and invoices directly through PostgREST
+  - Fingerprint: `platform-rls-role-only-ignores-permissions`
+  - Where: `supabase/migrations/20260722000034_privileged_access.sql:53` → `apps/api/src/common/guards/assist-scope.guard.ts:33`
+  - Status: fixed and verified. Migration 094 is applied, and pg_policies shows only SELECT policies on the 11 platform tables. In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12), a SUPER_ADMIN JWT is refused (42501) when inserting a privileged-access grant directly and when writing school_modules, and can still read. API writes go through the service role and are unaffected by RLS.
+- [x] **SA-09**: record_quiz_grade() authorizes TEACHER/ADMIN callers of any school and fails open when the caller predicate is NULL
+  - Fingerprint: `record-quiz-grade-caller-not-bound-to-attempt-school`
+  - Where: `supabase/migrations/20260728000083_record_quiz_grade_linkage.sql:22` → `supabase/migrations/20260728000082_write_linked_grade.sql:41`
+  - Status: fixed and verified. Migration 093 is applied. In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12): a TEACHER of another school and a school-less SUPER_ADMIN (the NULL predicate case) are refused; the owning STUDENT and a TEACHER of the attempt's school succeed. The existing `quiz-grade-cascade` and `gradebook-linking` suites pass.
+- [x] **SA-10**: Signup trigger provisions SUPER_ADMIN (all 18 platform permissions) or any school role from client-controlled user_metadata
+  - Fingerprint: `signup-trigger-trusts-user-metadata-role`
+  - Where: `apps/web/lib/supabase/client.ts:12` → `apps/api/src/common/guards/super-admin.guard.ts:25`
+  - Status: fixed and verified. Migrations 092 + 096 are applied: pg_proc shows the trigger reads only app_metadata, and pg_trigger shows `on_auth_user_app_metadata_updated` next to `on_auth_user_created`. In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12), users created with user_metadata role SUPER_ADMIN, or ADMIN plus school_id, get NO users row; an app_metadata TEACHER gets exactly one row; an app_metadata SUPER_ADMIN gets all 18 permissions (the createSuperAdmin path). The `cross-tenant` e2e passes 156/156 (its fixtures were switched from user_metadata to app_metadata, matching the API). Owner: still decide whether public sign-up should be enabled at all.
+- [x] **SA-11**: users_update_self RLS policy lets any authenticated user rewrite their own role, school_id and platform_permissions (self-promotion to SUPER_ADMIN or ADMIN, or a move into another tenant)
+  - Fingerprint: `users-update-self-unrestricted-columns`
+  - Where: `apps/web/lib/supabase/client.ts:13` → `apps/api/src/common/guards/platform-permission.guard.ts:39`
+  - Status: fixed and verified. Migration 091 is applied and the trigger `users_block_privileged_self_update` is present and enabled (pg_trigger). In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12), a STUDENT JWT PATCH of role (SUPER_ADMIN/ADMIN), school_id, platform_permissions or is_active is refused with 42501 and the row is unchanged; profile edits and service-role updates still work.
+- [x] **SA-12**: Web assist-mode service-role reads trust any valid sm_assist cookie, unbound to the session user or live grant state, and the cookie survives sign-out
+  - Fingerprint: `web-assist-reads-unbound-to-session-and-grant`
+  - Where: `apps/web/app/api/assist-mode/enter/route.ts:18` → `apps/web/lib/supabase/server.ts:149`
+  - Status: fixed and verified (unit). `apps/web/lib/__tests__/assistScopedClient.test.ts` drives the real proxy in `lib/supabase/server.ts`: reads are denied for a different signed-in user, with no session (cookie outliving sign-out), for an ENDED or expired grant, and for a grant owned by another super-admin; the query never executes. The owning super-admin gets school-scoped rows. Recommended: one staging click-through.
+- [x] **SA-13**: Assist-mode web client returns all tenants' rows for tables outside DIRECT_SCHOOL_ID_TABLES (payment_transactions, teachers, guardians, deletion_requests, api_tokens)
+  - Fingerprint: `web-assist-scoped-client-unlisted-tables-unfiltered`
+  - Where: `apps/web/middleware.ts:81` → `apps/web/app/(dashboard)/admin/payments/page.tsx:12`
+  - Status: fixed and verified (unit). `assistScopedClient.test.ts` shows an unlisted table (`guardians`) returns ASSIST_DENIED without being queried, allowlisted tables get `.eq(school_id, target)`, `schools` is scoped by id, and writes stay blocked.
+- [x] **SA-14**: write_linked_grade SECURITY DEFINER RPC lets any authenticated user upsert any grade in any school
+  - Fingerprint: `write-linked-grade-missing-caller-authorization`
+  - Where: `supabase/migrations/20260728000082_write_linked_grade.sql:51` → `supabase/migrations/20260728000082_write_linked_grade.sql:41`
+  - Status: fixed and verified. Migration 093 is applied: pg_proc shows the school check, anon has no EXECUTE, and only the owner can call `_write_linked_grade_internal`. In the live e2e `apps/api/test/security-audit-v1.e2e-spec.ts` (2026-11-12): STUDENT refused, TEACHER of another school refused, anon refused, the internal writer is not callable, and a TEACHER of the assessment's school succeeds. The existing `homework-grading`, `gradebook-linking` and `quiz-grade-cascade` e2e suites still pass.
+
+## V2
+
+- [x] **SA-15**: Quiz, quiz-question, assignment and submission write RLS ignores the creating teacher, and created_by_id can be rewritten to take over creator-gated actions
+  - Fingerprint: `academic-authoring-rls-no-creator-binding`
+  - Where: `supabase/migrations/20260721000024_module_enforcement_rls.sql:63` → `supabase/migrations/20260527000012_gradebook.sql:86`
+  - Status: fixed and verified. Migration 099: quiz/question/assignment writes require the creator (ADMIN unchanged); grading is limited to the creator or a teacher of the class; a column allowlist stops a grading teacher rewriting submitted content. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): another teacher cannot edit/delete the quiz, rewrite created_by_id, add questions, grade its attempts, edit the assignment or insert one under another creator; a class teacher can grade but gets 42501 rewriting content.
+- [ ] **SA-16**: Document chunks bypass per-document scope and soft-delete visibility (AI tutor retrieval and chunks_select RLS)
+  - Fingerprint: `ai-tutor-chunk-retrieval-ignores-document-scope`
+  - Where: `apps/api/src/ai/ai.controller.ts:155` → `apps/api/src/ai/ai.service.ts:216`
+  - Status: implemented: pending verification. `ai.controller.ts` tutor now reads chunks through the caller's client, so `chunks_select` (verified under SA-23) applies. To finish: one tutor question on staging as a student, confirming answers don't cite staff-only or deleted documents (needs an Anthropic call, so not run here).
+- [x] **SA-17**: A teacher can overwrite scores on, or delete, another subject's DIRECT assessment in any class they teach
+  - Fingerprint: `assessments-teacher-write-not-bound-to-subject`
+  - Where: `apps/api/src/assessments/assessments.controller.ts:64` → `apps/api/src/assessments/assessments.service.ts:183`
+  - Status: fixed and verified. Migration 097: assessment update/delete and grade insert/update require ADMIN, the owning teacher, or a subject_assignments row for that class+subject; deleteAssessment reports a filtered delete. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a different-subject teacher cannot write grades, edit or delete; the subject teacher can.
+- [x] **SA-18**: Any authenticated school member can insert forged audit_logs rows attributed to other users or with a NULL school
+  - Fingerprint: `audit-logs-insert-unbound-actor`
+  - Where: `apps/web/app/(dashboard)/teacher/assignments/[id]/SubmissionsClient.tsx:61` → `apps/api/src/audit-logs/audit-logs.service.ts:31`
+  - Status: fixed and verified. Migration 098: INSERT requires school_id = current_school_id() AND user_id = current_user_id() (all API/web inserts already did this). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): inserts as another user or with NULL school are refused; own row works.
+- [x] **SA-19**: Students and parents can read every behaviour_points row in their school, bypassing the leaderboard top-20 privacy cap
+  - Fingerprint: `behaviour-points-select-school-wide`
+  - Where: `supabase/migrations/20260721000024_module_enforcement_rls.sql:116` → `supabase/migrations/20260527000017_behaviour_safety.sql:12`
+  - Status: fixed and verified. Migration 098: bp_select is staff school-wide, a student sees own rows, a parent sees their child's. The leaderboard now aggregates server-side (service role, caller's school, top-N cap kept). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): student and parent see only their own; teacher sees all.
+- [x] **SA-20**: A class teacher can rewrite any column of their own class row through direct PostgREST, including is_active, name and school_id
+  - Fingerprint: `classes-update-prefect-policy-unrestricted-row`
+  - Where: `supabase/migrations/20260526000006_class_prefect.sql:7` → `supabase/migrations/20260522000001_init.sql:91`
+  - Status: fixed and verified. Migration 098: a column allowlist trigger lets a non-ADMIN class teacher change only prefect_student_id/updated_at. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): class teacher renaming or deactivating gets 42501, setting the prefect works, admin edits work.
+- [x] **SA-21**: Admin/teacher CSV exports do not neutralize spreadsheet formulas in student- and parent-controlled names and phones
+  - Fingerprint: `csv-export-formula-injection`
+  - Where: `apps/api/src/users/users.controller.ts:22` → `apps/api/src/common/csv.ts:3`
+  - Status: fixed and verified (unit). Shared `common/csv.ts` neutralizes formula cells (=, @, tab/CR, and +/- unless numeric); the two duplicate escapers (attendance, assessments) now use it. `csv.spec.ts` and the existing NEMIS export spec pass (phone numbers unchanged).
+- [ ] **SA-22**: Daraja IP allowlist trusts req.ip derived from X-Forwarded-For with a hard-coded trust proxy hop count of 1
+  - Fingerprint: `daraja-ip-allowlist-trust-proxy-hop-count`
+  - Where: `apps/api/src/payments/payments.controller.ts:76` → `apps/api/src/payments/mpesa-daraja.service.ts:65`
+  - Status: implemented: pending verification. `main.ts` reads TRUST_PROXY_HOPS (validated, default 1 = previous behaviour). To finish (owner): confirm Railway's proxy hop count with a staging diagnostic (see the validation plan) and set TRUST_PROXY_HOPS accordingly.
+- [x] **SA-23**: document_chunks RLS lets any same-school user read the full text of class-, subject- and assignment-scoped documents and soft-deleted documents
+  - Fingerprint: `document-chunks-select-ignores-scope-and-soft-delete`
+  - Where: `apps/web/lib/supabase/client.ts:11` → `supabase/migrations/20260721000024_module_enforcement_rls.sql:35`
+  - Status: fixed and verified. Migration 098: chunks_select requires the parent document to be visible under docs_select and not deleted. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a student reads only the school-wide chunk, not the other-class or deleted document's chunks.
+- [x] **SA-24**: Any teacher in a school can delete another teacher's homework, cascading its graded completions
+  - Fingerprint: `homework-remove-missing-creator-check`
+  - Where: `apps/api/src/homework/homework.controller.ts:34` → `apps/api/src/homework/homework.service.ts:185`
+  - Status: fixed and verified. Migration 097 (homework insert/update/delete bound to the owning teacher) and HomeworkService.remove() ownership check. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): another teacher cannot delete, edit, or create homework under someone else's teacher_id; the owner can delete.
+- [x] **SA-25**: Unvalidated ?next= on /login reaches router.push: open redirect after sign-in, with possible javascript: URL execution in the SKULI origin
+  - Fingerprint: `login-next-unvalidated-router-push`
+  - Where: `apps/web/app/(auth)/login/page.tsx:109` → `apps/web/app/(auth)/login/page.tsx:112`
+  - Status: fixed and verified (unit). `lib/utils/safeRedirect.ts` accepts only same-origin relative paths; both login paths use it. `safeRedirect.test.ts` (15 cases: javascript:, data:, //host, /\host, absolute URLs, control chars).
+- [x] **SA-26**: conv_update/msg_update RLS lets a conversation participant re-point conversation parties and forge or rewrite messages
+  - Fingerprint: `messaging-update-policies-unrestricted-columns`
+  - Where: `supabase/migrations/20260527000011_messaging.sql:72` → `apps/api/src/messaging/messaging.service.ts:648`
+  - Status: fixed and verified. Migration 098: allowlist triggers (messages {read_at}, conversations {*_unread_count}). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a participant forging a body or re-pointing teacher_user_id gets 42501; marking read and resetting counters work.
+- [x] **SA-27**: Notification recipients can rewrite their own rows so the dispatcher sends attacker-chosen SMS/email at school cost
+  - Fingerprint: `notifications-update-policy-unrestricted-dispatch-columns`
+  - Where: `supabase/migrations/20260526000009_notifications.sql:21` → `apps/api/src/notifications/notifications.service.ts:271`
+  - Status: fixed and verified. Migration 098: allowlist trigger {is_read, acknowledged_at} for end users; the dispatcher (service role) is unaffected. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): rewriting title/email_sent_at gets 42501; mark read and acknowledge work.
+- [x] **SA-28**: Concurrent Paystack verify/webhook reconciliation can credit one payment to a fee balance more than once
+  - Fingerprint: `paystack-reconcile-nonatomic-double-credit`
+  - Where: `apps/api/src/payments/payments.controller.ts:43` → `apps/api/src/payments/payments.service.ts:231`
+  - Status: fixed (with SA-06): the status transition is now a conditional `UPDATE ... WHERE status <> SUCCESS RETURNING`, so only one concurrent webhook or verify call credits a payment. Verified by the "does not credit twice" unit test.
+- [x] **SA-29**: Any parent in a school can record permission-slip consent for any student in that school and block the real guardian's signature
+  - Fingerprint: `permission-slip-insert-missing-guardian-binding`
+  - Where: `apps/web/app/(dashboard)/parent/permission-slips/PermissionSlipSigner.tsx:58` → `supabase/migrations/20260721000024_module_enforcement_rls.sql:152`
+  - Status: fixed and verified. Migration 098: psr_insert requires parent_user_id = current_user_id() and the student to be the caller's child. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): signing for another family's child or as another user is refused; signing for own child works.
+- [x] **SA-30**: Students set their own quiz score/max_score, and record_quiz_grade copies it into the linked gradebook assessment
+  - Fingerprint: `quiz-attempts-client-supplied-score`
+  - Where: `supabase/migrations/20260723000039_quiz_assignment_deadlines.sql:52` → `supabase/migrations/20260728000083_record_quiz_grade_linkage.sql:65`
+  - Status: fixed and verified. Migrations 099 + 101: quiz_attempts_server_score() ignores any student-supplied score, keeps it NULL while the attempt is open and computes it from the answer key on submit; qa_update gained the WITH CHECK that lets a student submit (101; the missing check dates back to 052, so submissions were probably already failing). QuizTaker no longer sends a score. Live e2e `security-audit-v2.e2e-spec.ts` 22/22 (2026-11-12): a student-supplied score of 99 is ignored, the submission is graded 2/5 server-side (MCQ only), and the teacher can add short-answer marks.
+- [x] **SA-31**: Students can read quiz answer keys (quiz_questions.correct_option_id) directly via PostgREST before submitting
+  - Fingerprint: `quiz-questions-answer-key-readable-by-students`
+  - Where: `apps/web/app/(dashboard)/student/quizzes/[id]/QuizTaker.tsx:5` → `supabase/migrations/20260527000014_quizzes.sql:28`
+  - Status: fixed and verified. Migration 099: SELECT on quiz_questions.correct_option_id revoked from anon/authenticated (other columns re-granted); staff, and students after submitting, use quiz_answer_keys(). Teacher page, builder and student review read keys via the RPC. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a student selecting the key column is refused; RPC works for the teacher and refuses an unsubmitted student.
+- [x] **SA-32**: Any same-school user can read all manual fee payment records (amount, method, reference, notes)
+  - Fingerprint: `rls-payment-records-select-school-wide`
+  - Where: `apps/api/src/payments/payments.controller.ts:152` → `apps/api/src/payments/payments.service.ts:381`
+  - Status: fixed and verified. Migration 098: payment_records readable by ADMIN, the student's guardian, or the student; writes ADMIN only. live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a parent sees only their child's record; a teacher sees none.
+- [x] **SA-33**: Same-school users can rewrite payment_transactions rows that Paystack reconciliation trusts, so a parent can replay credits
+  - Fingerprint: `rls-payment-transactions-update-unrestricted`
+  - Where: `supabase/migrations/20260529000019_payments.sql:61` → `apps/api/src/payments/payments.service.ts:183`
+  - Status: fixed and verified. Migration 098 drops pt_insert/pt_update (all writes are service-role). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): a parent update affects 0 rows (amount unchanged) and insert is refused.
+- [x] **SA-34**: Suspended, inactive, or archived schools keep full access because schools.status is never enforced
+  - Fingerprint: `school-status-not-enforced`
+  - Where: `apps/api/src/super-admin/super-admin.controller.ts:112` → `supabase/migrations/20260522000002_enable_rls.sql:20`
+  - Status: fixed and verified. Migration 100: RLS helpers return NULL unless the user's school is ACTIVE (SUPER_ADMIN unaffected); AuthGuard returns 403 for non-ACTIVE schools (unit tested). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): suspending a school removes its users' RLS access immediately; other schools are unaffected; restoring works.
+- [x] **SA-35**: School admins can point server-side webhook delivery at internal addresses
+  - Fingerprint: `school-webhook-url-ssrf`
+  - Where: `apps/api/src/payments/payments.controller.ts:196` → `apps/api/src/payments/payments.service.ts:403`
+  - Status: fixed and verified (unit). `common/outbound-url.ts`: https only, no credentials, hostname must resolve only to public addresses (private, loopback, link-local, metadata, CGNAT, IPv6-mapped are blocked); checked when saving and again at send time, with no redirect following; event names validated. `outbound-url.spec.ts` (14 cases incl. DNS rebinding).
+- [x] **SA-36**: Student-controlled submissions.file_urls rendered as an unvalidated href in the teacher grading view
+  - Fingerprint: `submissions-file-urls-unvalidated-href`
+  - Where: `apps/web/app/(dashboard)/student/assignments/StudentAssignmentsClient.tsx:79` → `apps/web/app/(dashboard)/teacher/assignments/[id]/SubmissionsClient.tsx:214`
+  - Status: fixed and verified. `SubmissionFileLink.test.tsx` shows a `javascript:` value renders as plain text, with no `<a>` and no button; a storage path opens through a 60 s signed URL. `submissionFiles.test.ts` covers path parsing.
+- [x] **SA-37**: Deactivated tenant users keep full API and RLS access because users.is_active is never enforced
+  - Fingerprint: `users-is-active-not-enforced`
+  - Where: `apps/api/src/platform-users/platform-users.controller.ts:41` → `supabase/migrations/20260522000002_enable_rls.sql:20`
+  - Status: fixed and verified. Migration 100: RLS helpers require users.is_active; AuthGuard returns 403 for deactivated or deleted accounts (unit tested). live e2e `apps/api/test/security-audit-v2.e2e-spec.ts` (2026-11-12): deactivating a user removes their RLS access immediately; reactivating restores it.
+
+## V3
+
+- [ ] **SA-38**: Subject teacher's blocked absence-request review still sends 'approved'/'denied' notifications to the parent and approvers
+  - Fingerprint: `absence-review-rls-filtered-update-false-success`
+  - Where: `apps/api/src/absence-requests/absence-requests.controller.ts:33` → `apps/api/src/absence-requests/absence-requests.service.ts:93`
+  - Status: open
+- [ ] **SA-39**: Approved-absences class-teacher check treats null == null as a match, exposing absence reasons to non-class teachers
+  - Fingerprint: `attendance-approved-absences-null-class-teacher-bypass`
+  - Where: `apps/api/src/students/students.controller.ts:72` → `apps/api/src/attendance/attendance.service.ts:202`
+  - Status: open
+- [ ] **SA-40**: Unauthenticated POST /auth/failed-login lets anyone forge auth.login_failed audit records attributed to any user and school
+  - Fingerprint: `auth-failed-login-audit-forgery`
+  - Where: `apps/api/src/auth/auth.controller.ts:89` → `apps/api/src/auth/auth.controller.ts:99`
+  - Status: open
+- [ ] **SA-41**: Behaviour leaderboard cache key omits the caller's RLS visibility, so one caller's narrowed result is served to the whole school
+  - Fingerprint: `behaviour-leaderboard-cache-key-omits-visibility`
+  - Where: `apps/api/src/behaviour/behaviour.controller.ts:17` → `apps/api/src/behaviour/behaviour.service.ts:86`
+  - Status: implemented: pending verification (with SA-19). The leaderboard aggregate no longer depends on the caller's RLS view, so the cached result is the same for every caller. To finish: compare a student's and a teacher's leaderboard on staging.
+- [ ] **SA-42**: Any teacher can delete any student's behaviour points school-wide, although inserting points is limited to the teacher's own classes
+  - Fingerprint: `behaviour-points-delete-missing-class-scope`
+  - Where: `supabase/migrations/20260721000024_module_enforcement_rls.sql:116` → `supabase/migrations/20260721000024_module_enforcement_rls.sql:125`
+  - Status: open
+- [ ] **SA-43**: Class-teacher RLS rewrite dropped the module_enabled() gate from the behaviour_points and permission_slips INSERT policies
+  - Fingerprint: `class-teacher-rls-module-enabled-dropped`
+  - Where: `apps/web/app/(dashboard)/teacher/behaviour/page.tsx:70` → `supabase/migrations/20260723000043_class_teacher_rls.sql:31`
+  - Status: open
+- [x] **SA-44**: Soft-deleted or deactivated staff keep Student 360 access because currentUserRow ignores users.deleted_at/is_active on an all-service-role path
+  - Fingerprint: `current-user-row-soft-deleted-admin-access`
+  - Where: `apps/api/src/students/students.controller.ts:81` → `apps/api/src/students/student-360.service.ts:231`
+  - Status: fixed and verified (unit, with SA-37). AuthGuard now rejects soft-deleted and deactivated accounts before any service-role path (Student 360 included) runs (`security-audit-v1.spec.ts`).
+- [ ] **SA-45**: Any teacher can send an arbitrary link to any same-school student's guardians through the report-card email endpoint
+  - Fingerprint: `notifications-report-card-email-unvalidated-url`
+  - Where: `apps/api/src/notifications/notifications.controller.ts:47` → `apps/api/src/notifications/notifications.service.ts:420`
+  - Status: open
+- [ ] **SA-46**: PostHog URL masking only covers $current_url on the manual $pageview. SDK default $pathname/$current_url and autocapture still send raw record UUIDs (and possibly clicked element text) to PostHog EU
+  - Fingerprint: `posthog-default-properties-unmasked-ids`
+  - Where: `apps/web/app/layout.tsx:28` → `apps/web/next.config.js:27`
+  - Status: open
+- [ ] **SA-47**: Student 360 class-teacher check passes for any teacher who is not a class teacher when the student has no current class (null === null)
+  - Fingerprint: `student360-null-class-teacher-bypass`
+  - Where: `apps/api/src/students/students.controller.ts:81` → `apps/api/src/students/student-360.service.ts:267`
+  - Status: open

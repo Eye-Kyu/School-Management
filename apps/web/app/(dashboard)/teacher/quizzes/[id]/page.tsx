@@ -21,11 +21,16 @@ export default async function QuizBuilderPage({ params }: { params: { id: string
     : { data: null };
   const canManage = userRow?.role === 'ADMIN' || userRow?.id === quiz.created_by_id;
 
-  const { data: questions } = await supabase
+  // SA-31: the answer key is no longer selectable through PostgREST. Staff
+  // read it via the quiz_answer_keys() accessor and it is merged in here.
+  const { data: rawQuestions } = await supabase
     .from('quiz_questions')
-    .select('id, position, kind, body, options, correct_option_id, points')
+    .select('id, position, kind, body, options, points')
     .eq('quiz_id', params.id)
     .order('position');
+  const { data: keys } = await supabase.rpc('quiz_answer_keys', { p_quiz_id: params.id });
+  const keyMap = new Map(((keys ?? []) as Array<{ question_id: string; correct_option_id: string | null }>).map((k) => [k.question_id, k.correct_option_id]));
+  const questions = (rawQuestions ?? []).map((q) => ({ ...q, correct_option_id: keyMap.get(q.id) ?? null }));
 
   const { data: attempts } = await supabase
     .from('quiz_attempts')

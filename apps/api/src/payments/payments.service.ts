@@ -4,6 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { buildReceiptToken } from './receipt-token';
+import { getNotificationHmacSecret } from '../common/notification-secret';
+import { assertSafeWebhookUrl, UnsafeOutboundUrlError } from '../common/outbound-url';
+
+/** Event types a school webhook may subscribe to (SA-35 input validation). */
+const WEBHOOK_EVENTS = new Set(['grade.posted', 'attendance.marked', 'fee.paid']); // matches ComplianceClient AVAILABLE_EVENTS
 
 @Injectable()
 export class PaymentsService {
@@ -34,7 +39,14 @@ export class PaymentsService {
     if (!feeBalance) throw new BadRequestException('Fee balance not found');
 
     const outstanding = Number(feeBalance.amount_due) - Number(feeBalance.amount_paid);
-    const amountKobo = Math.round(Math.min(input.amount, outstanding) * 100); // Paystack uses smallest unit
+    if (!Number.isFinite(Number(input.amount)) || Number(input.amount) <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+    if (!(outstanding > 0)) throw new BadRequestException('This fee balance has nothing outstanding');
+    const amountKobo = Math.round(Math.min(Number(input.amount), outstanding) * 100); // Paystack uses smallest unit
+    // SA-06: the amount recorded (and later credited) is what Paystack is
+    // actually asked to charge, never the unclamped client-supplied input.
+    const chargedAmount = amountKobo / 100;
 
     const reference = `sm_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
     const currency = input.currency ?? 'KES';
@@ -48,7 +60,7 @@ export class PaymentsService {
       parent_user_id: userRow.id,
       fee_balance_id: input.feeBalanceId,
       reference,
-      amount: input.amount,
+      amount: chargedAmount,
       currency,
       status: 'PENDING',
     });
@@ -62,7 +74,7 @@ export class PaymentsService {
       action: 'payment.initialized',
       entity_type: 'payment_transaction',
       entity_id: transactionId,
-      metadata: { reference, amount: input.amount, feeBalanceId: input.feeBalanceId, provider: 'PAYSTACK' },
+      metadata: { reference, amount: chargedAmount, requestedAmount: input.amount, feeBalanceId: input.feeBalanceId, provider: 'PAYSTACK' },
     });
 
     const secretKey = this.config.get<string>('PAYSTACK_SECRET_KEY');
@@ -105,7 +117,13 @@ export class PaymentsService {
 
   /** Paystack webhook — verifies signature and reconciles the payment. */
   async handleWebhook(signature: string, rawBody: string): Promise<void> {
-    const secretKey = this.config.get<string>('PAYSTACK_SECRET_KEY') ?? '';
+    const secretKey = this.config.get<string>('PAYSTACK_SECRET_KEY');
+    // SA-07: with no secret, HMAC over an empty key is computable by anyone.
+    // Refuse every webhook until the secret is configured.
+    if (!secretKey) {
+      console.error('[PaymentsService] PAYSTACK_SECRET_KEY is not set; rejecting Paystack webhook');
+      return;
+    }
 
     // Verify HMAC-SHA512 signature — constant-time comparison (fold-in fix,
     // Task 6c: the previous plain `!==` was a timing side-channel).
@@ -135,7 +153,8 @@ export class PaymentsService {
 
   /** Called after payment — verify with Paystack and update records. */
   async verifyAndReconcile(reference: string): Promise<void> {
-    const secretKey = this.config.get<string>('PAYSTACK_SECRET_KEY') ?? '';
+    const secretKey = this.config.get<string>('PAYSTACK_SECRET_KEY');
+    if (!secretKey) return; // SA-07: never reconcile against an unauthenticated verify call
     const res = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: { Authorization: `Bearer ${secretKey}` },
     });
@@ -147,23 +166,36 @@ export class PaymentsService {
   private async reconcilePayment(reference: string, providerData: Record<string, unknown>): Promise<void> {
     const { data: txn } = await this.supabase.admin
       .from('payment_transactions')
-      .select('id, school_id, student_id, parent_user_id, fee_balance_id, amount, status')
+      .select('id, school_id, student_id, parent_user_id, fee_balance_id, amount, currency, status')
       .eq('reference', reference)
       .maybeSingle();
 
     if (!txn || txn.status === 'SUCCESS') return; // Already processed — idempotent
 
     const paystackStatus = (providerData.status as string)?.toLowerCase();
-    const newStatus = paystackStatus === 'success' ? 'SUCCESS' : 'FAILED';
+    // SA-06: only credit what the provider confirms was charged, in the
+    // currency the transaction was created with. Paystack reports amount in
+    // the smallest unit (kobo/cents).
+    const providerAmountMinor = Number(providerData.amount);
+    const providerCurrency = typeof providerData.currency === 'string' ? providerData.currency.toUpperCase() : null;
+    const expectedMinor = Math.round(Number(txn.amount) * 100);
+    const amountMatches = Number.isFinite(providerAmountMinor) && providerAmountMinor === expectedMinor
+      && (!txn.currency || providerCurrency === String(txn.currency).toUpperCase());
+    const newStatus = paystackStatus === 'success' && amountMatches ? 'SUCCESS' : 'FAILED';
 
-    await this.supabase.admin
+    // Atomic transition: only the first concurrent webhook/verify call may move
+    // the row out of a non-SUCCESS state, so one payment is credited once.
+    const { data: transitioned } = await this.supabase.admin
       .from('payment_transactions')
       .update({
         status: newStatus,
         provider_payload: providerData,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', txn.id);
+      .eq('id', txn.id)
+      .neq('status', 'SUCCESS')
+      .select('id');
+    if (!transitioned || transitioned.length === 0) return; // another call already reconciled it
 
     if (newStatus !== 'SUCCESS') {
       // Fold-in fix (Task 6b): failed reconciliation was previously unaudited.
@@ -174,7 +206,13 @@ export class PaymentsService {
         action: 'payment.reconciliation_failed',
         entity_type: 'payment_transaction',
         entity_id: txn.id,
-        metadata: { reference, paystackStatus: paystackStatus ?? null },
+        metadata: {
+          reference,
+          paystackStatus: paystackStatus ?? null,
+          ...(paystackStatus === 'success' && !amountMatches
+            ? { reason: 'amount_or_currency_mismatch', expectedMinor, providerAmountMinor, providerCurrency }
+            : {}),
+        },
       });
       return;
     }
@@ -254,10 +292,15 @@ export class PaymentsService {
       : { data: null };
     const studentName = (student?.user as unknown as { full_name: string } | null)?.full_name ?? 'your child';
 
-    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
-    const token = buildReceiptToken(secret, input.paymentId, input.paymentType);
+    // SA-05: never sign with a guessable fallback key. Without a real secret,
+    // the notification goes out without a receipt link (parents can still
+    // download the receipt while signed in).
+    const secret = getNotificationHmacSecret(this.config);
     const apiUrl = this.config.get<string>('NEXT_PUBLIC_API_URL') ?? 'http://localhost:4000';
-    const receiptUrl = `${apiUrl}/payments/receipts/${input.paymentId}?type=${input.paymentType}&token=${token}`;
+    const receiptUrl = secret
+      ? `${apiUrl}/payments/receipts/${input.paymentId}?type=${input.paymentType}&token=${buildReceiptToken(secret, input.paymentId, input.paymentType)}`
+      : null;
+    if (!secret) console.error('[PaymentsService] NOTIFICATION_HMAC_SECRET is not set; sending payment notification without a receipt link');
     const amountStr = `KES ${input.amount.toLocaleString()}`;
 
     await this.notifications.queue([{
@@ -267,14 +310,16 @@ export class PaymentsService {
       title: `Payment confirmed — ${amountStr}`,
       // Kept short deliberately — this is the one of the two that goes out
       // over SMS too, and Africa's Talking bills per 160-char segment.
-      body: `${amountStr} received for ${studentName}. Receipt: ${receiptUrl}`,
+      body: receiptUrl ? `${amountStr} received for ${studentName}. Receipt: ${receiptUrl}` : `${amountStr} received for ${studentName}.`,
       metadata: { paymentId: input.paymentId, paymentType: input.paymentType, receiptUrl },
     }, {
       schoolId: input.schoolId,
       recipientId: input.recipientId,
       type: 'RECEIPT_AVAILABLE',
       title: 'Your receipt is ready',
-      body: `Your receipt for the ${amountStr} payment for ${studentName} is ready to download: ${receiptUrl}`,
+      body: receiptUrl
+        ? `Your receipt for the ${amountStr} payment for ${studentName} is ready to download: ${receiptUrl}`
+        : `Your receipt for the ${amountStr} payment for ${studentName} is ready to download from your fees page.`,
       metadata: { paymentId: input.paymentId, paymentType: input.paymentType, receiptUrl },
     }]);
   }
@@ -400,16 +445,23 @@ export class PaymentsService {
       let errorMsg: string | null = null;
 
       try {
+        // SA-35: re-validate at send time. Rows can also be written directly
+        // through PostgREST, and DNS can change after the endpoint was saved.
+        // Never follow redirects, which could bounce the request to an internal host.
+        await assertSafeWebhookUrl(ep.url);
         const res = await fetch(ep.url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': sig },
           body,
+          redirect: 'manual',
           signal: AbortSignal.timeout(10_000),
         });
         statusCode = res.status;
         if (!res.ok) errorMsg = `HTTP ${res.status}`;
       } catch (err) {
-        errorMsg = err instanceof Error ? err.message : 'Request failed';
+        errorMsg = err instanceof UnsafeOutboundUrlError
+          ? `Blocked: ${err.message}`
+          : err instanceof Error ? err.message : 'Request failed';
       }
 
       await this.supabase.admin.from('webhook_deliveries').insert({
@@ -430,6 +482,18 @@ export class PaymentsService {
   }
 
   async createWebhookEndpoint(accessToken: string, input: { url: string; events: string[] }) {
+    // SA-35: validate before storing. Dispatch re-checks anyway.
+    if (typeof input?.url !== 'string' || input.url.length > 2048) throw new BadRequestException('A webhook url is required');
+    try {
+      await assertSafeWebhookUrl(input.url);
+    } catch (err) {
+      if (err instanceof UnsafeOutboundUrlError) throw new BadRequestException(err.message);
+      throw err;
+    }
+    if (!Array.isArray(input.events) || input.events.length === 0
+      || !input.events.every((e) => typeof e === 'string' && WEBHOOK_EVENTS.has(e))) {
+      throw new BadRequestException(`events must be a non-empty list of: ${[...WEBHOOK_EVENTS].join(', ')}`);
+    }
     const client = this.supabase.forUser(accessToken);
     const userRow = await this.supabase.currentUserRow(accessToken, 'school_id') as { school_id: string } | null;
     const secret = randomUUID().replace(/-/g, '');

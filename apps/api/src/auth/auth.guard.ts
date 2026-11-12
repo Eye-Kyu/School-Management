@@ -15,6 +15,7 @@ import {
   ExecutionContext,
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
@@ -64,6 +65,27 @@ export class AuthGuard implements CanActivate {
     };
     req.accessToken = token;
 
+    // SA-37 / SA-34 (security audit 2026-11): a deactivated or deleted
+    // account, or any non-SUPER_ADMIN account whose school is not ACTIVE, is
+    // refused here. Many API paths read through the service-role client, which
+    // bypasses RLS, so the RLS helpers alone (migration 100) don't cover them.
+    // A caller with no users row yet (mid-provisioning) is let through as
+    // before; services resolve and reject them individually.
+    const { data: caller } = await this.supabase.admin
+      .from('users')
+      .select('id, role, is_active, deleted_at, school:schools(status)')
+      .eq('auth_id', data.user.id)
+      .maybeSingle();
+    if (caller) {
+      if (caller.deleted_at || caller.is_active === false) {
+        throw new ForbiddenException('This account has been deactivated');
+      }
+      const school = (Array.isArray(caller.school) ? caller.school[0] : caller.school) as { status?: string } | null;
+      if (caller.role !== 'SUPER_ADMIN' && school && school.status !== 'ACTIVE') {
+        throw new ForbiddenException('This school is not active');
+      }
+    }
+
     // Assist mode: an invalid/expired/missing token just means "not in
     // assist mode" — never blocks the request. Downstream write paths that
     // require an active assist context check for it explicitly and re-verify
@@ -72,7 +94,20 @@ export class AuthGuard implements CanActivate {
     if (typeof assistHeader === 'string' && assistHeader) {
       try {
         const payload = await this.jwt.verifyAsync(assistHeader);
-        req.assistContext = AssistModeClaimsSchema.parse(payload);
+        const claims = AssistModeClaimsSchema.parse(payload);
+        // SA-01: an assist token is a bearer credential minted for ONE
+        // super-admin. Only honour it when the authenticated caller IS that
+        // super-admin (and is still an active, non-deleted SUPER_ADMIN), so a
+        // leaked token cannot be replayed under any other account.
+        if (
+          caller
+          && caller.id === claims.superAdminUserId
+          && caller.role === 'SUPER_ADMIN'
+          && caller.is_active !== false
+          && !caller.deleted_at
+        ) {
+          req.assistContext = claims;
+        }
       } catch {
         // Expired, tampered, or shape-mismatched — silently treated as "no assist context."
       }

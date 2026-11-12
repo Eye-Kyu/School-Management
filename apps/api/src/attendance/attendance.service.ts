@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException, BadRequestException 
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { csvCell } from '../common/csv'; // SA-21: shared, formula-safe
 import type {
   AttendanceQuery,
   AttendanceRosterQuery,
@@ -678,7 +679,3 @@ export class AttendanceService {
   }
 }
 
-function csvCell(v: string): string {
-  return v.includes(',') || v.includes('"') || v.includes('\n')
-    ? `"${v.replace(/"/g, '""')}"` : v;
-}

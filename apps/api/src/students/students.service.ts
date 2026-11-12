@@ -114,6 +114,8 @@ export class StudentsService {
         role: 'STUDENT',
         full_name: input.fullName,
       },
+      // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+      app_metadata: { school_id: school.id, role: 'STUDENT' },
     });
     if (authError) throw new BadRequestException(authError.message);
 
@@ -301,6 +303,8 @@ export class StudentsService {
         password: tempPassword,
         email_confirm: true,
         user_metadata: { school_id: school.id, role: 'STUDENT', full_name: parsed.data.fullName },
+        // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+        app_metadata: { school_id: school.id, role: 'STUDENT' },
       });
       if (authError) {
         rows.push({ row: i + 1, result: 'error', admissionNo: parsed.data.admissionNo, message: authError.message });

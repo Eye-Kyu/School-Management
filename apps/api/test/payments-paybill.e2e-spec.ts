@@ -6,10 +6,11 @@
 // the paybill dashboard endpoints, and cross-tenant isolation across all of
 // it. Uses the real Supabase project — creates isolated test data in
 // beforeAll, fires real HTTP requests via supertest, deletes everything in
-// afterAll. MPESA_DARAJA_MODE is unset in this environment (defaults to
-// 'sandbox'), so MpesaDarajaService.isRequestFromSafaricom() is permissive
-// and callbacks can be posted directly from the test runner's own loopback
-// address — matches the AFRICASTALKING_MODE precedent from sub-sprint 1a.
+// afterAll. MPESA_DARAJA_MODE is set explicitly to 'sandbox' below (since
+// SA-04, an unset mode enforces the IP allowlist), so
+// MpesaDarajaService.isRequestFromSafaricom() is permissive and callbacks can
+// be posted directly from the test runner's own loopback address. This
+// matches the AFRICASTALKING_MODE precedent from sub-sprint 1a.
 //
 // confirm() persists synchronously but fires reconciliation without
 // awaiting it (deliberately — the parent-facing signal is Safaricom's own
@@ -26,6 +27,9 @@ import { randomUUID } from 'crypto';
 import ws from 'ws';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+
+// SA-04: an unset MPESA_DARAJA_MODE now fails closed, so opt into sandbox explicitly.
+process.env.MPESA_DARAJA_MODE ??= 'sandbox';
 
 const TIMEOUT = 30_000;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

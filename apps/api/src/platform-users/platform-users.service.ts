@@ -107,6 +107,8 @@ export class PlatformUsersService {
       password: tempPassword,
       email_confirm: true,
       user_metadata: { role: 'SUPER_ADMIN', full_name: input.fullName },
+      // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+      app_metadata: { role: 'SUPER_ADMIN' },
     });
     if (authError) throw new BadRequestException(authError.message);
 

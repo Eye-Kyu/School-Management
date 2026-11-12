@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import PDFDocument from 'pdfkit';
 import { SupabaseService } from '../supabase/supabase.service';
 import { verifyReceiptToken } from './receipt-token';
+import { getNotificationHmacSecret } from '../common/notification-secret';
 import { AssistModeClaims as AssistModeClaimsSchema } from '../common/assist-mode';
 
 export type ReceiptType = 'paystack' | 'paybill' | 'manual';
@@ -64,8 +65,9 @@ export class ReceiptPdfService {
     const data = await this.resolveReceiptData(paymentId, type);
 
     if (tokenParam) {
-      const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
-      const verified = verifyReceiptToken(secret, tokenParam);
+      // SA-05: fail closed when no real signing secret is configured.
+      const secret = getNotificationHmacSecret(this.config);
+      const verified = secret ? verifyReceiptToken(secret, tokenParam) : null;
       if (verified && verified.paymentId === paymentId && verified.paymentType === type) {
         return this.renderPdf(data);
       }
@@ -94,10 +96,13 @@ export class ReceiptPdfService {
         const claims = AssistModeClaimsSchema.parse(payload);
         const { data: grant } = await this.supabase.admin
           .from('privileged_access_grants')
-          .select('status, expires_at, scopes, target_school_id')
+          .select('super_admin_user_id, status, expires_at, scopes, target_school_id')
           .eq('id', claims.accessGrantId)
           .maybeSingle();
+        // SA-01: bind the token and its grant to the authenticated caller.
         isAssistAdmin = !!grant
+          && claims.superAdminUserId === caller.id
+          && grant.super_admin_user_id === caller.id
           && grant.status === 'ACTIVE'
           && new Date(grant.expires_at).getTime() > Date.now()
           && (grant.scopes as string[]).includes('FINANCIAL_DATA')

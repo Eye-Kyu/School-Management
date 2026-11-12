@@ -190,10 +190,11 @@ export default function QuizBuilderClient({
       options: validOptions ?? null,
       correct_option_id: isMCQ ? correctId || null : null,
       points: parseFloat(points) || 1,
-    }).select('id, position, kind, body, options, correct_option_id, points').single();
+      // SA-31: correct_option_id can be written but not selected back; keep it from the payload.
+    }).select('id, position, kind, body, options, points').single();
 
     if (data) {
-      setQuestions((p) => [...p, data as any]);
+      setQuestions((p) => [...p, { ...data, correct_option_id: isMCQ ? correctId || null : null } as any]);
       setAdding(null); setBody(''); setPoints('1'); setCorrectId('');
       setOptions([{ id: uid(), text: '' }, { id: uid(), text: '' }, { id: uid(), text: '' }, { id: uid(), text: '' }]);
     }
@@ -220,8 +221,8 @@ export default function QuizBuilderClient({
         options: q.kind === 'MCQ' && q.options ? q.options : null,
         correct_option_id: q.kind === 'MCQ' ? (q.correct_option_id ?? null) : null,
         points: q.points ?? 1,
-      }).select('id, position, kind, body, options, correct_option_id, points').single();
-      if (data) setQuestions((p) => [...p, data as Question]);
+      }).select('id, position, kind, body, options, points').single(); // SA-31: key not selectable
+      if (data) setQuestions((p) => [...p, { ...data, correct_option_id: q.kind === 'MCQ' ? (q.correct_option_id ?? null) : null } as Question]);
     }
   }
 

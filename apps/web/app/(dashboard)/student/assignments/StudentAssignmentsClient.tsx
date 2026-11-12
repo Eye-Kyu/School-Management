@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import AttachedDocumentsSection from '@/components/documents/AttachedDocumentsSection';
+import SubmissionFileLink from '@/components/SubmissionFileLink';
+import { ASSIGNMENTS_BUCKET, buildSubmissionPath } from '@/lib/assignments/submissionFiles';
 
 type Assignment = {
   id: string; title: string; description: string | null; due_date: string;
@@ -59,18 +61,21 @@ export default function StudentAssignmentsClient({
       const { data: authData } = await supabase.auth.getUser();
       const { data: userRow } = await supabase.from('users').select('id, school_id').eq('auth_id', authData?.user?.id ?? '').maybeSingle();
 
-      // Upload files to Supabase Storage
+      // Upload files to the private `assignments` bucket (SA-02). The folder
+      // must be the uploader's auth uid (Storage RLS), and file_urls stores the
+      // object PATH, never a public URL. Files are opened via signed URLs.
+      const authUid = authData?.user?.id;
+      if (files.length > 0 && !authUid) throw new Error('You must be signed in to upload files');
       const fileUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         setUploadProgress(`Uploading file ${i + 1}/${files.length}…`);
         const file = files[i]!;
-        const path = `submissions/${assignment.id}/${studentId}/${Date.now()}_${file.name}`;
+        const path = buildSubmissionPath(assignment.id, authUid!, file.name);
         const { error: uploadErr } = await supabase.storage
-          .from('assignments')
+          .from(ASSIGNMENTS_BUCKET)
           .upload(path, file, { upsert: true, contentType: file.type });
         if (uploadErr) throw new Error(`File upload failed: ${uploadErr.message}`);
-        const { data: { publicUrl } } = supabase.storage.from('assignments').getPublicUrl(path);
-        fileUrls.push(publicUrl);
+        fileUrls.push(path);
       }
 
       setUploadProgress('');
@@ -189,10 +194,7 @@ export default function StudentAssignmentsClient({
                     <ul className="space-y-1">
                       {sub.file_urls.map((url, i) => (
                         <li key={i}>
-                          <a href={url} target="_blank" rel="noopener noreferrer"
-                            className="text-sm text-blue-600 hover:underline">
-                            {url.split('/').pop()}
-                          </a>
+                          <SubmissionFileLink value={url} />
                         </li>
                       ))}
                     </ul>

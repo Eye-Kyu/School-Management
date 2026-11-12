@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AfricasTalkingClient } from './africastalking.client';
 import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
+import { getNotificationHmacSecret } from '../common/notification-secret';
 
 // Notification types SMS applies to. Deliberately narrow (not "every type
 // with sms_enabled=true") — a preference row alone isn't trusted to gate a
@@ -441,7 +442,9 @@ export class NotificationsService {
   }
 
   async handleUnsubscribe(token: string): Promise<{ message: string }> {
-    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+    // SA-05: no secret configured means no link can be trusted.
+    const secret = getNotificationHmacSecret(this.config);
+    if (!secret) return { message: 'Invalid unsubscribe link.' };
     let uid: string, type: string;
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf8');
@@ -465,8 +468,11 @@ export class NotificationsService {
     return { message: `You have been unsubscribed from ${type.toLowerCase().replace(/_/g, ' ')} email notifications.` };
   }
 
-  private buildUnsubscribeToken(userId: string, notifType: string): string {
-    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+  private buildUnsubscribeToken(userId: string, notifType: string): string | undefined {
+    // SA-05: without a real secret, send the email without an unsubscribe link
+    // rather than one anyone could forge.
+    const secret = getNotificationHmacSecret(this.config);
+    if (!secret) return undefined;
     const sig = createHmac('sha256', secret).update(`${userId}:${notifType}`).digest('hex');
     return Buffer.from(JSON.stringify({ uid: userId, type: notifType, sig })).toString('base64url');
   }

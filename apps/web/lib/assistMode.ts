@@ -35,7 +35,8 @@ export function verifyAssistTokenSync(token: string | undefined | null): AssistM
     if (expectedSig.length !== actualSig.length || !timingSafeEqual(expectedSig, actualSig)) return null;
 
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString('utf8'));
-    if (typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()) return null;
+    // SA-12: a token without exp is never valid (it would otherwise never expire).
+    if (typeof payload.exp !== 'number' || payload.exp * 1000 < Date.now()) return null;
 
     return AssistModeClaims.parse(payload);
   } catch {

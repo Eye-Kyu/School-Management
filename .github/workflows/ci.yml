@@ -10,6 +10,10 @@ on:
   pull_request:
     branches: [main]
 
+# SA-03 (security audit 2026-11): least-privilege GITHUB_TOKEN for every job.
+permissions:
+  contents: read
+
 # Cancel in-flight runs when a PR is updated.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -69,11 +73,6 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: RLS check
-        run: bash infra/scripts/check-rls.sh
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
       # Tests the checker itself, against the throwaway service container
       # above — never against production. Added after BUG-5 (docs/bug-triage.md)
       # found the checker had a false-negative blind spot with zero test
@@ -85,9 +84,62 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:dev@localhost:5432/check_migrations_test
 
+      - name: Build
+        run: pnpm build
+        env:
+          # Auth pages call createBrowserClient() during SSR prerender; placeholder
+          # values satisfy the non-empty check without making real network calls.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key-ci-build-only
+
+  # ---------------------------------------------------------------------------
+  # SA-03 (security audit 2026-11): checks that need database / service-role
+  # credentials live in their own job, bound to the `ci-database` GitHub
+  # environment, so PR-head code in the `build` job never receives them.
+  #
+  # REQUIRED owner setup (Settings > Environments > ci-database):
+  #   1. Add required reviewers, so every run waits for an approval.
+  #   2. Move DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+  #      SUPABASE_ANON_KEY and JWT_SECRET from repository secrets into this
+  #      environment's secrets, and delete the repository-level copies.
+  #   3. Point them at a NON-production Supabase project. The e2e suite
+  #      creates and deletes real rows.
+  # Without step 1 GitHub auto-creates the environment with no protection, so
+  # the job still runs, but secrets remain separated from the build job.
+  # ---------------------------------------------------------------------------
+  database-checks:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ci-database
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @school-manager/db generate
+
+      - name: RLS check
+        run: bash infra/scripts/check-rls.sh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       # Runs on every CI build, not just PRs touching supabase/migrations/ —
-      # matches the RLS check's own always-on precedent above rather than
-      # adding a new path-filtering action dependency for a check this cheap.
+      # matches the RLS check's own always-on precedent rather than adding a
+      # new path-filtering action dependency for a check this cheap.
       - name: Migration parity check
         run: bash infra/scripts/check-migrations.sh
         env:
@@ -100,11 +152,3 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-
-      - name: Build
-        run: pnpm build
-        env:
-          # Auth pages call createBrowserClient() during SSR prerender; placeholder
-          # values satisfy the non-empty check without making real network calls.
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key-ci-build-only
