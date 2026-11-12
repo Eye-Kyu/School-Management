@@ -44,9 +44,10 @@ export class NotificationsController {
   @Post('report-card-email')
   sendReportCardEmail(
     @CurrentUser() user: { id: string },
-    @Body() body: { studentId: string; termId: string; reportCardUrl: string },
+    // reportCardUrl is still accepted from older clients but ignored (SA-45).
+    @Body() body: { studentId: string; termId: string; reportCardUrl?: string },
   ) {
-    return this.svc.sendReportCardEmail(user.id, body.studentId, body.termId, body.reportCardUrl);
+    return this.svc.sendReportCardEmail(user.id, body.studentId, body.termId);
   }
 
   // Public — no AuthGuard; signature is verified inside the service

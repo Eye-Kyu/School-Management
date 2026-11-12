@@ -75,16 +75,21 @@ export class AbsenceRequestsService {
       throw new BadRequestException('A reason is required to deny an absence request');
     }
 
-    const { error } = await client.from('absence_requests').update({
+    const { data: updated, error } = await client.from('absence_requests').update({
       status: input.action === 'APPROVE' ? 'APPROVED' : 'DENIED',
       reviewed_by_user_id: me.id, reviewed_at: new Date().toISOString(),
       denial_reason: input.action === 'DENY' ? input.denialReason : null,
       updated_at: new Date().toISOString(),
-    }).eq('id', requestId);
-    // RLS restricts UPDATE to Admin or the student's Class Teacher — a
-    // Subject Teacher with no relation to this student's class is rejected
-    // by Postgres, surfaced here as a clean error.
-    if (error) throw new ForbiddenException("You don't have permission to review this request");
+    }).eq('id', requestId).eq('status', 'PENDING').select('id');
+    // RLS restricts UPDATE to Admin or the student's Class Teacher. A Subject
+    // Teacher's UPDATE is filtered to zero rows rather than raising, so an
+    // empty result must be treated as a refusal (SA-38): otherwise the
+    // audit row and the "approved/denied" notifications below would go out
+    // for a decision that never happened. The status filter also stops two
+    // concurrent reviews both notifying.
+    if (error || !updated || updated.length === 0) {
+      throw new ForbiddenException("You don't have permission to review this request");
+    }
 
     await this.audit(client, accessToken, reqRow.school_id, input.action === 'APPROVE' ? 'absence.approve' : 'absence.deny', 'absence_request', requestId, {
       denial_reason: input.action === 'DENY' ? input.denialReason : undefined,

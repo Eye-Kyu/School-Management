@@ -8,7 +8,7 @@ Every item began as a **needs-validation lead**. None was confirmed by running c
 - A box is ticked only when the fix is implemented **and** has been verified (tests, type check, or a live before/after query for migrations, per CLAUDE.md §6).
 - An item whose fix is written but still needs a migration applied or a live check stays unticked, with status `implemented: pending verification`.
 
-**Progress:** 35 fixed and verified, 4 implemented and pending verification, 8 open (of 47). Updated 2026-11-12 after V2 migrations 097-101 and live e2e.
+**Progress:** 43 fixed and verified, 4 implemented and pending verification, 0 open (of 47). Updated 2026-11-12 after migration 102 and the V3 code fixes.
 
 Priority (order to work in; not a severity):
 - **V1:** cross-tenant, platform-tier, unauthenticated, or money-movement boundary.
@@ -171,43 +171,43 @@ Priority (order to work in; not a severity):
 
 ## V3
 
-- [ ] **SA-38**: Subject teacher's blocked absence-request review still sends 'approved'/'denied' notifications to the parent and approvers
+- [x] **SA-38**: Subject teacher's blocked absence-request review still sends 'approved'/'denied' notifications to the parent and approvers
   - Fingerprint: `absence-review-rls-filtered-update-false-success`
   - Where: `apps/api/src/absence-requests/absence-requests.controller.ts:33` → `apps/api/src/absence-requests/absence-requests.service.ts:93`
-  - Status: open
-- [ ] **SA-39**: Approved-absences class-teacher check treats null == null as a match, exposing absence reasons to non-class teachers
+  - Status: fixed and verified (unit). AbsenceRequestsService.review() now filters on status PENDING and selects the updated row; zero rows (RLS-filtered or already decided) is a 403 before any audit row or notification. unit `security-audit-v3.spec.ts` (2026-11-12): a filtered update throws and queues nothing.
+- [x] **SA-39**: Approved-absences class-teacher check treats null == null as a match, exposing absence reasons to non-class teachers
   - Fingerprint: `attendance-approved-absences-null-class-teacher-bypass`
   - Where: `apps/api/src/students/students.controller.ts:72` → `apps/api/src/attendance/attendance.service.ts:202`
-  - Status: open
-- [ ] **SA-40**: Unauthenticated POST /auth/failed-login lets anyone forge auth.login_failed audit records attributed to any user and school
+  - Status: fixed and verified (unit). The class-teacher check refuses when the student has no current class, so null never matches null. unit `security-audit-v3.spec.ts` (2026-11-12).
+- [x] **SA-40**: Unauthenticated POST /auth/failed-login lets anyone forge auth.login_failed audit records attributed to any user and school
   - Fingerprint: `auth-failed-login-audit-forgery`
   - Where: `apps/api/src/auth/auth.controller.ts:89` → `apps/api/src/auth/auth.controller.ts:99`
-  - Status: open
+  - Status: fixed and verified (unit). POST /auth/failed-login stays unauthenticated (the caller has just failed to sign in) but now records an unattributed row (user_id, school_id, entity_id NULL; metadata.client_reported = true), so a forged report can't land on a real user's or school's audit trail. Input must be an email string (254 chars max), and each IP is limited to 10 per minute in-process. The system-health count still works. unit `security-audit-v3.spec.ts` (2026-11-12): a matching email is not attributed, non-email input is ignored, and the cap holds.
 - [ ] **SA-41**: Behaviour leaderboard cache key omits the caller's RLS visibility, so one caller's narrowed result is served to the whole school
   - Fingerprint: `behaviour-leaderboard-cache-key-omits-visibility`
   - Where: `apps/api/src/behaviour/behaviour.controller.ts:17` → `apps/api/src/behaviour/behaviour.service.ts:86`
   - Status: implemented: pending verification (with SA-19). The leaderboard aggregate no longer depends on the caller's RLS view, so the cached result is the same for every caller. To finish: compare a student's and a teacher's leaderboard on staging.
-- [ ] **SA-42**: Any teacher can delete any student's behaviour points school-wide, although inserting points is limited to the teacher's own classes
+- [x] **SA-42**: Any teacher can delete any student's behaviour points school-wide, although inserting points is limited to the teacher's own classes
   - Fingerprint: `behaviour-points-delete-missing-class-scope`
   - Where: `supabase/migrations/20260721000024_module_enforcement_rls.sql:116` → `supabase/migrations/20260721000024_module_enforcement_rls.sql:125`
-  - Status: open
-- [ ] **SA-43**: Class-teacher RLS rewrite dropped the module_enabled() gate from the behaviour_points and permission_slips INSERT policies
+  - Status: fixed and verified. Migration 102 (applied): bp_delete is limited to ADMIN, the awarding teacher (teacher_id = current_teacher_id()) or the student's class teacher. Live e2e `apps/api/test/security-audit-v3.e2e-spec.ts`: 4 attack cases succeeded before applying, 7/7 pass after (2026-11-12). An unrelated teacher deletes 0 rows; the awarding teacher, class teacher and admin can delete.
+- [x] **SA-43**: Class-teacher RLS rewrite dropped the module_enabled() gate from the behaviour_points and permission_slips INSERT policies
   - Fingerprint: `class-teacher-rls-module-enabled-dropped`
   - Where: `apps/web/app/(dashboard)/teacher/behaviour/page.tsx:70` → `supabase/migrations/20260723000043_class_teacher_rls.sql:31`
-  - Status: open
+  - Status: fixed and verified. Migration 102 (applied) restores module_enabled() on bp_insert and ps_insert, and binds a teacher's bp_insert to their own teacher_id. Live e2e `apps/api/test/security-audit-v3.e2e-spec.ts`: 4 attack cases succeeded before applying, 7/7 pass after (2026-11-12). With the modules off, teacher points and admin slips are refused; with them on, both work; a teacher can't award points in a colleague's name.
 - [x] **SA-44**: Soft-deleted or deactivated staff keep Student 360 access because currentUserRow ignores users.deleted_at/is_active on an all-service-role path
   - Fingerprint: `current-user-row-soft-deleted-admin-access`
   - Where: `apps/api/src/students/students.controller.ts:81` → `apps/api/src/students/student-360.service.ts:231`
   - Status: fixed and verified (unit, with SA-37). AuthGuard now rejects soft-deleted and deactivated accounts before any service-role path (Student 360 included) runs (`security-audit-v1.spec.ts`).
-- [ ] **SA-45**: Any teacher can send an arbitrary link to any same-school student's guardians through the report-card email endpoint
+- [x] **SA-45**: Any teacher can send an arbitrary link to any same-school student's guardians through the report-card email endpoint
   - Fingerprint: `notifications-report-card-email-unvalidated-url`
   - Where: `apps/api/src/notifications/notifications.controller.ts:47` → `apps/api/src/notifications/notifications.service.ts:420`
-  - Status: open
-- [ ] **SA-46**: PostHog URL masking only covers $current_url on the manual $pageview. SDK default $pathname/$current_url and autocapture still send raw record UUIDs (and possibly clicked element text) to PostHog EU
+  - Status: fixed and verified (unit). The report-card link is built server-side from NEXT_PUBLIC_APP_URL + /print/report-card/<studentId>?termId=<termId>, and any client-supplied reportCardUrl is ignored. The term must belong to the caller's school. A TEACHER must be the student's class teacher; ADMIN is unchanged. unit `security-audit-v3.spec.ts` (2026-11-12).
+- [x] **SA-46**: PostHog URL masking only covers $current_url on the manual $pageview. SDK default $pathname/$current_url and autocapture still send raw record UUIDs (and possibly clicked element text) to PostHog EU
   - Fingerprint: `posthog-default-properties-unmasked-ids`
   - Where: `apps/web/app/layout.tsx:28` → `apps/web/next.config.js:27`
-  - Status: open
-- [ ] **SA-47**: Student 360 class-teacher check passes for any teacher who is not a class teacher when the student has no current class (null === null)
+  - Status: fixed and verified (unit). posthog.init now has a before_send hook (`scrubAnalyticsEvent` in lib/analytics/maskUrl.ts) that masks UUIDs in $current_url, $pathname, $referrer, $prev_pageview_pathname, the $initial_* properties (incl. $set/$set_once), $elements[].attr__href/href and $elements_chain on every event. mask_all_text and mask_all_element_attributes are on, so autocapture sends no element text. `scrubAnalyticsEvent.test.ts` (3 cases). Owner follow-up (optional): confirm in PostHog Live events that new $pathname values show :id.
+- [x] **SA-47**: Student 360 class-teacher check passes for any teacher who is not a class teacher when the student has no current class (null === null)
   - Fingerprint: `student360-null-class-teacher-bypass`
   - Where: `apps/api/src/students/students.controller.ts:81` → `apps/api/src/students/student-360.service.ts:267`
-  - Status: open
+  - Status: fixed and verified (unit). Same null-class guard as SA-39 in Student360Service. unit `security-audit-v3.spec.ts` (2026-11-12).

@@ -43,7 +43,10 @@ export class Student360Service {
     } else if (userRow.role === 'TEACHER') {
       const { data: teacherRow } = await this.supabase.admin
         .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
-      if (teacherRow?.is_class_teacher_of !== student.current_class_id) {
+      // SA-39/SA-47: a student with no current class has no class teacher;
+      // without the first clause null === null would admit any teacher who
+      // is not a class teacher.
+      if (!student.current_class_id || teacherRow?.is_class_teacher_of !== student.current_class_id) {
         // Covers subject-teacher-only and Department Head alike — neither
         // has a distinct code path, both simply aren't this student's Class
         // Teacher (Department Head access is deferred, no precedent exists

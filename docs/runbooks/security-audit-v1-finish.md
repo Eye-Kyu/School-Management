@@ -1,6 +1,6 @@
 # Finishing the V1 security fixes: owner checklist
 
-Companion to `docs/audits/security-audit-2026-11-tracker.md`. Code for every V1 and V2 item is on branch `security/audit-v1-fixes`. Migrations 091–101 are **already applied to the live database**. The steps below are the parts only you can do: credentials, dashboards, approvals and the deploy.
+Companion to `docs/audits/security-audit-2026-11-tracker.md`. Code for every V1 and V2 item is on branch `security/audit-v1-fixes`. Migrations 091–102 are **already applied to the live database**. The steps below are the parts only you can do: credentials, dashboards, approvals and the deploy.
 
 > **Deploy soon (step 2).** Migration 099 hides the quiz answer key from direct reads. The live teacher quiz page and the student quiz review page still run code that selects `correct_option_id`, so they error until the web app on this branch is deployed. Quiz submission itself works now (migration 101).
 
@@ -141,3 +141,4 @@ Earlier e2e runs (July–August) left fixtures in the live database: 60 orphan S
 | SA-04, SA-05, SA-07 | Step 1, so the deploy doesn't switch Paybill or receipts off |
 | SA-02, SA-10, SA-12, SA-13 and everything else | Step 2, so production runs the fixed code |
 | SA-10 | Step 6: decide on sign-up |
+| SA-46 (optional) | After deploy, check PostHog → Activity → Live events: new `$pathname` values should show `:id`, not raw UUIDs |

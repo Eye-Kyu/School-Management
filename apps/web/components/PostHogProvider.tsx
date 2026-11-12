@@ -15,7 +15,7 @@ import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider, usePostHog } from 'posthog-js/react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, Suspense } from 'react';
-import { maskDynamicSegments } from '@/lib/analytics/maskUrl';
+import { maskDynamicSegments, scrubAnalyticsEvent } from '@/lib/analytics/maskUrl';
 
 if (typeof window !== 'undefined') {
   if (!process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV !== 'production') {
@@ -36,6 +36,12 @@ if (typeof window !== 'undefined') {
       capture_pageleave: true,
       capture_exceptions: true,
       person_profiles: 'identified_only',
+      // SA-46: mask record IDs in every URL-bearing property of every event
+      // (not only the manual $pageview), and never send clicked elements'
+      // text or attributes, which can contain student names.
+      before_send: (event) => scrubAnalyticsEvent(event),
+      mask_all_text: true,
+      mask_all_element_attributes: true,
       debug: process.env.NODE_ENV === 'development',
     });
   }
