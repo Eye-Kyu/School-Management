@@ -34,7 +34,7 @@ describe('scrubAnalyticsEvent (SA-46)', () => {
         $elements_chain: `a:href="/students/${ID}/360"nth-child="1"`,
       },
     });
-    const el = (ev.properties!.$elements as Array<Record<string, string>>)[0];
+    const el = (ev.properties!.$elements as Array<Record<string, string>>)[0]!;
     expect(el.attr__href).toBe('/students/:id/360');
     expect(el.href).toBe('/students/:id');
     expect(ev.properties!.$elements_chain).not.toContain(ID);

@@ -124,7 +124,7 @@ describe('AuthController.logFailedLogin (SA-40)', () => {
     await ctrl.logFailedLogin({ email: 'Victim@School.test' }, { ip: '203.0.113.7' });
     const inserts = writes.filter(([t, op]) => t === 'audit_logs' && op === 'insert');
     expect(inserts).toHaveLength(1);
-    expect(inserts[0][2]).toMatchObject({ user_id: null, school_id: null, entity_id: null, metadata: { email: 'victim@school.test', client_reported: true } });
+    expect(inserts[0]![2]).toMatchObject({ user_id: null, school_id: null, entity_id: null, metadata: { email: 'victim@school.test', client_reported: true } });
   });
 
   it('ignores non-email input', async () => {
@@ -163,7 +163,7 @@ describe('NotificationsService.sendReportCardEmail (SA-45)', () => {
     const queue = jest.spyOn(svc, 'queue').mockResolvedValue(undefined as never);
     jest.spyOn(svc as unknown as { sendEmail: () => Promise<void> }, 'sendEmail').mockResolvedValue(undefined);
     await svc.sendReportCardEmail('auth-admin', 'stu-1', 'term-1');
-    const sent = queue.mock.calls[0][0][0] as { body: string; metadata: { reportCardUrl: string } };
+    const sent = queue.mock.calls[0]![0][0] as unknown as { body: string; metadata: { reportCardUrl: string } };
     expect(sent.metadata.reportCardUrl).toBe('https://app.skuli.test/print/report-card/stu-1?termId=term-1');
     expect(sent.body).toContain('https://app.skuli.test/print/report-card/stu-1');
   });
