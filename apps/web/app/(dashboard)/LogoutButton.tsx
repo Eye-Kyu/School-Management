@@ -13,6 +13,8 @@ export default function LogoutButton() {
     apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.logout' }) }).catch(() => {});
     posthog.capture('user_signed_out');
     posthog.reset();
+    // SA-12: drop any assist-mode cookie so it cannot outlive this session.
+    await fetch('/api/assist-mode/exit', { method: 'POST' }).catch(() => {});
     await supabase.auth.signOut();
     router.refresh();
     router.push('/login');

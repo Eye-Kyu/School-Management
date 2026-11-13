@@ -61,6 +61,8 @@ async function createAuthUsersBatched(
           password: TEST_PASSWORD,
           email_confirm: true,
           user_metadata: { school_id: schoolId, role: person.role },
+          // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+          app_metadata: { school_id: schoolId, role: person.role },
         });
         if (authErr || !authData.user) throw new Error(`createUser failed for ${person.email}: ${authErr?.message}`);
         stateFile.appendAuthUserId(authData.user.id);

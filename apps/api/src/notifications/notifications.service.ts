@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AfricasTalkingClient } from './africastalking.client';
 import { invalidateUserFeedCache } from '../notifications-aggregation/feed-cache';
+import { getNotificationHmacSecret } from '../common/notification-secret';
 
 // Notification types SMS applies to. Deliberately narrow (not "every type
 // with sms_enabled=true") — a preference row alone isn't trusted to gate a
@@ -375,7 +376,6 @@ export class NotificationsService {
     authUserId: string,
     studentId: string,
     termId: string,
-    reportCardUrl: string,
   ): Promise<{ sent: number }> {
     // Resolve caller identity (id-filtered by JWT auth_id — safe on the
     // service-role client) and enforce that only staff can trigger this.
@@ -393,12 +393,35 @@ export class NotificationsService {
     // with no check at all.
     const { data: studentRow } = await this.supabase.admin
       .from('students')
-      .select('user:users!user_id(full_name), school_id')
+      .select('user:users!user_id(full_name), school_id, current_class_id')
       .eq('id', studentId)
       .maybeSingle();
     if (!studentRow || studentRow.school_id !== caller.school_id) {
       throw new NotFoundException('Student not found');
     }
+
+    // SA-45: a teacher may only email the guardians of a student in the class
+    // they are class teacher of (null class never matches), mirroring the
+    // Student 360 rule. Admins are unrestricted within their school.
+    if (caller.role === 'TEACHER') {
+      const { data: teacherRow } = await this.supabase.admin
+        .from('teachers').select('is_class_teacher_of').eq('user_id', caller.id).maybeSingle();
+      const studentClassId = (studentRow as { current_class_id: string | null }).current_class_id;
+      if (!studentClassId || teacherRow?.is_class_teacher_of !== studentClassId) {
+        throw new ForbiddenException('You are not the class teacher of this student');
+      }
+    }
+
+    // SA-45: the term must belong to the caller's school, and the link is
+    // built here from the configured app URL, never taken from the request,
+    // so the email can only ever point at this school's own report card page.
+    const { data: term } = await this.supabase.admin
+      .from('terms').select('id, school_id').eq('id', termId).maybeSingle();
+    if (!term || term.school_id !== caller.school_id) {
+      throw new NotFoundException('Term not found');
+    }
+    const appUrl = (this.config.get<string>('NEXT_PUBLIC_APP_URL') ?? 'http://localhost:3000').replace(/\/+$/, '');
+    const reportCardUrl = `${appUrl}/print/report-card/${encodeURIComponent(studentId)}?termId=${encodeURIComponent(termId)}`;
 
     // Get student's guardians — safe now that ownership is verified above
     const { data: guardians } = await this.supabase.admin
@@ -441,7 +464,9 @@ export class NotificationsService {
   }
 
   async handleUnsubscribe(token: string): Promise<{ message: string }> {
-    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+    // SA-05: no secret configured means no link can be trusted.
+    const secret = getNotificationHmacSecret(this.config);
+    if (!secret) return { message: 'Invalid unsubscribe link.' };
     let uid: string, type: string;
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf8');
@@ -465,8 +490,11 @@ export class NotificationsService {
     return { message: `You have been unsubscribed from ${type.toLowerCase().replace(/_/g, ' ')} email notifications.` };
   }
 
-  private buildUnsubscribeToken(userId: string, notifType: string): string {
-    const secret = this.config.get<string>('NOTIFICATION_HMAC_SECRET') ?? 'default-secret';
+  private buildUnsubscribeToken(userId: string, notifType: string): string | undefined {
+    // SA-05: without a real secret, send the email without an unsubscribe link
+    // rather than one anyone could forge.
+    const secret = getNotificationHmacSecret(this.config);
+    if (!secret) return undefined;
     const sig = createHmac('sha256', secret).update(`${userId}:${notifType}`).digest('hex');
     return Buffer.from(JSON.stringify({ uid: userId, type: notifType, sig })).toString('base64url');
   }

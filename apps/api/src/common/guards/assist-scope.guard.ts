@@ -26,11 +26,14 @@ export class AssistScopeGuard implements CanActivate {
 
     const { data: grant } = await this.supabase.admin
       .from('privileged_access_grants')
-      .select('id, status, expires_at, scopes, target_school_id')
+      .select('id, super_admin_user_id, status, expires_at, scopes, target_school_id')
       .eq('id', req.assistContext.accessGrantId)
       .maybeSingle();
 
-    if (!grant || grant.status !== 'ACTIVE' || new Date(grant.expires_at).getTime() <= Date.now()) {
+    // SA-01: the grant must belong to the super-admin the token was minted for
+    // (AuthGuard already bound that super-admin to the authenticated caller).
+    if (!grant || grant.super_admin_user_id !== req.assistContext.superAdminUserId
+      || grant.status !== 'ACTIVE' || new Date(grant.expires_at).getTime() <= Date.now()) {
       throw new ForbiddenException('Your assist-mode session has ended. Please re-enter assist mode.');
     }
 

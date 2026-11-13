@@ -17,6 +17,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 const TIMEOUT = 30_000;
+const CLEANUP_TIMEOUT = 300_000;
 // Node.js < 22 has no native WebSocket global, which @supabase/realtime-js
 // requires at construction time — see SupabaseService for the full rationale.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,9 +166,15 @@ describe('Cross-tenant isolation (e2e)', () => {
       const email = `${label}-${suffix}@test-isolation.internal`;
       const password = `TestPass${suffix}!`;
 
+      // SA-10 (security audit 2026-11): role/school come from service-role-only
+      // app_metadata, mirroring every API createUser call site. A SUPER_ADMIN
+      // fixture gets its full permission set from handle_new_auth_user() via
+      // migration 20261112000096's app_metadata-update trigger; user_metadata
+      // role is deliberately ignored now.
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email, password, email_confirm: true,
         user_metadata: { school_id: schoolId, role },
+        app_metadata: { role, ...(schoolId ? { school_id: schoolId } : {}) },
       });
       if (authErr) throw new Error(`Auth user create failed (${label}): ${authErr.message}`);
       const authId = authData.user.id;
@@ -354,11 +361,17 @@ describe('Cross-tenant isolation (e2e)', () => {
     if (createdCurriculumId) await admin.from('curricula').delete().eq('id', createdCurriculumId);
     // B1-4b AI entitlement tests create their own extra school
     if (aiEntitlementSchoolId) await admin.from('schools').delete().eq('id', aiEntitlementSchoolId);
+    // School-less fixtures (SUPER_ADMINs) are not removed by the school
+    // cascade, so delete every fixture users row explicitly first. Otherwise
+    // orphan rows accumulate (60+ found from earlier runs, 2026-11-12).
+    if (authUserIds.length) await admin.from('users').delete().in('auth_id', authUserIds);
     for (const id of authUserIds) {
       await admin.auth.admin.deleteUser(id);
     }
     await app.close();
-  }, TIMEOUT);
+  // Cleanup deletes dozens of auth users one by one over the network. 30 s was
+  // too short and left fixtures behind (seen 2026-11-12), so give it room.
+  }, CLEANUP_TIMEOUT);
 
   // ---------------------------------------------------------------------------
   // Students
@@ -579,7 +592,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     // a public.users row automatically from user_metadata — no separate
     // insert needed (and a manual one collides with it on auth_id).
     const { data: authData, error: authErr } = await admin.auth.admin.createUser({
-      email, password, email_confirm: true, user_metadata: { school_id: aiSchoolId, role: 'ADMIN', full_name: 'AI Test Admin' },
+      email, password, email_confirm: true, user_metadata: { school_id: aiSchoolId, role: 'ADMIN', full_name: 'AI Test Admin' }, app_metadata: { school_id: aiSchoolId, role: 'ADMIN' }, // SA-10
     });
     expect(authErr).toBeNull();
     authUserIds.push(authData!.user.id);
@@ -1157,7 +1170,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     const email = `entitlement-admin-${suffix}@test-isolation.internal`;
     const password = `TestPass${suffix}!`;
     const { data: authData, error: authErr } = await admin.auth.admin.createUser({
-      email, password, email_confirm: true, user_metadata: { school_id: entitlementSchoolId, role: 'ADMIN' },
+      email, password, email_confirm: true, user_metadata: { school_id: entitlementSchoolId, role: 'ADMIN' }, app_metadata: { school_id: entitlementSchoolId, role: 'ADMIN' }, // SA-10
     });
     expect(authErr).toBeNull();
     authUserIds.push(authData!.user.id);
@@ -1988,6 +2001,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     const { data: authData2 } = await admin.auth.admin.createUser({
       email: email2, password: password2, email_confirm: true,
       user_metadata: { school_id: schoolAId, role: 'TEACHER' },
+      app_metadata: { school_id: schoolAId, role: 'TEACHER' }, // SA-10: trigger provisions from app_metadata only
     });
     authUserIds.push(authData2!.user.id);
     const { data: teacherUserRow2 } = await admin.from('users').select('id').eq('auth_id', authData2!.user.id).single();
@@ -2211,6 +2225,7 @@ describe('Cross-tenant isolation (e2e)', () => {
     const { data: authData, error: authErr } = await admin.auth.admin.createUser({
       email, password, email_confirm: true,
       user_metadata: { school_id: schoolId, role },
+      app_metadata: { role, ...(schoolId ? { school_id: schoolId } : {}) }, // SA-10, see seedUser()
     });
     if (authErr) throw new Error(`Auth user create failed (${label}): ${authErr.message}`);
     authUserIds.push(authData.user.id);

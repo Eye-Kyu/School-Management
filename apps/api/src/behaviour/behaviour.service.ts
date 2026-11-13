@@ -173,7 +173,15 @@ export class BehaviourService {
       if (!classIds.length) return { rows: [], capped: cap !== null, scope: query.scope, window: query.window, selfRank: null };
     }
 
-    let q = client
+    // SA-19 (security audit 2026-11): bp_select (migration 098) limits
+    // STUDENT/PARENT callers to their own child's rows, so aggregating through
+    // the caller's client would collapse a student's leaderboard to just
+    // themselves. The aggregate is read with service-role, explicitly scoped
+    // to the caller's own schoolId (resolved by the caller of _compute), and
+    // the existing top-N cap is still applied below before anything leaves.
+    // Every caller now gets the same aggregate, which also removes the
+    // per-caller-visibility cache-key problem (behaviour-leaderboard-cache-key lead).
+    let q = this.supabase.admin
       .from('behaviour_points')
       .select(`
         points, category, reason_category, student_id,

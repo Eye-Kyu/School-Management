@@ -31,11 +31,16 @@ export default async function TakeQuizPage({ params }: { params: { id: string } 
   // correctness for MCQ, a genuine learning benefit) instead of re-entering
   // the taker or redirecting away and hiding the student's own answers.
   if (existing?.submitted_at) {
-    const { data: reviewQuestions } = await supabase
+    // SA-31: correct_option_id is not selectable through PostgREST. After
+    // submission the student may see the key via quiz_answer_keys().
+    const { data: rawReviewQuestions } = await supabase
       .from('quiz_questions')
-      .select('id, position, kind, body, options, points, correct_option_id')
+      .select('id, position, kind, body, options, points')
       .eq('quiz_id', params.id)
       .order('position');
+    const { data: keys } = await supabase.rpc('quiz_answer_keys', { p_quiz_id: params.id });
+    const keyMap = new Map(((keys ?? []) as Array<{ question_id: string; correct_option_id: string | null }>).map((k) => [k.question_id, k.correct_option_id]));
+    const reviewQuestions = (rawReviewQuestions ?? []).map((q) => ({ ...q, correct_option_id: keyMap.get(q.id) ?? null }));
 
     return (
       <div className="space-y-6">

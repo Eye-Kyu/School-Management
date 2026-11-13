@@ -44,6 +44,8 @@ export class TeachersService {
         role: 'TEACHER',
         full_name: input.fullName,
       },
+      // SA-10: the signup trigger reads role/school_id from app_metadata (service-role-only).
+      app_metadata: { school_id: school.id, role: 'TEACHER' },
     });
     if (authError) throw new BadRequestException(authError.message);
 

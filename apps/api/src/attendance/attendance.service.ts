@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException, BadRequestException 
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { csvCell } from '../common/csv'; // SA-21: shared, formula-safe
 import type {
   AttendanceQuery,
   AttendanceRosterQuery,
@@ -138,7 +139,10 @@ export class AttendanceService {
     } else if (userRow.role === 'TEACHER') {
       const { data: teacherRow } = await this.supabase.admin
         .from('teachers').select('is_class_teacher_of').eq('user_id', userRow.id).maybeSingle();
-      if (teacherRow?.is_class_teacher_of !== student.current_class_id) {
+      // SA-39/SA-47: a student with no current class has no class teacher;
+      // without the first clause null === null would admit any teacher who
+      // is not a class teacher.
+      if (!student.current_class_id || teacherRow?.is_class_teacher_of !== student.current_class_id) {
         throw new ForbiddenException('You are not the class teacher of this student');
       }
       reasonVisibility = 'ALL';
@@ -678,7 +682,3 @@ export class AttendanceService {
   }
 }
 
-function csvCell(v: string): string {
-  return v.includes(',') || v.includes('"') || v.includes('\n')
-    ? `"${v.replace(/"/g, '""')}"` : v;
-}

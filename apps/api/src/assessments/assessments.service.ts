@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
+import { csvCell } from '../common/csv'; // SA-21: shared, formula-safe
 import type { CreateAssessmentInput, UpsertScoresInput } from '@school-manager/types';
 
 const ASSESSMENT_COLUMNS = 'id, name, max_marks, assessment_date, created_at, term:terms(id, name), class:classes(id, name), subject:subjects(id, name, code)';
@@ -188,8 +189,12 @@ export class AssessmentsService {
 
   async deleteAssessment(accessToken: string, assessmentId: string) {
     const client = this.supabase.forUser(accessToken);
-    const { error } = await client.from('assessments').delete().eq('id', assessmentId);
+    // SA-17: RLS (migration 097) only lets ADMIN, the owning teacher or the
+    // class+subject teacher delete. A filtered delete returns zero rows, so
+    // report that instead of claiming success.
+    const { data: deleted, error } = await client.from('assessments').delete().eq('id', assessmentId).select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!deleted || deleted.length === 0) throw new NotFoundException('Assessment not found');
     return { deleted: true };
   }
 
@@ -227,7 +232,6 @@ export class AssessmentsService {
       assessment: { name: string; max_marks: number; assessment_date: string | null; subject: { name: string } | null };
       student: { admission_no: string; user: { full_name: string } };
     };
-    const csvCell = (v: string) => (v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v);
 
     const { data: classRow } = await client.from('classes').select('name').eq('id', classId).maybeSingle();
     const today = new Date().toISOString().slice(0, 10);

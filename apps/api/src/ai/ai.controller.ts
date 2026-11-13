@@ -155,6 +155,7 @@ export class AiController {
   @Post('tutor')
   async tutor(
     @CurrentUser() user: { id: string },
+    @AccessToken() token: string,
     @Body() body: {
       question: string;
       documentIds?: string[];
@@ -175,7 +176,13 @@ export class AiController {
     // Retrieve relevant curriculum chunks via full-text search — real RAG,
     // not just document titles. Fail-closed: always scoped by school_id,
     // never an unscoped query.
-    let chunksQuery = this.supabase.admin
+    //
+    // SA-16 (security audit 2026-11): read through the CALLER's client, not
+    // service-role. chunks_select (migration 098) only returns chunks whose
+    // parent document the caller can see under docs_select (per-document
+    // scope + soft delete), so a student's tutor never quotes staff-only,
+    // other-class or deleted documents.
+    let chunksQuery = this.supabase.forUser(token)
       .from('document_chunks')
       .select('content, document_id, document:documents(title)')
       .eq('school_id', userRow.school_id)

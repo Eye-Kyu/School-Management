@@ -120,23 +120,17 @@ export default function QuizTaker({
     if (submitting || submitted) return;
     setSubmitting(true);
 
-    // Auto-grade MCQ
-    let score = 0;
-    let maxScore = 0;
-    for (const q of rawQuestions) {
-      maxScore += q.points;
-      if (q.kind === 'MCQ' && (q as any).correct_option_id) {
-        if (answers[q.id] === (q as any).correct_option_id) score += q.points;
-      }
-      // SHORT_ANSWER queued for teacher review — score stays 0 until graded
-    }
-
-    await supabase.from('quiz_attempts').update({
+    // SA-30 (security audit 2026-11): the score is computed in the database
+    // by quiz_attempts_server_score() from the answer key, never sent from
+    // here. MCQ points count immediately; SHORT_ANSWER stays at 0 until a
+    // teacher grades it.
+    const { data: graded } = await supabase.from('quiz_attempts').update({
       submitted_at: new Date().toISOString(),
-      score,
-      max_score: maxScore,
       answers,
-    }).eq('quiz_id', quiz.id).eq('student_id', studentId);
+    }).eq('quiz_id', quiz.id).eq('student_id', studentId)
+      .select('score, max_score').maybeSingle();
+    const score = Number(graded?.score ?? 0);
+    const maxScore = Number(graded?.max_score ?? rawQuestions.reduce((sum, q) => sum + q.points, 0));
 
     // Bucket 1, PR 2b: cascades to the gradebook if (and only if) this quiz
     // is linked — record_quiz_grade() no-ops otherwise. Called on every

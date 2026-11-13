@@ -60,8 +60,18 @@ export class MpesaDarajaService {
    * allowlist. Matches the AFRICASTALKING_MODE precedent from sub-sprint 1a.
    */
   isRequestFromSafaricom(ip: string): boolean {
-    const mode = this.config.get<string>('MPESA_DARAJA_MODE') ?? 'sandbox';
-    if (mode !== 'production') return true;
+    // SA-04 (security audit 2026-11): fail closed. Previously an unset or
+    // misspelled MPESA_DARAJA_MODE meant "sandbox", which skipped the IP check
+    // entirely and let anyone POST a forged C2B confirmation that auto-credits
+    // a fee balance. Now only an explicit 'sandbox' skips the check, and never
+    // when NODE_ENV is 'production'. Any other value enforces the allowlist,
+    // and an empty allowlist matches nothing.
+    const mode = (this.config.get<string>('MPESA_DARAJA_MODE') ?? '').trim().toLowerCase();
+    const isProductionRuntime = this.config.get<string>('NODE_ENV') === 'production';
+    if (mode === 'sandbox' && !isProductionRuntime) return true;
+    if (mode === 'sandbox' && isProductionRuntime) {
+      console.error('[MpesaDarajaService] MPESA_DARAJA_MODE=sandbox ignored because NODE_ENV=production; enforcing IP allowlist');
+    }
     return isIpAllowed(ip, this.config.get<string>('MPESA_ALLOWED_IPS'));
   }
 

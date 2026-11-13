@@ -51,7 +51,10 @@ export async function middleware(request: NextRequest) {
 
   async function getUserRole(): Promise<string | null> {
     if (!user) return null;
-    const metaRole = (user.user_metadata?.role ?? user.app_metadata?.role) as string | undefined;
+    // SA-10: never route on user_metadata.role. Any user can rewrite it with
+    // auth.updateUser({ data }). app_metadata is service-role-only. Older
+    // accounts that only carry user_metadata fall through to the DB lookup below.
+    const metaRole = user.app_metadata?.role as string | undefined;
     if (metaRole && ROLE_HOME[metaRole]) return metaRole;
     const { data } = await supabase
       .from('users')

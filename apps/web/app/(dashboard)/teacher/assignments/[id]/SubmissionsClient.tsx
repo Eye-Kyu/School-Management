@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { getCurrentUserRow } from '@/lib/supabase/currentUser';
 import { apiFetch } from '@/lib/api';
 import { useModuleAccess } from '@/lib/hooks/useModuleAccess';
+import SubmissionFileLink from '@/components/SubmissionFileLink';
 
 type Student = { id: string; user: { full_name: string } };
 type Submission = {
@@ -211,10 +212,8 @@ export default function SubmissionsClient({
                 {sub.file_urls.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {sub.file_urls.map((url, i) => (
-                      <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-blue-600 underline">
-                        File {i + 1}
-                      </a>
+                      // SA-02: opened via a signed URL; non-storage values are never linkified.
+                      <SubmissionFileLink key={i} value={url} label={`File ${i + 1}`} className="text-xs text-blue-600 underline" />
                     ))}
                   </div>
                 )}

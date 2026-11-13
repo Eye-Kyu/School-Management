@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import { apiFetch, API_BASE } from '@/lib/api';
 import { EmailLoginInput } from '@school-manager/types';
 import posthog from 'posthog-js';
+import { safeInternalPath } from '@/lib/utils/safeRedirect';
 
 type Tab = 'email' | 'phone';
 
@@ -106,7 +107,8 @@ function LoginPageInner() {
     await identifyForAnalytics();
     posthog.capture('user_signed_in', { login_method: 'email' });
 
-    const next = searchParams.get('next');
+    // SA-25: only follow ?next= when it is a same-origin relative path.
+    const next = safeInternalPath(searchParams.get('next'));
     const destination = next || (role && ROLE_HOME[role]) || '/';
 
     router.push(destination);
@@ -154,7 +156,8 @@ function LoginPageInner() {
     await identifyForAnalytics();
     posthog.capture('user_signed_in', { login_method: 'phone_otp' });
 
-    const next = searchParams.get('next');
+    // SA-25: only follow ?next= when it is a same-origin relative path.
+    const next = safeInternalPath(searchParams.get('next'));
     const destination = next || (role && ROLE_HOME[role]) || '/';
 
     router.push(destination);

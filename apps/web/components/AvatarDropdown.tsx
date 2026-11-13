@@ -39,6 +39,8 @@ export default function AvatarDropdown({
   async function handleSignOut() {
     setOpen(false);
     apiFetch('/auth/events', { method: 'POST', body: JSON.stringify({ action: 'auth.logout' }) }).catch(() => {});
+    // SA-12: drop any assist-mode cookie so it cannot outlive this session.
+    await fetch('/api/assist-mode/exit', { method: 'POST' }).catch(() => {});
     const supabase = createClient();
     await supabase.auth.signOut();
     router.refresh();

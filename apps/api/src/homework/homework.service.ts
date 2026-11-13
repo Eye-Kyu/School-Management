@@ -179,11 +179,22 @@ export class HomeworkService {
     }
 
     const { data: hw } = await client
-      .from('homework_assignments').select('id').eq('id', homeworkId).maybeSingle();
+      .from('homework_assignments').select('id, teacher_id').eq('id', homeworkId).maybeSingle();
     if (!hw) throw new NotFoundException('Homework not found');
 
-    const { error } = await client.from('homework_assignments').delete().eq('id', homeworkId);
+    // SA-24: a teacher may only delete homework they own. ADMIN may delete any
+    // homework in their school. Migration 097 enforces the same rule in RLS.
+    if (userRow.role === 'TEACHER') {
+      const { data: teacher } = await client.from('teachers').select('id').eq('user_id', userRow.id).maybeSingle();
+      if (!teacher || teacher.id !== hw.teacher_id) {
+        throw new ForbiddenException('You can only delete homework you created');
+      }
+    }
+
+    const { data: deleted, error } = await client.from('homework_assignments').delete().eq('id', homeworkId).select('id');
     if (error) throw new Error(error.message);
+    // RLS filtering a delete returns zero rows, not an error, so report it rather than claim success.
+    if (!deleted || deleted.length === 0) throw new ForbiddenException('You can only delete homework you created');
     return { deleted: true };
   }
 
