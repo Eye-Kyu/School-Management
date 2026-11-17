@@ -52,19 +52,19 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Total collected</p>
+          <p className="text-xs text-slate-400 font-medium">Total collected</p>
           <p className="text-2xl font-bold text-emerald-700 mt-1">{fmt(stats.totalCollected)}</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Today</p>
+          <p className="text-xs text-slate-400 font-medium">Today</p>
           <p className="text-2xl font-bold text-slate-800 mt-1">{fmt(stats.today)}</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">This week</p>
+          <p className="text-xs text-slate-400 font-medium">This week</p>
           <p className="text-2xl font-bold text-slate-800 mt-1">{fmt(stats.thisWeek)}</p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Failed / Pending</p>
+          <p className="text-xs text-slate-400 font-medium">Failed / Pending</p>
           <p className="text-2xl font-bold text-rose-600 mt-1">{stats.failed} / {stats.pending}</p>
         </div>
       </div>

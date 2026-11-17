@@ -263,6 +263,32 @@ accuracy fix, not a behavior change).
 
 ---
 
+### BUG-14 (OPEN, deferred): `announcements.published_at` has no time zone, so every announcement displays 3 hours early in Kenya
+
+**Status:** open, deliberately deferred to a dedicated follow-up (agreed 2026-11-18). Not fixed yet.
+
+**Found during:** 2026-11-18, multi-role browser QA of the role-tailored UI redesign. An announcement posted at 00:11 EAT on 18 Nov showed as **11/17/2026** on `/admin/announcements`, while the same announcement's dashboard-feed notification correctly said "25m ago".
+
+**File:** `supabase/migrations/20260522000001_init.sql:200` (`"published_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`), displayed by `apps/web/app/(dashboard)/admin/announcements/AnnouncementsClient.tsx:211` (`new Date(a.published_at).toLocaleDateString()`). Written by `apps/api/src/announcements/announcements.service.ts:43,56` (`published_at: new Date().toISOString()`).
+
+**What is wrong:** the API writes a UTC ISO string, but the column is `TIMESTAMP` **without** time zone, so Postgres keeps the UTC wall-clock value and discards the zone. PostgREST then returns it with no offset (e.g. `2026-11-17T21:11:00`), which the browser's `Date` parses as *local* (Nairobi, UTC+3) time. Result: every announcement time is 3 hours early, and anything posted between 00:00 and 03:00 EAT shows the previous day's date. The feed is unaffected because its notifications come from `notifications.created_at`, which is `TIMESTAMPTZ`.
+
+**Likely wider than one column (verify before fixing):** `20260522000001_init.sql` declares **27** `TIMESTAMP(3)` columns (the original Prisma-generated schema), and no later migration converts any of them to `TIMESTAMPTZ`. Any of those rendered with `new Date(...)` in the browser can show the same 3-hour skew. Expiry comparisons (`expires_at` on the same table) may also be off by 3 hours.
+
+**Not yet verified live.** The diagnosis rests on the migration file plus the observed symptom. Per CLAUDE.md §5 (schema drift is a recurring pattern here), the first step of the fix is to confirm the real column types against the live database:
+`SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'timestamp without time zone' ORDER BY 1, 2;`
+
+**Proposed fix (for the follow-up):**
+1. Run the query above to get the real list of affected columns.
+2. New additive migration (never edit `init.sql`): `ALTER TABLE ... ALTER COLUMN ... TYPE TIMESTAMPTZ USING <col> AT TIME ZONE 'UTC'` per affected column. Existing values were written as UTC, so `AT TIME ZONE 'UTC'` preserves the instant.
+3. Mandatory before/after verification (CLAUDE.md §6): capture `SELECT id, published_at FROM announcements ORDER BY published_at DESC LIMIT 20` (and the equivalent for each converted column) before and after, and diff. The instants must be identical; only the zone annotation should change.
+4. If more than 5 columns or files are touched in one commit, include per-column live evidence (CLAUDE.md §6 bulk-migration rule).
+5. Keep `packages/db/prisma/schema.prisma` in sync (`@db.Timestamptz(3)`), since it is the hand-synced second copy of the schema.
+
+**Reproduce:** post an announcement between 00:00 and 03:00 EAT and check its date on `/admin/announcements`; or at any hour compare its time with the actual post time (3 hours early).
+
+---
+
 ## Resolved / re-verified (not bugs)
 
 For traceability — items raised as open questions in a prior PR's follow-up notes, re-examined during the 2026-07-25 audit and confirmed safe, not touched:

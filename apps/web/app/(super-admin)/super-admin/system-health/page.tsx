@@ -128,11 +128,11 @@ function SystemHealthContent() {
             <SectionHeading title="API" status={overview.api.status} />
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white border border-slate-200 rounded-xl px-5 py-4">
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Version</p>
+                <p className="text-xs font-medium text-slate-500">Version</p>
                 <p className="text-lg font-semibold mt-1 text-slate-800">{overview.api.version}</p>
               </div>
               <div className="bg-white border border-slate-200 rounded-xl px-5 py-4">
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Server time</p>
+                <p className="text-xs font-medium text-slate-500">Server time</p>
                 <p className="text-sm mt-1 text-slate-600">{new Date(overview.api.timestamp).toLocaleString()}</p>
               </div>
             </div>

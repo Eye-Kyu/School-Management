@@ -97,7 +97,7 @@ export default function AiTutorPage() {
   // someone from just typing /student/tutor into the address bar.
   if (!modulesLoading && !isModuleEnabled('ai_tutor')) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-3.5rem)] max-w-2xl text-center px-4">
+      <div className="flex flex-col items-center justify-center h-shell-fill max-w-2xl text-center px-4">
         <BackButton href="/student" />
         <p className="mt-6 text-slate-500">AI Tutor isn&apos;t enabled for your school.</p>
       </div>
@@ -105,14 +105,14 @@ export default function AiTutorPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)] max-w-2xl">
+    <div className="flex flex-col h-shell-fill max-w-2xl">
       {/* Header */}
       <div className="flex items-center gap-3 pb-4 border-b border-slate-200 shrink-0">
         <BackButton href="/student" />
-        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-lg shrink-0">✨</div>
+        <div aria-hidden="true" className="w-9 h-9 rounded-full bg-pear flex items-center justify-center text-ink text-sm font-semibold shrink-0">AI</div>
         <div>
           <p className="font-semibold text-slate-800">AI Tutor</p>
-          <p className="text-xs text-slate-400">Answers from your school curriculum only</p>
+          <p className="text-xs text-slate-500">Answers from your school curriculum only</p>
         </div>
       </div>
 
@@ -121,7 +121,7 @@ export default function AiTutorPage() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} gap-2`}>
             {m.role === 'assistant' && (
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-xs shrink-0 mt-0.5">✨</div>
+              <div aria-hidden="true" className="w-7 h-7 rounded-full bg-pear flex items-center justify-center text-ink text-[11px] font-semibold shrink-0 mt-0.5">AI</div>
             )}
             <div
               className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${

@@ -155,14 +155,14 @@ export default function EventsClient({
 
       {upcoming.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Upcoming</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Upcoming</h2>
           <EventTable events={upcoming} onEdit={openEdit} onDelete={handleDelete} />
         </section>
       )}
 
       {past.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Past</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Past</h2>
           <EventTable events={past} onEdit={openEdit} onDelete={handleDelete} />
         </section>
       )}

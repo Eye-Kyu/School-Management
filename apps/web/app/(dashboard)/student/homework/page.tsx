@@ -75,7 +75,7 @@ export default function StudentHomeworkPage() {
 
       {pending.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">To do ({pending.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-500">To do ({pending.length})</h2>
           <div className="space-y-2">
             {pending.map((hw) => (
               <Fragment key={hw.id}>
@@ -111,7 +111,7 @@ export default function StudentHomeworkPage() {
                     onClick={() => setExpandedId((id) => (id === hw.id ? null : hw.id))}
                     className="text-xs text-slate-400 hover:text-slate-700 shrink-0"
                   >
-                    📎 {expandedId === hw.id ? 'Hide' : 'Docs'}
+                    {expandedId === hw.id ? 'Hide' : 'Docs'}
                   </button>
                 </div>
                 {expandedId === hw.id && (
@@ -125,7 +125,7 @@ export default function StudentHomeworkPage() {
 
       {done.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Done ({done.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Done ({done.length})</h2>
           <div className="space-y-2">
             {done.map((hw) => (
               <Fragment key={hw.id}>
@@ -159,7 +159,7 @@ export default function StudentHomeworkPage() {
                     onClick={() => setExpandedId((id) => (id === hw.id ? null : hw.id))}
                     className="text-xs text-slate-400 hover:text-slate-700 shrink-0"
                   >
-                    📎 {expandedId === hw.id ? 'Hide' : 'Docs'}
+                    {expandedId === hw.id ? 'Hide' : 'Docs'}
                   </button>
                 </div>
                 {expandedId === hw.id && (

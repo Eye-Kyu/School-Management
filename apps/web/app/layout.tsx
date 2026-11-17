@@ -24,6 +24,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Chillax (Hum's face), 500 and 600 only */}
+        <link rel="preconnect" href="https://api.fontshare.com" crossOrigin="" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=chillax@500,600&display=swap" />
+      </head>
       <body>
         <PostHogProvider>
           <QueryProvider>{children}</QueryProvider>

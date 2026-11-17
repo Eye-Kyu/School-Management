@@ -243,7 +243,7 @@ export default function CurriculumDetailPage() {
             .sort(([a], [b]) => Number(a) - Number(b))
             .map(([grade, subs]) => (
               <div key={grade} className="mb-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                <p className="text-xs font-semibold text-slate-400 mb-1">
                   {gradeLevelNameByNumber[Number(grade)] ?? `Grade ${grade}`}
                 </p>
                 <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">

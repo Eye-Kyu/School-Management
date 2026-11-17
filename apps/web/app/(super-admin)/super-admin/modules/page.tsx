@@ -49,7 +49,7 @@ export default function ModuleRegistryPage() {
       ) : (
         Object.entries(byCategory).map(([category, mods]) => (
           <div key={category} className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{category}</h2>
+            <h2 className="text-xs font-semibold text-slate-400">{category}</h2>
             <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
               {mods.map((m) => {
                 const a = adoptionByKey.get(m.key);

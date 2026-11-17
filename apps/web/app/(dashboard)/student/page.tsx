@@ -99,132 +99,128 @@ export default async function StudentHomePage() {
   const firstName = (studentUser?.full_name as string | null)?.split(' ')[0] ?? 'Student';
   const badges = _uRow ? await getMyRoleBadges(supabase, _uRow.id, 'STUDENT') : [];
 
+  const slots = (todaySlots ?? []) as any[];
+  const attTone =
+    attRate === null ? 'bg-slate-200'
+    : attRate >= 80 ? 'bg-mint'
+    : attRate >= 60 ? 'bg-pear'
+    : 'bg-coral';
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <PrefectPanel />
-      {/* Header */}
-      <div>
+
+      {/* Greeting */}
+      <header>
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-semibold">
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">
             Good {greeting()}, {firstName}
           </h1>
           {bestStudentAward && (
-            <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-3 py-1 text-xs font-semibold">
-              🏆 Best Student — {currentTerm?.name}
+            <span className="student-sticker">
+              Best Student, {currentTerm?.name}
             </span>
           )}
         </div>
-        <p className="text-sm text-slate-500 mt-1">
-          {DAY_LABELS[today]} · {(todaySlots ?? []).length} classes today
+        <p className="text-base text-slate-600 mt-2">
+          {DAY_LABELS[today]}, <span className="highlight">{slots.length} {slots.length === 1 ? 'class' : 'classes'} today</span>
         </p>
-        {badges.length > 0 && <RoleBadgeList badges={badges} className="mt-2" />}
-      </div>
+        {badges.length > 0 && <RoleBadgeList badges={badges} className="mt-3" />}
+      </header>
 
-      {/* Cards grid */}
-      <div className="grid grid-cols-2 gap-4">
-
-        {/* Today's classes card */}
-        <Link href="/student/timetable" className="block group">
-          <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-3 sm:px-5 sm:py-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-blue-100 text-xs font-medium uppercase tracking-wide">Today's Classes</span>
-                <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-              </div>
-              <p className="text-3xl sm:text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
-              <p className="text-blue-100 text-sm mt-1">{DAY_LABELS[today]}</p>
-            </div>
-            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
-              {(todaySlots ?? []).length === 0 ? (
-                <p className="text-sm text-slate-500">No classes scheduled today.</p>
-              ) : (
-                (todaySlots ?? []).slice(0, 3).map((s: any) => (
-                  <div key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
-                    <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
-                  </div>
-                ))
-              )}
-              {(todaySlots ?? []).length > 3 && (
-                <p className="text-xs text-slate-500">+{(todaySlots ?? []).length - 3} more</p>
-              )}
-            </div>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+        {/* Today: each lesson a card-stock tile in its own colour */}
+        <section aria-labelledby="today-heading">
+          <div className="flex items-baseline justify-between gap-4 mb-4">
+            <h2 id="today-heading" className="text-xl font-semibold">Today&apos;s classes</h2>
+            <Link href="/student/timetable" className="link text-sm font-semibold">Full timetable</Link>
           </div>
-        </Link>
-
-        {/* Grades card */}
-        <Link href="/student/grades" className="block group">
-          <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">My Grades</span>
-                <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-              </div>
-              <p className="text-3xl sm:text-4xl font-bold text-white">%</p>
-              <p className="text-violet-100 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
+          {slots.length === 0 ? (
+            <div className="ruled-page">
+              <p className="font-semibold">No classes scheduled today.</p>
+              <p className="text-slate-600">
+                Check the <Link href="/student/timetable" className="link">week ahead</Link>.
+              </p>
             </div>
-            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
-              <p className="text-sm text-slate-600">View assessment results and scores.</p>
-            </div>
-          </div>
-        </Link>
+          ) : (
+            <ol className="space-y-3">
+              {slots.map((s, i) => (
+                <li key={s.id} className={`lesson-tile lesson-tile--${i % 4}`}>
+                  <span className="lesson-time tabular">{formatTime(s.start_time)}</span>
+                  <span className="lesson-label min-w-0">
+                    <span className="block font-semibold text-lg leading-tight truncate">{s.subject?.name}</span>
+                    <span className="block text-sm text-slate-600 truncate">
+                      {[s.teacher?.user?.full_name, s.room && (/^\d/.test(s.room) ? `Room ${s.room}` : s.room)].filter(Boolean).join(', ')}
+                    </span>
+                  </span>
+                  <span className="lesson-end tabular">until {formatTime(s.end_time)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
 
-        {/* Attendance card */}
-        <Link href="/student/attendance" className="block group">
-          <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
-              attRate === null ? 'from-slate-400 to-slate-500'
-              : attRate >= 80 ? 'from-emerald-500 to-teal-600'
-              : attRate >= 60 ? 'from-amber-500 to-orange-600'
-              : 'from-rose-500 to-red-600'
-            }`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
-                <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-              </div>
-              <p className="text-3xl sm:text-4xl font-bold text-white">
+        <div className="space-y-5">
+          {/* Attendance */}
+          <Link href="/student/attendance" className="student-card group block">
+            <div className={`${attTone} px-6 pt-5 pb-6`}>
+              <p className="text-sm font-semibold">Attendance, {currentTerm?.name ?? 'current term'}</p>
+              <p className="text-6xl font-semibold tracking-tight tabular mt-2">
                 {attRate !== null ? `${attRate}%` : '—'}
               </p>
-              <p className="text-white/80 text-sm mt-1">
-                {currentTerm?.name ?? 'current term'}
-              </p>
             </div>
-            <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
+            <div className="px-6 py-4 space-y-3">
               {todayAttendance ? (
-                <p className="text-sm">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                    todayAttendance.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
-                    : todayAttendance.status === 'LATE' ? 'bg-amber-100 text-amber-700'
-                    : todayAttendance.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
-                    : 'bg-slate-100 text-slate-600'
+                <p className="text-sm flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    todayAttendance.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-800'
+                    : todayAttendance.status === 'LATE' ? 'bg-amber-100 text-amber-800'
+                    : todayAttendance.status === 'ABSENT' ? 'bg-rose-100 text-rose-800'
+                    : 'bg-slate-100 text-slate-700'
                   }`}>
                     {todayAttendance.status.charAt(0) + todayAttendance.status.slice(1).toLowerCase()} today
                   </span>
-                  <span className="text-slate-500 text-xs ml-2">
+                  <span className="text-slate-500 text-xs">
                     updated {new Date(todayAttendance.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </p>
               ) : (
-                <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
+                <p className="text-sm text-slate-600">Attendance not yet marked for today.</p>
               )}
               {attOverall.total_school_days === 0 ? (
-                <p className="text-sm text-slate-500">No attendance recorded yet.</p>
+                <p className="text-sm text-slate-600">No attendance recorded yet.</p>
               ) : (
-                <div className="flex gap-4 text-sm">
-                  <span className="text-emerald-600 font-medium">{attPresent} present</span>
-                  <span className="text-amber-600 font-medium">{attLate} late</span>
-                  <span className="text-rose-600 font-medium">{attAbsent} absent</span>
-                </div>
+                <dl className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-emerald-50 py-2">
+                    <dt className="text-xs text-emerald-800">Present</dt>
+                    <dd className="text-xl font-semibold tabular text-emerald-900">{attPresent}</dd>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 py-2">
+                    <dt className="text-xs text-amber-800">Late</dt>
+                    <dd className="text-xl font-semibold tabular text-amber-900">{attLate}</dd>
+                  </div>
+                  <div className="rounded-xl bg-rose-50 py-2">
+                    <dt className="text-xs text-rose-800">Absent</dt>
+                    <dd className="text-xl font-semibold tabular text-rose-900">{attAbsent}</dd>
+                  </div>
+                </dl>
               )}
             </div>
-          </div>
-        </Link>
+          </Link>
+
+          {/* Grades */}
+          <Link href="/student/grades" className="student-card student-card--manila group block px-6 py-5">
+            <p className="text-sm font-semibold text-slate-700">Report card, {currentTerm?.name ?? 'current term'}</p>
+            <p className="text-2xl font-semibold mt-1">My grades</p>
+            <p className="text-sm text-slate-700 mt-1">View assessment results and scores.</p>
+          </Link>
+        </div>
       </div>
 
       {/* What's new for you */}
       {_uRow && (
         <section>
-          <h2 className="text-base font-medium mb-3">What&apos;s new for you</h2>
+          <h2 className="text-xl font-semibold mb-4">What&apos;s new for you</h2>
           <DashboardFeed userId={_uRow.id} role="STUDENT" />
         </section>
       )}

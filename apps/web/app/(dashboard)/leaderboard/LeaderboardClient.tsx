@@ -9,7 +9,8 @@ type Row = { studentId: string; fullName: string; total: number; breakdown: Reco
 type Result = { rows: Row[]; capped: boolean; scope: Scope; window: Window };
 
 const WINDOW_LABEL: Record<Window, string> = { week: 'This week', month: 'This month', term: 'This term', all: 'All-time' };
-const MEDALS = ['🥇', '🥈', '🥉'];
+// Top three: gold, silver and bronze rank discs, like sports-day ribbons.
+const MEDALS = ['bg-pear text-ink', 'bg-slate-200 text-slate-900', 'bg-kraft text-ink'];
 
 function breakdownLabel(breakdown: Record<string, number>) {
   const parts = Object.entries(breakdown)
@@ -142,7 +143,9 @@ export default function LeaderboardClient({
           {result.rows.map((r, i) => (
             <div key={r.studentId} className={`flex items-center gap-3 px-4 py-3 ${i < 3 ? 'bg-amber-50/40' : ''}`}>
               <span className="w-8 text-center text-sm font-semibold text-slate-500 shrink-0">
-                {i < 3 ? MEDALS[i] : `#${i + 1}`}
+                {i < 3 ? (
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold tabular ${MEDALS[i]}`}>{i + 1}</span>
+                ) : `#${i + 1}`}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-800 truncate">{r.fullName}</p>

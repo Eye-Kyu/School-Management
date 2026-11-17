@@ -145,7 +145,15 @@ export class TimetableService {
         room: input.room ?? null,
         updated_at: new Date().toISOString(),
       })
-      .select()
+      // Same joined shape as list(): the admin timetable appends this row and
+      // renders slot.subject.name / slot.class.name straight away, so a bare
+      // .select() crashed the page on every successful create.
+      .select(`
+        id, day_of_week, start_time, end_time, room, class_id, subject_id, teacher_id,
+        class:classes(id, name, grade_level),
+        subject:subjects(id, name, code),
+        teacher:teachers!inner(id, user:users!inner(id, full_name))
+      `)
       .single();
     if (error) throw new Error(error.message);
 

@@ -7,7 +7,7 @@ import { calculateAttendanceRate } from '@school-manager/types';
 function StatCard({ label, value, sub, color = 'text-slate-800' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
     <div className="bg-white border border-slate-100 rounded-xl px-5 py-4">
-      <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">{label}</p>
+      <p className="text-xs text-slate-400 font-medium">{label}</p>
       <p className={`text-3xl font-bold mt-1 ${color}`}>{value}</p>
       {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
     </div>

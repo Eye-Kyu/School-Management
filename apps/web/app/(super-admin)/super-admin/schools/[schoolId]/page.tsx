@@ -992,7 +992,7 @@ export default function SchoolDetailPage() {
                   <StatCard label="Grades recorded (30d)" value={overview.academic.gradesRecordedLast30Days} />
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-3">
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Attendance rate (30d)</p>
+                  <p className="text-xs font-medium text-slate-500">Attendance rate (30d)</p>
                   <p className="text-3xl font-bold mt-1 text-slate-800">
                     {overview.academic.attendance.presentRate != null ? `${overview.academic.attendance.presentRate}%` : '—'}
                   </p>
@@ -1067,7 +1067,7 @@ export default function SchoolDetailPage() {
 
               return (
                 <div key={category} className="space-y-2 mb-4">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{category}</h3>
+                  <h3 className="text-xs font-semibold text-slate-400">{category}</h3>
                   <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
                     {topLevelMods.map((m) => {
                       const children = childrenByParent.get(m.key);

@@ -217,7 +217,7 @@ export default function OnboardSchoolPage() {
             ) : (
               Object.entries(byCategory).map(([category, mods]) => (
                 <div key={category}>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">{category}</p>
+                  <p className="text-xs font-semibold text-slate-400 mb-1">{category}</p>
                   <div className="space-y-1">
                     {mods.map((m) => (
                       <label key={m.key} className={`flex items-center gap-2 text-sm px-2 py-1 rounded ${m.is_core ? 'opacity-50' : ''}`}>

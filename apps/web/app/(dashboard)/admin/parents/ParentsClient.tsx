@@ -183,9 +183,9 @@ export default function ParentsClient({ initialParents, students }: Props) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Parent</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Contact</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Children</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500">Parent</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500">Contact</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-slate-500">Children</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>

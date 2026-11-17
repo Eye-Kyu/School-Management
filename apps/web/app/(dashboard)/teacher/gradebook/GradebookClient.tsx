@@ -153,14 +153,14 @@ export default function GradebookClient({
       {/* Filters */}
       <div className="flex flex-wrap gap-3 bg-white border border-slate-200 rounded-xl p-4">
         <div className="flex flex-col gap-1">
-          <label htmlFor="gradebook-class" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Class</label>
+          <label htmlFor="gradebook-class" className="text-xs font-medium text-slate-500">Class</label>
           <select id="gradebook-class" value={classId} onChange={(e) => setClassId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             {myClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor="gradebook-subject" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Subject</label>
+          <label htmlFor="gradebook-subject" className="text-xs font-medium text-slate-500">Subject</label>
           <select id="gradebook-subject" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             <option value="">Select subject…</option>
@@ -168,7 +168,7 @@ export default function GradebookClient({
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor="gradebook-term" className="text-xs font-medium text-slate-500 uppercase tracking-wide">Term</label>
+          <label htmlFor="gradebook-term" className="text-xs font-medium text-slate-500">Term</label>
           <select id="gradebook-term" value={termId} onChange={(e) => setTermId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm min-w-[140px]">
             {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current ? ' (current)' : ''}</option>)}
@@ -273,7 +273,7 @@ export default function GradebookClient({
                             className="mt-1 inline-block text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5"
                             title={`Derived from a ${a.source_type.toLowerCase()} — grades are read-only here. Update the source instead.`}
                           >
-                            🔒 {a.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}
+                            {a.source_type === 'HOMEWORK' ? 'Homework' : 'Quiz'}
                           </div>
                         )}
                       </th>

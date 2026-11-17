@@ -85,7 +85,7 @@ export default async function ParentHomeworkPage() {
 
       {pending.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Pending ({pending.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Pending ({pending.length})</h2>
           <div className="space-y-2">
             {pending.map((hw) => (
               <div
@@ -116,7 +116,7 @@ export default async function ParentHomeworkPage() {
 
       {done.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Completed ({done.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Completed ({done.length})</h2>
           <div className="space-y-2">
             {done.map((hw) => (
               <div key={hw.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 opacity-70">

@@ -60,7 +60,7 @@ function ShortAnswerReview({
 
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
+      <h2 className="text-sm font-semibold text-slate-600">
         Short-answer review ({submitted.length} submissions)
       </h2>
       {submitted.map((attempt) => {
@@ -341,7 +341,7 @@ export default function QuizBuilderClient({
       {/* Results */}
       {attempts.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Results ({attempts.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-600">Results ({attempts.length})</h2>
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500 uppercase">

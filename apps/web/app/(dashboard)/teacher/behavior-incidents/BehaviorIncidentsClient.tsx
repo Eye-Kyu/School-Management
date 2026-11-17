@@ -46,9 +46,12 @@ export default function BehaviorIncidentsClient({ initialReports }: { initialRep
     }
   }
 
-  function ReportRow({ report, actionable }: { report: Report; actionable: boolean }) {
+  // Called as a plain function, not rendered as <X />: a component declared
+  // inside this one is a new type every render, so React remounted it on each
+  // keystroke and its inputs lost focus after one character.
+  function renderReportRow(report: Report, actionable: boolean) {
     return (
-      <div className="px-5 py-4 border-b border-slate-100 last:border-0">
+      <div key={report.id} className="px-5 py-4 border-b border-slate-100 last:border-0">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <p className="font-medium text-slate-800 text-sm">
@@ -110,7 +113,7 @@ export default function BehaviorIncidentsClient({ initialReports }: { initialRep
           <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">No pending reports.</div>
         ) : (
           <div className="bg-white border border-slate-200 rounded-xl">
-            {pending.map((r) => <ReportRow key={r.id} report={r} actionable />)}
+            {pending.map((r) => renderReportRow(r, true))}
           </div>
         )}
       </div>
@@ -119,7 +122,7 @@ export default function BehaviorIncidentsClient({ initialReports }: { initialRep
         <div>
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Reviewed / Dismissed</h2>
           <div className="bg-white border border-slate-200 rounded-xl">
-            {decided.map((r) => <ReportRow key={r.id} report={r} actionable={false} />)}
+            {decided.map((r) => renderReportRow(r, false))}
           </div>
         </div>
       )}

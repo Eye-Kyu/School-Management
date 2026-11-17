@@ -9,7 +9,7 @@ export default function PrintButton() {
         background: '#0f172a', color: 'white', border: 'none', cursor: 'pointer',
       }}
     >
-      🖨 Print / Save as PDF
+      Print / Save as PDF
     </button>
   );
 }

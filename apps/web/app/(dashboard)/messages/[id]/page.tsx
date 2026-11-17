@@ -48,7 +48,7 @@ export default async function ThreadPage({ params }: { params: { id: string } })
     : null;
 
   return (
-    <div className="flex flex-col max-w-2xl h-[calc(100vh-3.5rem)]">
+    <div className="flex flex-col max-w-2xl h-shell-fill">
       {/* Header */}
       <div className="flex items-center gap-3 pb-4 border-b border-slate-200 shrink-0">
         <BackButton href="/messages" />

@@ -219,7 +219,7 @@ export default function ProfileClient({
           <div className="space-y-1">
             <p className="text-sm font-medium text-slate-700">{fullName || 'Your name'}</p>
             {role && (
-              <span className="text-xs font-medium uppercase tracking-wide bg-slate-100 text-slate-500 px-2 py-0.5 rounded">
+              <span className="text-xs font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded">
                 {role.toLowerCase()}
               </span>
             )}

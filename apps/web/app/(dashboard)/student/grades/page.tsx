@@ -114,7 +114,7 @@ export default async function StudentGradesPage({
         {student && currentTermId && (
           <a href={`/print/report-card/${student.id}?termId=${currentTermId}`} target="_blank" rel="noopener noreferrer"
             className="text-sm font-medium text-violet-700 border border-violet-300 bg-violet-50 hover:bg-violet-100 rounded-lg px-4 py-1.5 transition-colors">
-            🖨 Print report card
+            Print report card
           </a>
         )}
       </div>
@@ -156,7 +156,7 @@ export default async function StudentGradesPage({
                   )}
                 </div>
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                  <thead className="bg-slate-50 text-slate-500 text-xs">
                     <tr>
                       <th className="px-5 py-2 text-left font-medium">Assessment</th>
                       <th className="px-4 py-2 text-center font-medium">Score</th>

@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { cn } from '@school-manager/ui';
 import { FeedIcon } from './FeedIcon';
@@ -15,24 +14,14 @@ export function FeedCard({
   density: FeedDensity;
   onMarkRead: (entry: FeedEntry) => void;
 }) {
-  // Entrance animation: slide down 8px + fade in over 200ms, once, on mount —
-  // matches this codebase's existing transition-based motion idiom (the
-  // sidebar's transition-transform duration-200), no keyframes/new library.
-  const [entered, setEntered] = useState(false);
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
   const compact = density === 'compact';
 
   return (
     <div
       className={cn(
-        'group relative bg-white border border-slate-100 border-l-4 rounded-r-xl shadow-sm hover:shadow-md transition-all duration-200 ease-out',
-        entry.isRead ? 'border-l-slate-200' : 'border-l-blue-500',
+        'group relative bg-white border border-slate-200 border-l-4 rounded-r-xl transition-[box-shadow,border-color] duration-200 ease-out hover:shadow-card',
+        entry.isRead ? 'border-l-slate-200' : 'border-l-role',
         compact ? 'px-4 py-2' : 'px-5 py-4',
-        entered ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2',
       )}
     >
       <Link href={entry.href} className="flex items-start gap-3 min-w-0">
@@ -55,7 +44,7 @@ export function FeedCard({
             <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{entry.body}</p>
           )}
           {entry.timestamp && (
-            <p className="text-xs text-slate-400 mt-1">{timeAgo(entry.timestamp)}</p>
+            <p className="text-xs text-slate-500 mt-1">{timeAgo(entry.timestamp)}</p>
           )}
         </div>
       </Link>
@@ -64,7 +53,7 @@ export function FeedCard({
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkRead(entry); }}
           className={cn(
-            'absolute top-3 right-3 text-xs text-slate-400 hover:text-slate-700',
+            'absolute top-3 right-3 text-xs text-slate-500 hover:text-slate-800',
             'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150',
           )}
           aria-label={`Mark "${entry.title}" as read`}
