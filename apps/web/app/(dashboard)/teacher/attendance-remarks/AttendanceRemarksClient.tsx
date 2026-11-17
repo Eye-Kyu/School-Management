@@ -69,10 +69,13 @@ export default function AttendanceRemarksClient({ isDepartmentHead, myUserId }: 
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>;
 
-  function RequestCard({ r, showReview }: { r: RemarkRequest; showReview: boolean }) {
+  // Called as a plain function, not rendered as <X />: a component declared
+  // inside this one is a new type every render, so React remounted it on each
+  // keystroke and its inputs lost focus after one character.
+  function renderRequestCard(r: RemarkRequest, showReview: boolean) {
     const expired = r.status === 'PENDING' && new Date(r.expires_at).getTime() < Date.now();
     return (
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+      <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-slate-800">{r.class?.name ?? 'Class'} · {r.date}</p>
@@ -132,7 +135,7 @@ export default function AttendanceRemarksClient({ isDepartmentHead, myUserId }: 
           {toReview.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400">Nothing pending.</div>
           ) : (
-            <div className="space-y-3">{toReview.map((r) => <RequestCard key={r.id} r={r} showReview />)}</div>
+            <div className="space-y-3">{toReview.map((r) => renderRequestCard(r, true))}</div>
           )}
         </div>
       )}
@@ -142,7 +145,7 @@ export default function AttendanceRemarksClient({ isDepartmentHead, myUserId }: 
         {mine.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400">No re-marking requests yet.</div>
         ) : (
-          <div className="space-y-3">{mine.map((r) => <RequestCard key={r.id} r={r} showReview={false} />)}</div>
+          <div className="space-y-3">{mine.map((r) => renderRequestCard(r, false))}</div>
         )}
       </div>
     </div>

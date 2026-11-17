@@ -59,9 +59,12 @@ export default function AbsenceRequestReviewQueue() {
   const pending = requests.filter((r) => r.status === 'PENDING');
   const decided = requests.filter((r) => r.status !== 'PENDING');
 
-  function Card({ r }: { r: AbsenceRequest }) {
+  // Rendered as a plain function call, not <Card />: a component declared
+  // inside this one is a new type on every render, so React remounted it on
+  // each keystroke and the denial-reason textarea lost focus after one letter.
+  function renderCard(r: AbsenceRequest) {
     return (
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+      <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-slate-800">{r.student?.user?.full_name ?? 'Student'} ({r.student?.admission_no ?? '—'})</p>
@@ -75,7 +78,7 @@ export default function AbsenceRequestReviewQueue() {
         {r.status === 'PENDING' && (
           denyReasonFor === r.id ? (
             <div className="space-y-2">
-              <textarea value={denyReason} onChange={(e) => setDenyReason(e.target.value)} rows={2} placeholder="Reason for denial"
+              <textarea value={denyReason} onChange={(e) => setDenyReason(e.target.value)} rows={2} placeholder="Reason for denial" aria-label="Reason for denial" autoFocus
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none" />
               <div className="flex gap-2">
                 <button onClick={() => review(r.id, 'DENY')} disabled={busyId === r.id || !denyReason.trim()}
@@ -105,14 +108,14 @@ export default function AbsenceRequestReviewQueue() {
         {pending.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400">Nothing pending.</div>
         ) : (
-          <div className="space-y-3">{pending.map((r) => <Card key={r.id} r={r} />)}</div>
+          <div className="space-y-3">{pending.map(renderCard)}</div>
         )}
       </div>
 
       {decided.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Decided</h2>
-          <div className="space-y-3">{decided.map((r) => <Card key={r.id} r={r} />)}</div>
+          <div className="space-y-3">{decided.map(renderCard)}</div>
         </div>
       )}
     </div>
