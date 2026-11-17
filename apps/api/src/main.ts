@@ -47,8 +47,19 @@ async function bootstrap() {
   // A trailing slash breaks the exact-match comparison against the
   // browser's Origin header (which never has one), so strip it defensively.
   const webOrigin = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+  // Local multi-session testing only: CORS_EXTRA_ORIGINS (comma-separated,
+  // e.g. "http://student.localhost:3000,http://parent.localhost:3000") lets
+  // several role sessions run side by side on distinct loopback hostnames.
+  // Ignored entirely in production, so the deployed API stays single-origin.
+  const extraOrigins =
+    process.env.NODE_ENV === 'production'
+      ? []
+      : (process.env.CORS_EXTRA_ORIGINS ?? '')
+          .split(',')
+          .map((o) => o.trim().replace(/\/+$/, ''))
+          .filter((o) => /^http:\/\/[a-z0-9.-]*localhost(:\d+)?$/i.test(o));
   app.enableCors({
-    origin: webOrigin,
+    origin: extraOrigins.length > 0 ? [webOrigin, ...extraOrigins] : webOrigin,
     credentials: true,
   });
 
@@ -75,6 +86,7 @@ async function bootstrap() {
   await app.listen(port);
   logger.log(`API listening on http://localhost:${port}`);
   logger.log(`CORS allowed origin: ${webOrigin}`);
+  if (extraOrigins.length > 0) logger.log(`CORS extra dev origins: ${extraOrigins.join(', ')}`);
 }
 
 bootstrap().catch((err) => {
