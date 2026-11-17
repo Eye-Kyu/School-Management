@@ -133,201 +133,158 @@ export default async function ParentHomePage() {
   const firstName = userRow?.full_name?.split(' ')[0] ?? 'Parent';
   const childFirstName = (firstStudent?.user as any)?.full_name?.split(' ')[0];
 
+  const slots = (todaySlots ?? []) as any[];
+  const statusPill = (status: string) =>
+    status === 'PRESENT' ? 'bg-emerald-100 text-emerald-800'
+    : status === 'LATE' ? 'bg-amber-100 text-amber-800'
+    : status === 'ABSENT' ? 'bg-rose-100 text-rose-800'
+    : 'bg-slate-100 text-slate-700';
+  const statusLabel = (status: string) => status.charAt(0) + status.slice(1).toLowerCase();
+  const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold">
+    <div className="space-y-10">
+      {/* Greeting */}
+      <header>
+        <h1 className="text-3xl font-semibold tracking-tight">
           Good {greeting()}, {firstName}
         </h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-base text-slate-600 mt-2">
           {students.length > 0
             ? `${students.length} child${students.length > 1 ? 'ren' : ''} linked`
             : 'No students linked to your account yet'}
         </p>
         {students.length === 1 && (prefectBadgesByStudent.get(firstStudent.id) ?? []).length > 0 && (
-          <RoleBadgeList badges={prefectBadgesByStudent.get(firstStudent.id) ?? []} className="mt-2" />
+          <RoleBadgeList badges={prefectBadgesByStudent.get(firstStudent.id) ?? []} className="mt-3" />
         )}
-      </div>
+      </header>
 
       {students.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl px-5 py-10 text-center text-sm text-slate-500">
-          Ask your school admin to link your child's account.
+        <div className="ruled-page max-w-xl">
+          <p className="font-semibold">Ask your school admin to link your child&apos;s account.</p>
         </div>
       ) : (
         <>
-          {/* Multiple children: compact per-child attendance cards, side by side */}
+          {/* Multiple children: one folder each, side by side */}
           {students.length > 1 && (
-            <div>
-              <h2 className="text-base font-medium mb-3">Attendance</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <section aria-labelledby="children-heading">
+              <h2 id="children-heading" className="text-lg font-semibold mb-4">Attendance</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {students.map((s: any) => {
                   const todayRow = todayByStudent.get(s.id) as { status: string; updated_at: string } | undefined;
                   const childBadges = prefectBadgesByStudent.get(s.id) ?? [];
                   return (
-                    <div key={s.id} className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm hover:shadow-md transition-shadow">
-                      <Link href="/parent/attendance" className="block group">
-                        <p className="font-medium text-sm text-slate-700 truncate">{(s.user as any)?.full_name}</p>
+                    <div key={s.id} className="folder">
+                      <Link href="/parent/attendance" className="folder-link">
+                        <span className="folder-tab truncate">{(s.user as any)?.full_name}</span>
                         {todayRow ? (
-                          <p className="text-sm mt-1.5">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                              todayRow.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
-                              : todayRow.status === 'LATE' ? 'bg-amber-100 text-amber-700'
-                              : todayRow.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
-                              : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
+                          <span className="flex flex-wrap items-center gap-2 text-sm mt-3">
+                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusPill(todayRow.status)}`}>
+                              {statusLabel(todayRow.status)} today
                             </span>
-                            <span className="text-slate-500 text-xs ml-2">
-                              updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </p>
+                            <span className="text-slate-500 text-xs">updated {timeOf(todayRow.updated_at)}</span>
+                          </span>
                         ) : (
-                          <p className="text-sm text-slate-500 mt-1.5">Not yet marked for today.</p>
+                          <span className="block text-sm text-slate-600 mt-3">Not yet marked for today.</span>
                         )}
                       </Link>
-                      {childBadges.length > 0 && <RoleBadgeList badges={childBadges} className="mt-2" />}
+                      {childBadges.length > 0 && <RoleBadgeList badges={childBadges} className="mt-3" />}
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </section>
           )}
 
-          {/* Cards grid */}
-          <div className="grid grid-cols-2 gap-4">
-
-            {/* Today's classes card */}
-            <Link href="/parent/timetable" className="block group">
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-3 py-3 sm:px-5 sm:py-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-blue-100 text-xs font-medium uppercase tracking-wide">
-                      {childFirstName ? `${childFirstName}'s Classes Today` : "Today's Classes"}
-                    </span>
-                    <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-                  </div>
-                  <p className="text-3xl sm:text-4xl font-bold text-white">{(todaySlots ?? []).length}</p>
-                  <p className="text-blue-100 text-sm mt-1">{DAY_LABELS[today]}</p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-1.5">
-                  {(todaySlots ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-500">No classes today.</p>
-                  ) : (
-                    (todaySlots ?? []).slice(0, 3).map((s: any) => (
-                      <div key={s.id} className="flex items-center gap-3 text-sm">
-                        <span className="text-slate-500 text-xs w-16 shrink-0">{formatTime(s.start_time)}</span>
-                        <span className="font-medium text-slate-700 truncate">{s.subject?.name}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            {/* The child's school day, as the timetable reads */}
+            <section aria-labelledby="classes-heading">
+              <div className="flex items-baseline justify-between gap-4 mb-4">
+                <h2 id="classes-heading" className="text-lg font-semibold">
+                  {childFirstName ? `${childFirstName}'s classes today` : "Today's classes"}
+                </h2>
+                <Link href="/parent/timetable" className="link text-sm font-semibold">Timetable</Link>
               </div>
-            </Link>
+              <div className="sheet overflow-hidden">
+                <p className="px-5 py-3 text-sm text-slate-600 border-b border-slate-200">{DAY_LABELS[today]}</p>
+                {slots.length === 0 ? (
+                  <p className="px-5 py-8 text-sm text-slate-600">No classes today.</p>
+                ) : (
+                  <ol>
+                    {slots.map((s) => (
+                      <li key={s.id} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-4 px-5 py-3 border-b border-slate-100 last:border-b-0">
+                        <span className="text-sm text-slate-600 tabular">{formatTime(s.start_time)}</span>
+                        <span className="min-w-0">
+                          <span className="block font-semibold truncate">{s.subject?.name}</span>
+                          {s.teacher?.user?.full_name && (
+                            <span className="block text-sm text-slate-600 truncate">{s.teacher.user.full_name}</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </section>
 
-            {/* Attendance card — only for a single linked child; multiple
-                children get the compact per-child cards above instead. */}
-            {students.length === 1 && (
-              <Link href="/parent/attendance" className="block group">
-                <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                  <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
-                    attRate === null ? 'from-slate-400 to-slate-500'
-                    : attRate >= 80 ? 'from-emerald-500 to-teal-600'
-                    : attRate >= 60 ? 'from-amber-500 to-orange-600'
-                    : 'from-rose-500 to-red-600'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Attendance</span>
-                      <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-                    </div>
-                    <p className="text-3xl sm:text-4xl font-bold text-white">
-                      {attRate !== null ? `${attRate}%` : '—'}
-                    </p>
-                    <p className="text-white/80 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
-                  </div>
-                  <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3 space-y-2">
-                    {(() => {
-                      const todayRow = todayByStudent.get(firstStudent.id) as { status: string; updated_at: string } | undefined;
-                      return todayRow ? (
-                        <p className="text-sm">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                            todayRow.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700'
-                            : todayRow.status === 'LATE' ? 'bg-amber-100 text-amber-700'
-                            : todayRow.status === 'ABSENT' ? 'bg-rose-100 text-rose-700'
-                            : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {todayRow.status.charAt(0) + todayRow.status.slice(1).toLowerCase()} today
-                          </span>
-                          <span className="text-slate-500 text-xs ml-2">
-                            updated {new Date(todayRow.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="text-sm text-slate-500">Attendance not yet marked for today.</p>
-                      );
-                    })()}
-                    {attTotal === 0 ? (
-                      <p className="text-sm text-slate-500">No attendance recorded yet.</p>
-                    ) : (
-                      <div className="flex gap-4 text-sm">
-                        <span className="text-emerald-600 font-medium">{attPresent} present</span>
-                        <span className="text-amber-600 font-medium">{attLate} late</span>
-                        <span className="text-rose-600 font-medium">{attAbsent} absent</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
+            <div className="space-y-4">
+              {/* Fee statement: the figure parents look for first */}
+              <Link href="/parent/fees" className="statement">
+                <span className="text-sm font-semibold text-slate-600">Fee balance</span>
+                <span className={`block text-4xl font-semibold tracking-tight tabular mt-1 ${totalOutstanding > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                  {currency} {totalOutstanding.toLocaleString()}
+                </span>
+                <span className="block text-sm text-slate-700 mt-1">
+                  {totalOutstanding > 0 ? 'outstanding balance' : 'all fees paid'}
+                </span>
+                <span className="block text-sm text-slate-500 mt-3 pt-3 border-t border-slate-200">
+                  {(feeBalances ?? []).length === 0
+                    ? 'No fee records yet.'
+                    : `${(feeBalances ?? []).length} balance record${(feeBalances ?? []).length !== 1 ? 's' : ''} on file`}
+                </span>
               </Link>
-            )}
 
-            {/* Grades card */}
-            <Link href="/parent/grades" className="block group">
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="bg-gradient-to-br from-violet-500 to-purple-600 px-3 py-3 sm:px-5 sm:py-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-violet-100 text-xs font-medium uppercase tracking-wide">
-                      {childFirstName ? `${childFirstName}'s Grades` : 'Grades'}
-                    </span>
-                    <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-                  </div>
-                  <p className="text-3xl sm:text-4xl font-bold text-white">%</p>
-                  <p className="text-violet-100 text-sm mt-1">{currentTerm?.name ?? 'current term'}</p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
-                  <p className="text-sm text-slate-600">View assessment results and marks.</p>
-                </div>
-              </div>
-            </Link>
-
-            {/* Fee balance card */}
-            <Link href="/parent/fees" className="block group">
-              <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className={`px-3 py-3 sm:px-5 sm:py-4 bg-gradient-to-br ${
-                  totalOutstanding > 0 ? 'from-amber-500 to-orange-600' : 'from-emerald-500 to-teal-600'
-                }`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-white/80 text-xs font-medium uppercase tracking-wide">Fee Balance</span>
-                    <span className="text-white/60 text-sm group-hover:translate-x-0.5 transition-transform">→</span>
-                  </div>
-                  <p className="text-3xl font-bold text-white">
-                    {currency} {totalOutstanding.toLocaleString()}
-                  </p>
-                  <p className="text-white/80 text-sm mt-1">
-                    {totalOutstanding > 0 ? 'outstanding balance' : 'all fees paid'}
-                  </p>
-                </div>
-                <div className="bg-white px-3 py-2.5 sm:px-5 sm:py-3">
-                  {(feeBalances ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-500">No fee records yet.</p>
+              {/* Attendance, for a single linked child */}
+              {students.length === 1 && (
+                <Link href="/parent/attendance" className="statement">
+                  <span className="text-sm font-semibold text-slate-600">Attendance, {currentTerm?.name ?? 'current term'}</span>
+                  <span className="block text-4xl font-semibold tracking-tight tabular mt-1">
+                    {attRate !== null ? `${attRate}%` : '—'}
+                  </span>
+                  {(() => {
+                    const todayRow = todayByStudent.get(firstStudent.id) as { status: string; updated_at: string } | undefined;
+                    return todayRow ? (
+                      <span className="flex flex-wrap items-center gap-2 text-sm mt-2">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusPill(todayRow.status)}`}>
+                          {statusLabel(todayRow.status)} today
+                        </span>
+                        <span className="text-slate-500 text-xs">updated {timeOf(todayRow.updated_at)}</span>
+                      </span>
+                    ) : (
+                      <span className="block text-sm text-slate-600 mt-2">Attendance not yet marked for today.</span>
+                    );
+                  })()}
+                  {attTotal === 0 ? (
+                    <span className="block text-sm text-slate-600 mt-3 pt-3 border-t border-slate-200">No attendance recorded yet.</span>
                   ) : (
-                    <p className="text-sm text-slate-600">
-                      {(feeBalances ?? []).length} balance record{(feeBalances ?? []).length !== 1 ? 's' : ''} on file
-                    </p>
+                    <span className="flex gap-5 text-sm mt-3 pt-3 border-t border-slate-200 tabular">
+                      <span className="text-emerald-800 font-semibold">{attPresent} present</span>
+                      <span className="text-amber-800 font-semibold">{attLate} late</span>
+                      <span className="text-rose-800 font-semibold">{attAbsent} absent</span>
+                    </span>
                   )}
-                </div>
-              </div>
-            </Link>
+                </Link>
+              )}
 
+              {/* Report card */}
+              <Link href="/parent/grades" className="statement statement--manila">
+                <span className="text-sm font-semibold text-slate-700">Report card, {currentTerm?.name ?? 'current term'}</span>
+                <span className="block text-xl font-semibold mt-1">
+                  {childFirstName ? `${childFirstName}'s grades` : 'Grades'}
+                </span>
+                <span className="block text-sm text-slate-700 mt-1">View assessment results and marks.</span>
+              </Link>
+            </div>
           </div>
         </>
       )}
@@ -335,7 +292,7 @@ export default async function ParentHomePage() {
       {/* What's new for you */}
       {userRow && (
         <section>
-          <h2 className="text-base font-semibold mb-3 text-slate-700">What&apos;s new for you</h2>
+          <h2 className="text-lg font-semibold mb-4">What&apos;s new for you</h2>
           <DashboardFeed userId={userRow.id} role="PARENT" />
         </section>
       )}

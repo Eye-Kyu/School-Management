@@ -154,7 +154,7 @@ export default function SubmissionsClient({
         </div>
       ) : (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Submissions</h2>
+          <h2 className="text-sm font-semibold text-slate-600">Submissions</h2>
           {submitted.map((s) => {
             const sub = submissions[s.id]!;
             const g = grading[s.id];
@@ -286,7 +286,7 @@ export default function SubmissionsClient({
       {/* Not submitted */}
       {pending.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Not submitted ({pending.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-600">Not submitted ({pending.length})</h2>
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
             {pending.map((s) => (
               <div key={s.id} className="px-5 py-2.5 text-sm text-slate-500">

@@ -91,7 +91,7 @@ export default function AiQuizGenerator({
         onClick={() => setOpen(true)}
         className="flex items-center gap-2 px-4 py-2 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-sm font-medium hover:bg-violet-100 transition-colors"
       >
-        <span className="text-lg">✨</span> Generate with AI
+        Generate with AI
       </button>
     );
   }
@@ -100,7 +100,7 @@ export default function AiQuizGenerator({
     <div className="bg-white border border-violet-200 rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-          <span>✨</span> AI Quiz Generator
+          AI Quiz Generator
         </h3>
         <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 text-xl w-6 h-6 flex items-center justify-center">×</button>
       </div>
@@ -167,7 +167,7 @@ export default function AiQuizGenerator({
               </svg>
               Claude is thinking…
             </>
-          ) : '✨ Generate questions'}
+          ) : 'Generate questions'}
         </button>
       </div>
 

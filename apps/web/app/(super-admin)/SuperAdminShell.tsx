@@ -172,7 +172,7 @@ export default function SuperAdminShell({
             </svg>
           </button>
           <span className="font-semibold text-slate-800">School Manager</span>
-          <span className="hidden sm:inline text-xs font-medium uppercase tracking-wide bg-violet-100 text-violet-700 px-2 py-0.5 rounded">
+          <span className="hidden sm:inline text-xs font-medium bg-violet-100 text-violet-700 px-2 py-0.5 rounded">
             Control Plane
           </span>
         </div>
@@ -198,7 +198,7 @@ export default function SuperAdminShell({
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
             {visibleGroups.map((group) => (
               <div key={group.heading}>
-                <p className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <p className="px-3 mb-1 text-[11px] font-semibold text-slate-400">
                   {group.heading}
                 </p>
                 <div className="space-y-0.5">

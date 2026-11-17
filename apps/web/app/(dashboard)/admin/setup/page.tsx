@@ -124,7 +124,7 @@ export default async function SetupChecklistPage() {
           />
         </div>
         {pct === 100 && (
-          <p className="text-sm text-emerald-600 font-medium">🎉 Setup complete! Your school is ready to use.</p>
+          <p className="text-sm text-emerald-600 font-medium">Setup complete! Your school is ready to use.</p>
         )}
       </div>
 

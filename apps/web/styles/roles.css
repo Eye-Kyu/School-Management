@@ -1,0 +1,141 @@
+/* Hallmark · shape: app screen · genre: playful · theme: Hum (deal 1/3, seed school-management-app-kenyan-36dc·47129324·2026-11-17·r0) · redesign: full
+ * nav: the project's sidebar shell, kept, re-cut per role · signature: the student's day as coloured card-stock lessons; the parent's child-at-a-glance sheet · states: empty, full (loading via app/(dashboard)/loading.tsx; error via error.tsx)
+ * axes: light/rounded-sans/chromatic-yellow · posture: full-palette (student), restrained (parent, teacher, admin) · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P3 H2 E3 S3 R3 V3 · weakest: H, app scope has no hero; each role's first screen leads with its one object instead */
+/* Role layer: one Hum system, four dials.
+ * Tailwind's slate / violet / emerald / amber / rose families resolve to the
+ * scales below (tailwind.config.ts), so every existing page re-skins per role.
+ * Each scale is declared on `:root, [data-role]` so a role's own hue and
+ * chroma recompute it inside that subtree. */
+
+:root,
+[data-role] {
+  /* paper → ink (Tailwind "slate"); light steps carry the paper hue, dark steps the ink hue */
+  --k-50: 97% calc(var(--paper-c) * 1) var(--paper-h);
+  --k-100: 94.5% calc(var(--paper-c) * 1.4) var(--paper-h);
+  --k-200: 89% calc(var(--paper-c) * 1.3) var(--paper-h);
+  --k-300: 81% calc(var(--paper-c) * 1.2) var(--paper-h);
+  --k-400: 54% var(--ink-c) var(--ink-h);
+  --k-500: 46% var(--ink-c) var(--ink-h);
+  --k-600: 38% var(--ink-c) var(--ink-h);
+  --k-700: 30% var(--ink-c) var(--ink-h);
+  --k-800: 25% var(--ink-c) var(--ink-h);
+  --k-900: 20% var(--ink-c) var(--ink-h);
+  --k-950: 15% var(--ink-c) var(--ink-h);
+  --k-card: 99% calc(var(--paper-c) * 0.5) var(--paper-h);
+
+  /* role accent (Tailwind violet / purple / indigo / blue / sky) */
+  --a-50: 97% calc(var(--acc-c) * 0.18) var(--acc-h);
+  --a-100: 94% calc(var(--acc-c) * 0.32) var(--acc-h);
+  --a-200: 88% calc(var(--acc-c) * 0.5) var(--acc-h);
+  --a-300: 80% calc(var(--acc-c) * 0.7) var(--acc-h);
+  --a-400: 70% calc(var(--acc-c) * 0.9) var(--acc-h);
+  --a-500: 60% var(--acc-c) var(--acc-h);
+  --a-600: 50% var(--acc-c) var(--acc-h);
+  --a-700: 43% var(--acc-c) var(--acc-h);
+  --a-800: 36% calc(var(--acc-c) * 0.85) var(--acc-h);
+  --a-900: 30% calc(var(--acc-c) * 0.7) var(--acc-h);
+  --a-950: 22% calc(var(--acc-c) * 0.6) var(--acc-h);
+
+  /* status: good (emerald / green / teal), watch (amber / yellow / orange), alert (rose / red / pink) */
+  --g-50: 97% calc(var(--st-c) * 0.2) 152; --g-100: 94% calc(var(--st-c) * 0.38) 152; --g-200: 88% calc(var(--st-c) * 0.55) 152;
+  --g-300: 80% calc(var(--st-c) * 0.75) 152; --g-400: 70% var(--st-c) 152; --g-500: 60% var(--st-c) 152;
+  --g-600: 50% var(--st-c) 155; --g-700: 43% calc(var(--st-c) * 0.85) 155; --g-800: 36% calc(var(--st-c) * 0.7) 155;
+  --g-900: 30% calc(var(--st-c) * 0.6) 155; --g-950: 22% calc(var(--st-c) * 0.5) 155;
+  --w-50: 97% calc(var(--st-c) * 0.25) 88; --w-100: 94% calc(var(--st-c) * 0.5) 88; --w-200: 89% calc(var(--st-c) * 0.75) 86;
+  --w-300: 83% calc(var(--st-c) * 0.95) 82; --w-400: 76% var(--st-c) 76; --w-500: 68% var(--st-c) 66;
+  --w-600: 57% var(--st-c) 58; --w-700: 48% calc(var(--st-c) * 0.85) 54; --w-800: 40% calc(var(--st-c) * 0.7) 52;
+  --w-900: 33% calc(var(--st-c) * 0.6) 50; --w-950: 24% calc(var(--st-c) * 0.5) 48;
+  --r-50: 97% calc(var(--st-c) * 0.18) 22; --r-100: 94% calc(var(--st-c) * 0.32) 22; --r-200: 88% calc(var(--st-c) * 0.5) 22;
+  --r-300: 80% calc(var(--st-c) * 0.75) 22; --r-400: 70% var(--st-c) 22; --r-500: 62% var(--st-c) 24;
+  --r-600: 54% var(--st-c) 26; --r-700: 46% calc(var(--st-c) * 0.95) 26; --r-800: 39% calc(var(--st-c) * 0.8) 26;
+  --r-900: 32% calc(var(--st-c) * 0.65) 26; --r-950: 23% calc(var(--st-c) * 0.5) 26;
+
+  /* Hum surface tokens follow the role's paper */
+  --color-paper: oklch(var(--k-50)); --color-paper-2: oklch(var(--k-100)); --color-paper-3: oklch(var(--k-200));
+  --color-rule: oklch(var(--k-200)); --color-card: oklch(var(--k-card));
+  --color-ink: oklch(var(--k-900)); --color-ink-2: oklch(var(--k-700)); --color-muted: oklch(var(--k-500));
+  --color-role: oklch(var(--a-600)); --color-role-soft: oklch(var(--a-100)); --color-role-ink: oklch(var(--a-800));
+  --color-focus: oklch(var(--a-600));
+}
+
+/* Defaults (sign-in, marketing, platform screens): calm, the parent dial */
+:root {
+  --paper-h: 95; --paper-c: 0.008;
+  --ink-h: 255; --ink-c: 0.014;
+  --acc-h: 245; --acc-c: 0.09;
+  --st-c: 0.14;
+  --shell-radius: 14px;
+}
+
+/* Student: the whole Hum palette. Cream paper pulled toward pear, the
+ * vivid blue for links and state, pear for the action, coral for the one
+ * loud moment, mint for growth, rounder corners. */
+[data-role="student"] {
+  --paper-h: 95; --paper-c: 0.016;
+  --acc-h: 250; --acc-c: 0.17;
+  --st-c: 0.17;
+  --shell-radius: 22px;
+}
+
+/* Parent: calm and trustworthy. Quiet warm paper, one deep blue, status
+ * colours a step softer so a fee or an absence reads clearly, never loudly. */
+[data-role="parent"] {
+  --paper-h: 90; --paper-c: 0.007;
+  --acc-h: 240; --acc-c: 0.085;
+  --st-c: 0.13;
+  --shell-radius: 16px;
+}
+
+/* Teacher: a working tool. Near-neutral paper, Hum blue for state, pear
+ * kept for the day's one action (mark attendance). */
+[data-role="teacher"] {
+  --paper-h: 90; --paper-c: 0.006;
+  --acc-h: 250; --acc-c: 0.13;
+  --st-c: 0.14;
+  --shell-radius: 14px;
+}
+
+/* Admin and super admin: the densest, coolest dial; colour is state only. */
+[data-role="admin"],
+[data-role="super_admin"] {
+  --paper-h: 240; --paper-c: 0.004;
+  --acc-h: 235; --acc-c: 0.07;
+  --st-c: 0.13;
+  --shell-radius: 12px;
+}
+
+[data-role] { background: var(--color-paper); color: var(--color-ink); }
+
+/* Fine paper grain, only where the dial asks for warmth (student, parent). */
+[data-role="student"],
+[data-role="parent"] {
+  background-image: var(--grain);
+  background-size: 180px 180px;
+}
+:root {
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.18 0 0 0 0 0.1 0 0 0 0.045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── School materials ─────────────────────────────────────────────
+ * Stationery mapped onto Hum's accents: pencil yellow (pear) for the action,
+ * ballpoint blue for links and state, red marking pen (coral) for the one
+ * loud moment, chalkboard green for the teacher's day, manila for reports. */
+:root {
+  --color-ballpoint: oklch(48% 0.16 258);
+  --color-exercise-line: oklch(83% 0.05 240);
+  --color-margin: oklch(63% 0.17 22);
+  --color-chalkboard: oklch(33% 0.045 165);
+  --color-chalkboard-2: oklch(38% 0.05 165);
+  --color-chalk: oklch(96% 0.012 95);
+  --color-manila: oklch(89% 0.055 85);
+  --color-manila-deep: oklch(76% 0.07 78);
+  --color-cork: oklch(70% 0.07 65);
+  --color-cover-1: var(--color-accent);
+  --color-cover-2: var(--color-mint);
+  --color-cover-3: oklch(84% 0.09 22);
+  --color-cover-4: var(--color-sugar);
+  /* exercise-book page: blue rules every 28px, the red margin 44px in */
+  --ruled: repeating-linear-gradient(to bottom, transparent 0 27px, var(--color-exercise-line) 27px 28px);
+  --margin-line: linear-gradient(to right, transparent 0 43px, var(--color-margin) 43px 44px, transparent 44px);
+}

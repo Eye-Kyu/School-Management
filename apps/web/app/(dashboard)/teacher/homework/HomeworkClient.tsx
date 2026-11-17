@@ -165,14 +165,14 @@ export default function HomeworkClient({
 
       {upcoming.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Upcoming / Active</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Upcoming / Active</h2>
           <AssignmentList items={upcoming} subjects={subjects} classes={classes} terms={terms} onDelete={handleDelete} onUnlink={handleUnlink} onLinked={handleLinked} />
         </section>
       )}
 
       {past.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Past</h2>
+          <h2 className="text-sm font-semibold text-slate-500">Past</h2>
           <AssignmentList items={past} subjects={subjects} classes={classes} terms={terms} onDelete={handleDelete} onUnlink={handleUnlink} onLinked={handleLinked} />
         </section>
       )}

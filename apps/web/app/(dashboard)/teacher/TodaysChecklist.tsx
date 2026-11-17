@@ -188,7 +188,7 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
 
       {/* Manual items — personal, in-memory only (see comment above). */}
       <div className="pt-2 border-t border-slate-100">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Personal notes</p>
+        <p className="text-sm font-semibold text-slate-600 mb-2">Personal notes</p>
         <ul className="space-y-1.5 mb-2">
           {manualItems.map((item) => (
             <li key={item.id} className="flex items-center gap-2 text-sm">
@@ -216,7 +216,7 @@ export default function TodaysChecklist({ teacherId, timezone }: { teacherId: st
 function ChecklistGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">{title}</p>
+      <p className="text-sm font-semibold text-slate-600 mb-1.5">{title}</p>
       <ul className="space-y-1.5">{children}</ul>
     </div>
   );

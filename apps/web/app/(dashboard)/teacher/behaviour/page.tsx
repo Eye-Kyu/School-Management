@@ -151,7 +151,7 @@ export default function TeacherBehaviourPage() {
       </form>
 
       <div className="space-y-2">
-        <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Recent entries</h2>
+        <h2 className="text-sm font-semibold text-slate-600">Recent entries</h2>
         {points.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">No entries yet.</div>
         ) : points.map((p) => (

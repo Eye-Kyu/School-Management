@@ -217,10 +217,10 @@ export default function AnnouncementsClient({
                   {statsMap[a.id] && (
                     <div className="flex gap-3 mt-2">
                       <span className="text-xs text-slate-500">
-                        📬 {statsMap[a.id]!.sent} notified
+                        {statsMap[a.id]!.sent} notified
                       </span>
                       <span className="text-xs text-emerald-600">
-                        👁 {statsMap[a.id]!.read} read ({statsMap[a.id]!.sent > 0 ? Math.round((statsMap[a.id]!.read / statsMap[a.id]!.sent) * 100) : 0}%)
+                        {statsMap[a.id]!.read} read ({statsMap[a.id]!.sent > 0 ? Math.round((statsMap[a.id]!.read / statsMap[a.id]!.sent) * 100) : 0}%)
                       </span>
                     </div>
                   )}

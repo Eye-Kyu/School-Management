@@ -137,7 +137,7 @@ export default function StudentAssignmentsClient({
                 </span>
                 <button onClick={() => setDocsOpen(docsOpen === a.id ? null : a.id)}
                   className="text-xs font-medium text-slate-400 hover:text-slate-700">
-                  📎 {docsOpen === a.id ? 'Hide docs' : 'Docs'}
+                  {docsOpen === a.id ? 'Hide docs' : 'Docs'}
                 </button>
                 {sub ? (
                   <div className="flex flex-col items-end gap-1">

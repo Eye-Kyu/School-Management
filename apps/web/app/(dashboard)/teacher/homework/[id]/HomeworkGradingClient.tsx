@@ -92,10 +92,10 @@ export default function HomeworkGradingClient({
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Student</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Completed</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Score</th>
-              <th className="text-right px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Action</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Student</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Completed</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Score</th>
+              <th className="text-right px-4 py-3 font-medium text-slate-600 text-xs">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

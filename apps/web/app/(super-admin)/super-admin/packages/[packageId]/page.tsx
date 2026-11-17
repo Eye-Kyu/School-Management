@@ -199,7 +199,7 @@ export default function PackageDetailPage() {
 
         {Object.entries(byCategory).map(([category, mods]) => (
           <div key={category} className="space-y-2 mb-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{category}</h3>
+            <h3 className="text-xs font-semibold text-slate-400">{category}</h3>
             <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-100">
               {mods.map((m) => {
                 const value: Entitlement = m.is_core ? 'INCLUDED' : (entitlements[m.key] ?? 'NOT_AVAILABLE');

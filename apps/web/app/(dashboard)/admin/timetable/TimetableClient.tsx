@@ -165,7 +165,7 @@ export default function TimetableClient({
       {/* Weekly grid */}
       {DAYS.map((d) => (
         <div key={d}>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+          <h3 className="text-xs font-semibold text-slate-500 mb-2">
             {DAY_LABELS[d]}
           </h3>
           {byDay[d]?.length === 0 ? (

@@ -134,7 +134,7 @@ export default function PermissionSlipSigner({
                       onChange={(e) => setCodeInputs((p) => ({ ...p, [slip.id]: e.target.value.toUpperCase() }))}
                       maxLength={8}
                       placeholder="e.g. AB3XY7"
-                      className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono tracking-widest uppercase"
+                      className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono"
                     />
                     <button
                       onClick={() => handleSign(slip)}

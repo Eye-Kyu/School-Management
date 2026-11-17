@@ -118,7 +118,7 @@ export default async function ReportCardPage({
 
         {/* School header */}
         <div className="bg-slate-800 text-white px-8 py-6 text-center print:bg-slate-800 print:text-white">
-          <p className="text-xs font-medium tracking-widest uppercase text-slate-300 mb-1">
+          <p className="text-xs font-medium text-slate-300 mb-1">
             {school?.name ?? 'School Name'}
           </p>
           <h1 className="text-2xl font-bold tracking-wide">Academic Report Card</h1>
@@ -136,7 +136,7 @@ export default async function ReportCardPage({
             { label: 'Term', value: term?.name ?? '—' },
           ].map(({ label, value }) => (
             <div key={label} className="px-5 py-3">
-              <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">{label}</p>
+              <p className="text-xs text-slate-400 font-medium">{label}</p>
               <p className="font-semibold text-slate-800 mt-0.5">{value}</p>
             </div>
           ))}
@@ -172,7 +172,7 @@ export default async function ReportCardPage({
 
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-xs text-slate-500 uppercase tracking-wide border-b border-slate-100">
+                      <tr className="text-xs text-slate-500 border-b border-slate-100">
                         <th className="text-left px-4 py-2 font-medium">Assessment</th>
                         <th className="text-left px-4 py-2 font-medium">Date</th>
                         <th className="text-right px-4 py-2 font-medium">Marks</th>
@@ -233,7 +233,7 @@ export default async function ReportCardPage({
           {grandPct != null && (
             <div className="border-2 border-slate-800 rounded-lg px-6 py-4 flex items-center justify-between">
               <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Overall Performance</p>
+                <p className="text-xs text-slate-500 font-medium">Overall Performance</p>
                 <p className="text-2xl font-bold text-slate-800 mt-0.5">
                   {scoredSubjectAverages.length} subject{scoredSubjectAverages.length === 1 ? '' : 's'} averaged
                 </p>

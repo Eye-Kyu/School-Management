@@ -69,7 +69,7 @@ export default function AvatarDropdown({
           {/* User info header */}
           <div className="px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-800 truncate">{name}</p>
-            <p className="text-xs text-slate-400 mt-0.5 uppercase tracking-wide">{role.toLowerCase()}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{role.charAt(0) + role.slice(1).toLowerCase().replace('_', ' ')}</p>
           </div>
 
           {/* Menu items */}

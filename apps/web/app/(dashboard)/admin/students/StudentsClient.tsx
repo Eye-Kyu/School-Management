@@ -246,7 +246,7 @@ export default function StudentsClient({
           </div>
 
           <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+            <p className="text-xs font-medium text-slate-500 mb-2">
               NEMIS details (optional)
             </p>
             <div className="grid grid-cols-2 gap-3">

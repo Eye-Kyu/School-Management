@@ -9,7 +9,7 @@ type StatCard = {
   value: string | number;
   sub?: string;
   href: string;
-  gradient: string;
+  tone?: string;
 };
 
 export default async function AdminHomePage({
@@ -57,101 +57,88 @@ export default async function AdminHomePage({
       label: 'Active classes',
       value: classCount ?? 0,
       href: '/admin/classes',
-      gradient: 'from-cyan-500 to-blue-600',
     },
     {
       label: 'Teachers',
       value: teacherCount ?? 0,
       href: '/admin/teachers',
-      gradient: 'from-teal-500 to-emerald-600',
     },
     {
       label: 'Students',
       value: studentCount ?? 0,
       href: '/admin/students',
-      gradient: 'from-violet-500 to-purple-600',
     },
     {
       label: 'Parents',
       value: parentCount ?? 0,
       href: '/admin/parents',
-      gradient: 'from-pink-500 to-rose-600',
     },
     {
       label: 'Fee arrears',
       value: `KES ${totalOutstanding.toLocaleString()}`,
       sub: 'outstanding',
       href: '/admin/fees',
-      gradient: totalOutstanding > 0 ? 'from-amber-500 to-orange-600' : 'from-emerald-500 to-teal-600',
+      tone: totalOutstanding > 0 ? 'text-rose-700' : 'text-emerald-700',
     },
   ];
 
   const setupLinks = [
-    { href: '/admin/terms',         label: 'Terms',         desc: 'Create the current academic term',        color: 'text-sky-600 bg-sky-50 border-sky-200' },
-    { href: '/admin/classes',       label: 'Classes',       desc: 'Add grade levels and streams',            color: 'text-cyan-600 bg-cyan-50 border-cyan-200' },
-    { href: '/admin/subjects',      label: 'Subjects',      desc: 'Define subjects and assign teachers',     color: 'text-indigo-600 bg-indigo-50 border-indigo-200' },
-    { href: '/admin/teachers',      label: 'Teachers',      desc: 'Create teacher accounts',                 color: 'text-teal-600 bg-teal-50 border-teal-200' },
-    { href: '/admin/students',      label: 'Students',      desc: 'Enrol students and link to classes',      color: 'text-violet-600 bg-violet-50 border-violet-200' },
-    { href: '/admin/parents',       label: 'Parents',       desc: 'Create parent accounts and link children', color: 'text-pink-600 bg-pink-50 border-pink-200' },
-    { href: '/admin/timetable',     label: 'Timetable',     desc: 'Build the weekly class schedule',         color: 'text-blue-600 bg-blue-50 border-blue-200' },
-    { href: '/admin/fees',          label: 'Fee arrears',   desc: 'Import, record payments, view balances',  color: 'text-amber-600 bg-amber-50 border-amber-200' },
-    { href: '/admin/attendance',    label: 'Attendance',    desc: 'Export attendance records as CSV',         color: 'text-green-600 bg-green-50 border-green-200' },
-    { href: '/admin/announcements', label: 'Announcements', desc: 'Post notices to staff and students',      color: 'text-rose-600 bg-rose-50 border-rose-200' },
-    { href: '/teacher/assessments', label: 'Assessments',   desc: 'View all assessments and grades',         color: 'text-violet-600 bg-violet-50 border-violet-200' },
+    { href: '/admin/terms',         label: 'Terms',         desc: 'Create the current academic term' },
+    { href: '/admin/classes',       label: 'Classes',       desc: 'Add grade levels and streams' },
+    { href: '/admin/subjects',      label: 'Subjects',      desc: 'Define subjects and assign teachers' },
+    { href: '/admin/teachers',      label: 'Teachers',      desc: 'Create teacher accounts' },
+    { href: '/admin/students',      label: 'Students',      desc: 'Enrol students and link to classes' },
+    { href: '/admin/parents',       label: 'Parents',       desc: 'Create parent accounts and link children' },
+    { href: '/admin/timetable',     label: 'Timetable',     desc: 'Build the weekly class schedule' },
+    { href: '/admin/fees',          label: 'Fee arrears',   desc: 'Import, record payments, view balances' },
+    { href: '/admin/attendance',    label: 'Attendance',    desc: 'Export attendance records as CSV' },
+    { href: '/admin/announcements', label: 'Announcements', desc: 'Post notices to staff and students' },
+    { href: '/teacher/assessments', label: 'Assessments',   desc: 'View all assessments and grades' },
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <DeniedBanner reason={searchParams.denied} />
-      <div>
-        <h1 className="text-2xl font-semibold">Admin dashboard</h1>
-        <p className="text-sm text-slate-500 mt-1">Manage your school setup and users.</p>
-      </div>
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Admin dashboard</h1>
+        <p className="text-base text-slate-600 mt-1">Manage your school setup and users.</p>
+      </header>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((card) => (
-          <Link key={card.href} href={card.href} className="block group">
-            <div className="rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <div className={`bg-gradient-to-br ${card.gradient} px-5 py-5`}>
-                <p className="text-3xl font-bold text-white">{card.value}</p>
-                <p className="text-white/80 text-sm mt-1">{card.label}</p>
-                {card.sub && <p className="text-white/60 text-xs mt-0.5">{card.sub}</p>}
-              </div>
-              <div className="bg-white px-5 py-2.5 flex justify-end">
-                <span className="text-xs text-slate-500 group-hover:text-slate-700 transition-colors">
-                  View details →
-                </span>
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* What's new for you — replaces the old separate announcements +
-          platform-messages widgets with one unified feed. */}
-      {userRow && (
-        <div>
-          <h2 className="text-base font-semibold text-slate-700 mb-3">What&apos;s new for you</h2>
-          <DashboardFeed userId={userRow.id} role="ADMIN" />
-        </div>
-      )}
-
-      {/* Setup links */}
-      <div>
-        <h2 className="text-base font-semibold text-slate-700 mb-3">School setup</h2>
-        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-          {setupLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`rounded-xl border p-4 hover:shadow-md transition-shadow ${link.color}`}
-            >
-              <p className="font-semibold text-sm">{link.label}</p>
-              <p className="text-xs opacity-70 mt-1">{link.desc}</p>
+      {/* The school in figures, a ledger row */}
+      <section aria-label="School figures">
+        <div className="ledger">
+          {statCards.map((card) => (
+            <Link key={card.href} href={card.href} className="ledger-cell">
+              <span className="block text-sm text-slate-600">{card.label}</span>
+              <span className={`block text-2xl font-semibold tabular mt-1 ${card.tone ?? ''}`}>{card.value}</span>
+              {card.sub && <span className="block text-xs text-slate-500 mt-0.5">{card.sub}</span>}
             </Link>
           ))}
         </div>
+      </section>
+
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {/* What's new for you — replaces the old separate announcements +
+            platform-messages widgets with one unified feed. */}
+        {userRow && (
+          <section>
+            <h2 className="text-lg font-semibold mb-4">What&apos;s new for you</h2>
+            <DashboardFeed userId={userRow.id} role="ADMIN" />
+          </section>
+        )}
+
+        {/* Setup, as an index */}
+        <section aria-labelledby="setup-heading">
+          <h2 id="setup-heading" className="text-lg font-semibold mb-2">School setup</h2>
+          <nav aria-labelledby="setup-heading">
+            {setupLinks.map((link) => (
+              <Link key={link.href} href={link.href} className="index-link">
+                <span className="font-semibold text-sm">{link.label}</span>
+                <span className="text-sm text-slate-600">{link.desc}</span>
+              </Link>
+            ))}
+          </nav>
+        </section>
       </div>
 
       <UpcomingEvents events={(events ?? []) as any[]} />

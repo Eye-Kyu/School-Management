@@ -83,7 +83,7 @@ export default function GradeEntryClient({
     <div className="space-y-4">
       {isLinked && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-800">
-          🔒 This assessment is derived from a {sourceType === 'HOMEWORK' ? 'homework assignment' : 'quiz'}
+          This assessment is derived from a {sourceType === 'HOMEWORK' ? 'homework assignment' : 'quiz'}
           {sourceLabel ? `: "${sourceLabel}"` : ''}. Marks are read-only here — update them from the source instead.
         </div>
       )}
@@ -114,13 +114,13 @@ export default function GradeEntryClient({
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Adm No</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Student</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide w-32">
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Adm No</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Student</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs w-32">
                 Marks / {maxMarks}
               </th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide w-16">%</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs uppercase tracking-wide">Comments</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs w-16">%</th>
+              <th className="text-left px-4 py-3 font-medium text-slate-600 text-xs">Comments</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

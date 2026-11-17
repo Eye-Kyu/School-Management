@@ -112,7 +112,7 @@ export default function SubstitutesPage() {
       </form>
 
       <div className="space-y-2">
-        <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Active grants (today and future)</h2>
+        <h2 className="text-sm font-semibold text-slate-600">Active grants (today and future)</h2>
         {grants.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">No active grants.</div>
         ) : grants.map((g) => (
